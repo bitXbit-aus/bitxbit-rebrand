@@ -4,9 +4,17 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  NEXT_TELEMETRY_DISABLED = "1"
 
-# Next.js middleware, API routes, and SSR are supported by Netlify's Next.js runtime.
-# No additional plugin configuration is required.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Redirect root to dashboard (authenticated users will land there; others are handled by middleware)
+[[redirects]]
+  from = "/"
+  to = "/dashboard"
+  status = 302
+  force = true
 
 # Security headers for all routes
 [[headers]]
