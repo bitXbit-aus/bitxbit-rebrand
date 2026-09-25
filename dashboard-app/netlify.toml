@@ -1,0 +1,19 @@
+[build]
+  command = "next build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Next.js middleware, API routes, and SSR are supported by Netlify's Next.js runtime.
+# No additional plugin configuration is required.
+
+# Security headers for all routes
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "interest-cohort=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"

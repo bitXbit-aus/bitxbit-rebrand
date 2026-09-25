@@ -1,0 +1,38 @@
+# Dependencies
+webflow-site/node_modules/
+dashboard-app/node_modules/
+node_modules/
+
+# Next.js build output
+dashboard-app/.next/
+dashboard-app/out/
+dashboard-app/dist/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+!dashboard-app/.env.local.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Misc
+.cache/
+.vercel
+.netlify
+*.patch

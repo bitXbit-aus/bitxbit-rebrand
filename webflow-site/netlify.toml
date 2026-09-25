@@ -1,0 +1,96 @@
+[build]
+  publish = "."
+  command = "echo 'Static site — no build step required'"
+
+[build.processing]
+  skip_processing = false
+
+[build.processing.html]
+  pretty_urls = true
+
+[build.processing.css]
+  bundle = true
+  minify = true
+
+[build.processing.js]
+  bundle = true
+  minify = true
+
+[build.processing.images]
+  compress = true
+
+# Security headers for all routes
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "interest-cohort=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none';"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+
+# Cache static assets
+[[headers]]
+  for = "/css/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/js/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Redirect old paths (if migrating from previous site structure)
+# [[redirects]]
+#   from = "/old-page"
+#   to = "/how-it-works"
+#   status = 301
+
+# Pretty URL fallbacks — Netlify handles this automatically when pretty_urls = true,
+# but these explicit redirects ensure compatibility if post-processing is ever disabled.
+[[redirects]]
+  from = "/how-it-works"
+  to = "/how-it-works.html"
+  status = 200
+
+[[redirects]]
+  from = "/referrals"
+  to = "/referrals.html"
+  status = 200
+
+[[redirects]]
+  from = "/token-economy"
+  to = "/token-economy.html"
+  status = 200
+
+[[redirects]]
+  from = "/projects"
+  to = "/projects.html"
+  status = 200
+
+[[redirects]]
+  from = "/transparency"
+  to = "/transparency.html"
+  status = 200
+
+[[redirects]]
+  from = "/faq"
+  to = "/faq.html"
+  status = 200
+
+[[redirects]]
+  from = "/legal"
+  to = "/legal-disclaimer.html"
+  status = 200
+
+[[redirects]]
+  from = "/style-guide"
+  to = "/style-guide.html"
+  status = 200
+
+# SPA fallback for any unknown routes (optional — sends to homepage)
+# [[redirects]]
+#   from = "/*"
+#   to = "/index.html"
+#   status = 200

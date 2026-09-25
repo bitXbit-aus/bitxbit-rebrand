@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Style Guide — bitXbit</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/design-system.css">
+  <style>
+    .sg-section { margin-bottom: var(--space-16); }
+    .sg-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: var(--space-4); }
+    .sg-swatch { width: 100%; height: 80px; border-radius: var(--radius-lg); margin-bottom: var(--space-2); }
+    .sg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--space-4); }
+    .sg-card-demo { background: var(--bg-secondary); border-radius: var(--radius-lg); padding: var(--space-4); border: 1px solid var(--border-subtle); }
+  </style>
+</head>
+<body style="padding-top: 100px;">
+
+  <nav class="navbar">
+    <div class="container navbar-inner">
+      <a href="index.html" class="logo">bit<span>X</span>bit</a>
+      <span class="text-muted text-sm">Style Guide</span>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1 class="mb-8">Design System & Style Guide</h1>
+    <p class="text-secondary mb-12">Reference for building the bitXbit marketing site in Webflow.</p>
+
+    <div class="sg-section">
+      <div class="sg-label">Colours</div>
+      <div class="sg-grid">
+        <div class="sg-card-demo"><div class="sg-swatch" style="background: #0A0E1A;"></div><p class="text-sm text-primary font-medium">Bg Primary</p><p class="text-xs text-muted">#0A0E1A</p></div>
+        <div class="sg-card-demo"><div class="sg-swatch" style="background: #111827;"></div><p class="text-sm text-primary font-medium">Bg Secondary</p><p class="text-xs text-muted">#111827</p></div>
+        <div class="sg-card-demo"><div class="sg-swatch" style="background: #1A2236;"></div><p class="text-sm text-primary font-medium">Bg Tertiary</p><p class="text-xs text-muted">#1A2236</p></div>
+        <div class="sg-card-demo"><div class="sg-swatch" style="background: #3B82F6;"></div><p class="text-sm text-primary font-medium">Accent Blue</p><p class="text-xs text-muted">#3B82F6</p></div>
+        <div class="sg-card-demo"><div class="sg-swatch" style="background: #F59E0B;"></div><p class="text-sm text-primary font-medium">Accent Gold</p><p class="text-xs text-muted">#F59E0B</p></div>
+        <div class="sg-card-demo"><div class="sg-swatch" style="background: #F8FAFC;"></div><p class="text-sm text-primary font-medium">Text Primary</p><p class="text-xs text-muted">#F8FAFC</p></div>
+        <div class="sg-card-demo"><div class="sg-swatch" style="background: #94A3B8;"></div><p class="text-sm text-primary font-medium">Text Secondary</p><p class="text-xs text-muted">#94A3B8</p></div>
+        <div class="sg-card-demo"><div class="sg-swatch" style="background: #64748B;"></div><p class="text-sm text-primary font-medium">Text Muted</p><p class="text-xs text-muted">#64748B</p></div>
+      </div>
+    </div>
+
+    <div class="sg-section">
+      <div class="sg-label">Typography</div>
+      <h1>Heading 1 — Turn everyday referrals</h1>
+      <h2>Heading 2 — How bitXbit Works</h2>
+      <h3>Heading 3 — Community Rewards</h3>
+      <h4>Heading 4 — Project Title</h4>
+      <p>Body text — bitXbit brings trusted referral and affiliate opportunities into one ecosystem, using generated income to support token rewards, liquidity, buybacks, and regenerative real-world projects.</p>
+      <p class="text-sm">Small text — Used for disclosures, metadata, and secondary information.</p>
+    </div>
+
+    <div class="sg-section">
+      <div class="sg-label">Buttons</div>
+      <div class="flex flex-wrap gap-4">
+        <a href="#" class="btn btn-primary">Primary</a>
+        <a href="#" class="btn btn-secondary">Secondary</a>
+        <a href="#" class="btn btn-gold">Gold</a>
+        <a href="#" class="btn btn-primary btn-sm">Small</a>
+        <a href="#" class="btn btn-primary btn-lg">Large</a>
+      </div>
+    </div>
+
+    <div class="sg-section">
+      <div class="sg-label">Cards</div>
+      <div class="grid grid-3">
+        <div class="card">Basic Card — Use for content blocks and info panels.</div>
+        <div class="referral-card">
+          <span class="category-tag">Crypto</span>
+          <div class="logo">JP</div>
+          <h4>Jupiter</h4>
+          <p class="text-sm text-secondary">Best swap rates on Solana.</p>
+          <a href="#" class="btn btn-primary btn-sm" style="width:100%">Get Started</a>
+          <p class="disclosure">bitXbit may earn affiliate income.</p>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">$12,450</div>
+          <div class="stat-label">Liquidity Built</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sg-section">
+      <div class="sg-label">Status Tags</div>
+      <div class="flex gap-4">
+        <span class="status-tag status-active">Active</span>
+        <span class="status-tag status-planning">Planning</span>
+        <span class="status-tag status-completed">Completed</span>
+      </div>
+    </div>
+
+    <div class="sg-section">
+      <div class="sg-label">Progress Bar</div>
+      <div style="max-width: 400px;">
+        <div class="progress-bar"><div class="progress-fill" style="width: 65%;"></div></div>
+      </div>
+    </div>
+
+    <div class="sg-section">
+      <div class="sg-label">Alert Boxes</div>
+      <div class="disclaimer-box"><p><strong>Disclaimer:</strong> bitXbit tokens are community participation incentives, not financial products.</p></div>
+      <div class="info-box mt-4"><p><strong>Note:</strong> These percentages are placeholder figures subject to confirmation.</p></div>
+    </div>
+
+    <div class="sg-section">
+      <div class="sg-label">Allocation Bars</div>
+      <div class="allocation-chart">
+        <div class="allocation-row"><span class="allocation-label">Rewards</span><div class="allocation-bar"><div class="allocation-fill rewards" style="width:40%">40%</div></div></div>
+        <div class="allocation-row"><span class="allocation-label">Liquidity</span><div class="allocation-bar"><div class="allocation-fill liquidity" style="width:25%">25%</div></div></div>
+        <div class="allocation-row"><span class="allocation-label">Buybacks</span><div class="allocation-bar"><div class="allocation-fill buybacks" style="width:15%">15%</div></div></div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>
