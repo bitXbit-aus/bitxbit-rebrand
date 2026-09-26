@@ -253,6 +253,35 @@ export async function distributeRewards(periodId: string, txHash: string) {
   revalidatePath("/admin/rewards");
 }
 
+export async function distributeRewardsWithTx(periodId: string, formData: FormData) {
+  const txHash = formData.get("txHash") as string;
+  if (!txHash) throw new Error("Transaction hash is required");
+  return distributeRewards(periodId, txHash);
+}
+
+export async function publishTransparencyReport(id: string) {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from("transparency_reports")
+    .update({ published_at: new Date().toISOString(), published_by: user?.id })
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/transparency-updates");
+  revalidatePath("/dashboard/transparency");
+}
+
+export async function unpublishTransparencyReport(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("transparency_reports")
+    .update({ published_at: null, published_by: null })
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/transparency-updates");
+  revalidatePath("/dashboard/transparency");
+}
+
 export async function createProject(formData: FormData) {
   const supabase = createClient();
   const { error } = await supabase.from("projects").insert({

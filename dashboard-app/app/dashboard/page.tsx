@@ -40,6 +40,11 @@ export default async function DashboardPage() {
     .order("display_order", { ascending: true })
     .limit(3);
 
+  const { data: offerStats } = await supabase
+    .from("user_activities")
+    .select("offer_id, activity_type")
+    .eq("user_id", user?.id);
+
   const totalActivities = activities?.length ?? 0;
   const pendingRewards = rewards?.filter((r) => r.status === "pending").length ?? 0;
   const totalEarned = rewards?.reduce((sum, r) => sum + (r.estimated_aud_value ?? 0), 0) ?? 0;
@@ -80,19 +85,27 @@ export default async function DashboardPage() {
           <CardContent>
             {featuredOffers && featuredOffers.length > 0 ? (
               <div className="space-y-3">
-                {featuredOffers.map((offer) => (
-                  <Link
-                    key={offer.id}
-                    href={`/dashboard/offers#${offer.category?.name.toLowerCase().replace(/\s+/g, "-") ?? "all"}`}
-                    className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted transition-colors"
-                  >
-                    <div>
-                      <p className="font-medium text-sm">{offer.name}</p>
-                      <p className="text-xs text-muted-foreground">{offer.category?.name ?? "Offer"}</p>
-                    </div>
-                    <Gift className="h-4 w-4 text-muted-foreground" />
-                  </Link>
-                ))}
+                {featuredOffers.map((offer) => {
+                  const clicks = offerStats?.filter((s) => s.offer_id === offer.id && s.activity_type === "click").length ?? 0;
+                  return (
+                    <Link
+                      key={offer.id}
+                      href={`/dashboard/offers#${offer.category?.name.toLowerCase().replace(/\s+/g, "-") ?? "all"}`}
+                      className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted transition-colors"
+                    >
+                      <div>
+                        <p className="font-medium text-sm">{offer.name}</p>
+                        <p className="text-xs text-muted-foreground">{offer.category?.name ?? "Offer"}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {clicks > 0 && (
+                          <span className="text-xs text-muted-foreground">{clicks} click{clicks === 1 ? "" : "s"}</span>
+                        )}
+                        <Gift className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    </Link>
+                  );
+                })}
                 <Link
                   href="/dashboard/offers"
                   className="inline-flex items-center text-sm text-primary hover:underline pt-2"

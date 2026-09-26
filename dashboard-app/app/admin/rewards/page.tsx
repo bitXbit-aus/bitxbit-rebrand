@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { createRewardPeriod, calculateRewards, approveRewards, distributeRewards } from "@/lib/actions";
+import { createRewardPeriod, calculateRewards, approveRewards, distributeRewardsWithTx } from "@/lib/actions";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export default async function AdminRewardsPage() {
@@ -98,14 +98,20 @@ export default async function AdminRewardsPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 items-end">
                   <form action={calculateRewards.bind(null, period.id)}>
                     <Button type="submit" size="sm" variant="outline">Calculate</Button>
                   </form>
                   <form action={approveRewards.bind(null, period.id)}>
                     <Button type="submit" size="sm" variant="outline">Approve</Button>
                   </form>
-                  <form action={distributeRewards.bind(null, period.id, "manual-tx-hash")}>
+                  <form action={distributeRewardsWithTx.bind(null, period.id)} className="flex gap-2 items-end">
+                    <input
+                      name="txHash"
+                      placeholder="Solana tx signature"
+                      className="input text-sm w-64"
+                      required
+                    />
                     <Button type="submit" size="sm">Mark Distributed</Button>
                   </form>
                 </div>
