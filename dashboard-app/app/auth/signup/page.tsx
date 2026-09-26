@@ -10,24 +10,58 @@ import Link from "next/link";
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const supabase = createClient();
 
+  const appUrl = typeof window !== "undefined"
+    ? (process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin)
+    : process.env.NEXT_PUBLIC_APP_URL;
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (password !== confirmPassword) {
+      toast({ title: "Error", description: "Passwords do not match.", variant: "destructive" });
+      return;
+    }
+
     setLoading(true);
-    const redirectTo = process.env.NEXT_PUBLIC_APP_URL
-      ? `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`
-      : `${window.location.origin}/auth/callback`;
-    const { error } = await supabase.auth.signInWithOtp({
+
+    const { error } = await supabase.auth.signUp({
       email,
-      options: { emailRedirectTo: redirectTo },
+      password,
+      options: {
+        emailRedirectTo: `${appUrl}/auth/callback`,
+      },
     });
+
     setLoading(false);
+
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Check your email", description: "We sent you a magic link to sign in." });
+      toast({
+        title: "Account created",
+        description: "Check your email to confirm, or sign in now if confirmation is disabled.",
+      });
+      window.location.href = "/dashboard";
+    }
+  };
+
+  const handleOAuth = async (provider: "google" | "github") => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${appUrl}/auth/callback`,
+      },
+    });
+    setLoading(false);
+
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   };
 
@@ -37,15 +71,64 @@ export default function SignupPage() {
         <h1 className="text-2xl font-bold text-white">Join bitXbit</h1>
         <p className="text-muted-foreground">Create an account to start participating.</p>
       </div>
+
       <form onSubmit={handleSignup} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <Input
+            id="email"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="confirm-password">Confirm Password</Label>
+          <Input
+            id="confirm-password"
+            type="password"
+            placeholder="••••••••"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+          />
         </div>
         <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? "Sending..." : "Send Magic Link"}
+          {loading ? "Creating account..." : "Sign up"}
         </Button>
       </form>
+
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <span className="w-full border-t border-border" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Button variant="outline" onClick={() => handleOAuth("google")} disabled={loading}>
+          Google
+        </Button>
+        <Button variant="outline" onClick={() => handleOAuth("github")} disabled={loading}>
+          GitHub
+        </Button>
+      </div>
+
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}
         <Link href="/auth/login" className="text-primary hover:underline">
