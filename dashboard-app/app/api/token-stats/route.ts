@@ -3,6 +3,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 
 const TOKEN_MINT = process.env.BITXBIT_TOKEN_MINT || "DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5";
 const SOLSCAN_API_KEY = process.env.SOLSCAN_API_KEY;
+const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const TOKEN_CREATED_AT = "2021-10-17"; // bitxbit token creation date
@@ -102,6 +103,71 @@ export async function GET() {
     stats.errors.push("SOLSCAN_API_KEY not configured");
   }
 
+  // Birdeye API - price, liquidity, market cap, holders
+  if (BIRDEYE_API_KEY) {
+    try {
+      const birdRes = await fetch(
+        `https://public-api.birdeye.so/defi/token_overview?address=${TOKEN_MINT}`,
+        {
+          headers: {
+            "X-API-KEY": BIRDEYE_API_KEY,
+            "x-chain": "solana",
+          },
+          next: { revalidate: 60 },
+        }
+      );
+      if (birdRes.ok) {
+        const birdData = await birdRes.json();
+        const d = birdData?.data;
+        if (d) {
+          if (d.price !== undefined && d.price !== null) stats.price = Number(d.price);
+          if (d.history24hPrice !== undefined && d.history24hPrice !== null && d.price !== undefined) {
+            const change = ((Number(d.price) - Number(d.history24hPrice)) / Number(d.history24hPrice)) * 100;
+            stats.priceChange24h = Number(change.toFixed(2));
+          } else if (d.priceChange24hPercent !== undefined && d.priceChange24hPercent !== null) {
+            stats.priceChange24h = Number(d.priceChange24hPercent);
+          }
+          if (d.liquidity !== undefined && d.liquidity !== null) stats.liquidity = Number(d.liquidity);
+          if (d.marketCap !== undefined && d.marketCap !== null) stats.marketCap = Number(d.marketCap);
+          if (d.holder !== undefined && d.holder !== null) stats.holders = Number(d.holder);
+        }
+      } else {
+        stats.errors.push(`Birdeye API error: ${birdRes.status}`);
+      }
+    } catch (err) {
+      stats.errors.push(`Birdeye fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else {
+    stats.errors.push("BIRDEYE_API_KEY not configured");
+  }
+
+  // Dexscreener Keyless API - fallback liquidity and price
+  if (stats.liquidity === null || stats.price === null) {
+    try {
+      const dexRes = await fetch(
+        `https://api.dexscreener.com/latest/dex/tokens/${TOKEN_MINT}`,
+        { next: { revalidate: 60 } }
+      );
+      if (dexRes.ok) {
+        const dexData = await dexRes.json();
+        const pairs = dexData?.pairs ?? [];
+        const totalLiquidity = pairs.reduce((sum: number, pair: any) => {
+          return sum + (pair.liquidity?.usd ?? 0);
+        }, 0);
+        if (stats.liquidity === null) stats.liquidity = totalLiquidity > 0 ? totalLiquidity : null;
+
+        if (stats.price === null && pairs.length > 0) {
+          stats.price = parseFloat(pairs[0].priceUsd) || null;
+          if (stats.marketCap === null) stats.marketCap = pairs[0].marketCap ?? pairs[0].fdv ?? null;
+        }
+      } else {
+        stats.errors.push(`Dexscreener API error: ${dexRes.status}`);
+      }
+    } catch (err) {
+      stats.errors.push(`Dexscreener fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // Free fallback: count unique holders directly from Solana RPC
   if (stats.holders === null) {
     const rpcHolders = await fetchHolderCountViaRpc();
@@ -110,32 +176,6 @@ export async function GET() {
     } else {
       stats.errors.push("RPC holder count failed");
     }
-  }
-
-  // Dexscreener Keyless API - total liquidity
-  try {
-    const dexRes = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${TOKEN_MINT}`,
-      { next: { revalidate: 60 } }
-    );
-    if (dexRes.ok) {
-      const dexData = await dexRes.json();
-      const pairs = dexData?.pairs ?? [];
-      const totalLiquidity = pairs.reduce((sum: number, pair: any) => {
-        return sum + (pair.liquidity?.usd ?? 0);
-      }, 0);
-      stats.liquidity = totalLiquidity > 0 ? totalLiquidity : null;
-
-      // Fallback price if Solscan didn't return one
-      if (stats.price === null && pairs.length > 0) {
-        stats.price = parseFloat(pairs[0].priceUsd) || null;
-        stats.marketCap = pairs[0].marketCap ?? pairs[0].fdv ?? null;
-      }
-    } else {
-      stats.errors.push(`Dexscreener API error: ${dexRes.status}`);
-    }
-  } catch (err) {
-    stats.errors.push(`Dexscreener fetch failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return NextResponse.json(stats, {
