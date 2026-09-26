@@ -767,24 +767,23 @@ p {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: 600px;
+  max-width: 700px;
 }
 
 .allocation-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 180px 1fr 48px;
   align-items: center;
   gap: var(--space-4);
 }
 
 .allocation-row .allocation-label {
-  width: 180px;
   font-size: 0.9375rem;
   color: var(--text-primary);
   font-weight: 500;
 }
 
 .allocation-row .allocation-bar {
-  flex: 1;
   height: 32px;
   background: var(--bg-tertiary);
   border-radius: var(--radius-md);
@@ -795,14 +794,14 @@ p {
 .allocation-row .allocation-fill {
   height: 100%;
   border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding-right: var(--space-3);
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: white;
   transition: width 1s ease;
+}
+
+.allocation-row .allocation-percent {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
 }
 
 .allocation-fill.rewards { background: linear-gradient(90deg, var(--accent-blue), #1d4ed8); }
@@ -1046,15 +1045,20 @@ p {
   }
 
   .allocation-row {
-    flex-direction: column;
-    align-items: flex-start;
+    grid-template-columns: 1fr auto;
+    gap: var(--space-2) var(--space-3);
   }
 
   .allocation-row .allocation-label {
-    width: auto;
+    grid-column: 1 / 2;
+  }
+
+  .allocation-row .allocation-percent {
+    grid-column: 2 / 3;
   }
 
   .allocation-row .allocation-bar {
+    grid-column: 1 / 3;
     width: 100%;
   }
 
