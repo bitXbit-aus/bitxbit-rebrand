@@ -7,6 +7,7 @@ const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const TOKEN_CREATED_AT = "2021-10-17"; // bitxbit token creation date
+const CACHE_TTL_SECONDS = 3600; // update Birdeye stats once per hour
 
 interface TokenStats {
   price: number | null;
@@ -103,7 +104,7 @@ export async function GET() {
     stats.errors.push("SOLSCAN_API_KEY not configured");
   }
 
-  // Birdeye API - price, liquidity, market cap, holders
+  // Birdeye API - price, liquidity, market cap, holders (single call, cached 1 hour)
   if (BIRDEYE_API_KEY) {
     try {
       const birdRes = await fetch(
@@ -113,7 +114,7 @@ export async function GET() {
             "X-API-KEY": BIRDEYE_API_KEY,
             "x-chain": "solana",
           },
-          next: { revalidate: 60 },
+          next: { revalidate: CACHE_TTL_SECONDS },
         }
       );
       if (birdRes.ok) {
@@ -183,7 +184,7 @@ export async function GET() {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
-      "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+      "Cache-Control": `public, s-maxage=${CACHE_TTL_SECONDS}, stale-while-revalidate=${CACHE_TTL_SECONDS * 2}`,
     },
   });
 }
