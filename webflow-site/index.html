@@ -122,27 +122,28 @@
       <div class="section-header reveal">
         <h2>Ecosystem Pulse</h2>
         <p>Real numbers. Real flow. Updated regularly.</p>
+        <p class="text-sm text-muted" style="margin-top: 0.5rem;">Token launched 17 Oct 2021</p>
       </div>
       <div class="grid grid-4">
         <div class="stat-card reveal">
-          <div class="stat-value">$12,450</div>
-          <div class="stat-label">Liquidity Built</div>
-          <div class="stat-sublabel">Supporting healthy markets</div>
+          <div class="stat-value" id="stat-price">—</div>
+          <div class="stat-label">Token Price</div>
+          <div class="stat-sublabel" id="stat-price-sublabel">USD per bitxbit</div>
         </div>
         <div class="stat-card reveal">
-          <div class="stat-value">84,200</div>
-          <div class="stat-label">Tokens Bought Back</div>
-          <div class="stat-sublabel">Community-supported stability</div>
+          <div class="stat-value" id="stat-liquidity">—</div>
+          <div class="stat-label">Liquidity</div>
+          <div class="stat-sublabel">Total DEX liquidity</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="stat-holders">—</div>
+          <div class="stat-label">Holders</div>
+          <div class="stat-sublabel">On-chain token holders</div>
         </div>
         <div class="stat-card reveal">
           <div class="stat-value">1</div>
           <div class="stat-label">Projects Funded</div>
           <div class="stat-sublabel">New Earth Healing Clinic</div>
-        </div>
-        <div class="stat-card reveal">
-          <div class="stat-value">1,247</div>
-          <div class="stat-label">Community Members</div>
-          <div class="stat-sublabel">And growing</div>
         </div>
       </div>
       <div class="text-center mt-8 reveal">
@@ -314,5 +315,54 @@
   </footer>
 
   <script src="js/main.js"></script>
+  <script>
+    (function () {
+      const API_URL = "https://app.bitxbit.com.au/api/token-stats";
+
+      function formatCurrency(value) {
+        if (value === null || value === undefined || isNaN(value)) return "—";
+        if (value < 0.01) return "$" + value.toFixed(6);
+        if (value < 1) return "$" + value.toFixed(4);
+        return "$" + value.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+
+      function formatNumber(value) {
+        if (value === null || value === undefined || isNaN(value)) return "—";
+        return value.toLocaleString("en-AU");
+      }
+
+      async function loadStats() {
+        try {
+          const res = await fetch(API_URL, { cache: "no-store" });
+          if (!res.ok) throw new Error("API error " + res.status);
+          const data = await res.json();
+
+          const priceEl = document.getElementById("stat-price");
+          const priceSubEl = document.getElementById("stat-price-sublabel");
+          const liquidityEl = document.getElementById("stat-liquidity");
+          const holdersEl = document.getElementById("stat-holders");
+
+          if (priceEl) priceEl.textContent = formatCurrency(data.price);
+          if (priceSubEl) {
+            const change = data.priceChange24h;
+            if (change !== null && change !== undefined) {
+              const sign = change >= 0 ? "+" : "";
+              priceSubEl.textContent = `24h ${sign}${change.toFixed(2)}%`;
+              priceSubEl.style.color = change >= 0 ? "#34d399" : "#f87171";
+            } else {
+              priceSubEl.textContent = "USD per bitxbit";
+            }
+          }
+          if (liquidityEl) liquidityEl.textContent = formatCurrency(data.liquidity);
+          if (holdersEl) holdersEl.textContent = formatNumber(data.holders);
+        } catch (err) {
+          console.error("Failed to load token stats:", err);
+        }
+      }
+
+      loadStats();
+      setInterval(loadStats, 60000);
+    })();
+  </script>
 </body>
 </html>
