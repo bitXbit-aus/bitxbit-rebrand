@@ -408,8 +408,31 @@ export async function airdropRewards(periodId: string) {
     }))
     .filter((d) => d.walletAddress && d.amount > 0) ?? [];
 
+  const missingWalletCount = (rewards?.length ?? 0) - distributions.length;
+
   if (distributions.length === 0) {
-    throw new Error("No approved rewards with wallet addresses found for this period.");
+    throw new Error(
+      missingWalletCount > 0
+        ? `No approved rewards with wallet addresses found. ${missingWalletCount} member(s) are missing a wallet address.`
+        : "No approved rewards found for this period."
+    );
+  }
+
+  // Pre-flight balance checks
+  const totalNeeded = distributions.reduce((sum, d) => sum + d.amount, 0);
+  const balance = await getAirdropWalletBalance();
+  const estimatedSolFee = distributions.length * 0.005;
+
+  if (balance.token < totalNeeded) {
+    throw new Error(
+      `Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, Needed: ${totalNeeded.toFixed(4)}`
+    );
+  }
+
+  if (balance.sol < estimatedSolFee) {
+    throw new Error(
+      `Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL, Estimated: ${estimatedSolFee.toFixed(4)} SOL`
+    );
   }
 
   const results = await distributeTokens(distributions);

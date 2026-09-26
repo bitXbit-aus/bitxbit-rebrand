@@ -103,6 +103,11 @@ export default async function AdminRewardsPage() {
         {periods?.map((period) => {
           const totals = totalsByPeriod.get(period.id);
           const canAirdrop = period.status === "approved" && (totals?.bitxbit ?? 0) > 0;
+          const tokensNeeded = totals?.bitxbit ?? 0;
+          const hasEnoughTokens = airdropBalance.token >= tokensNeeded;
+          const solNeeded = (totals?.count ?? 0) * 0.005;
+          const hasEnoughSol = airdropBalance.sol >= solNeeded;
+          const canRunAirdrop = canAirdrop && hasEnoughTokens && hasEnoughSol;
           return (
             <Card key={period.id}>
               <CardHeader>
@@ -145,7 +150,9 @@ export default async function AdminRewardsPage() {
                   </form>
                   {canAirdrop && (
                     <form action={airdropRewards.bind(null, period.id)}>
-                      <Button type="submit" size="sm">Airdrop Tokens</Button>
+                      <Button type="submit" size="sm" disabled={!canRunAirdrop}>
+                        Airdrop Tokens
+                      </Button>
                     </form>
                   )}
                   <form action={distributeRewardsWithTx.bind(null, period.id)} className="flex gap-2 items-end">
@@ -158,6 +165,16 @@ export default async function AdminRewardsPage() {
                     <Button type="submit" size="sm" variant="outline">Mark Distributed</Button>
                   </form>
                 </div>
+                {canAirdrop && !canRunAirdrop && (
+                  <div className="mt-3 text-xs text-amber-400">
+                    {!hasEnoughTokens && (
+                      <div>Insufficient bitxbit: wallet has {airdropBalance.token.toFixed(4)}, needs {tokensNeeded.toFixed(4)}</div>
+                    )}
+                    {!hasEnoughSol && (
+                      <div>Insufficient SOL: wallet has {airdropBalance.sol.toFixed(4)}, needs ~{solNeeded.toFixed(4)}</div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           );
