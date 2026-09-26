@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { Connection, PublicKey } from "@solana/web3.js";
 
 const TOKEN_MINT = process.env.BITXBIT_TOKEN_MINT || "DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5";
 const SOLSCAN_API_KEY = process.env.SOLSCAN_API_KEY;
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const TOKEN_CREATED_AT = "2021-10-17"; // bitxbit token creation date
 
 interface TokenStats {
@@ -13,6 +16,31 @@ interface TokenStats {
   createdAt: string;
   mint: string;
   errors: string[];
+}
+
+async function fetchHolderCountViaRpc(): Promise<number | null> {
+  try {
+    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+    const mint = new PublicKey(TOKEN_MINT);
+    const accounts = await connection.getProgramAccounts(TOKEN_PROGRAM_ID, {
+      filters: [
+        { dataSize: 165 }, // SPL token account size
+        { memcmp: { offset: 0, bytes: mint.toBase58() } },
+      ],
+    });
+
+    const owners = new Set<string>();
+    for (const { account } of accounts) {
+      // Owner pubkey is at bytes 32-64 of the token account data
+      const ownerBytes = account.data.slice(32, 64);
+      const owner = new PublicKey(ownerBytes).toBase58();
+      owners.add(owner);
+    }
+    return owners.size;
+  } catch (err) {
+    console.error("RPC holder count failed:", err);
+    return null;
+  }
 }
 
 export async function GET() {
@@ -72,6 +100,16 @@ export async function GET() {
     }
   } else {
     stats.errors.push("SOLSCAN_API_KEY not configured");
+  }
+
+  // Free fallback: count unique holders directly from Solana RPC
+  if (stats.holders === null) {
+    const rpcHolders = await fetchHolderCountViaRpc();
+    if (rpcHolders !== null) {
+      stats.holders = rpcHolders;
+    } else {
+      stats.errors.push("RPC holder count failed");
+    }
   }
 
   // Dexscreener Keyless API - total liquidity
