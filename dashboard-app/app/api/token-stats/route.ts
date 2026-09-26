@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 
 const TOKEN_MINT = process.env.BITXBIT_TOKEN_MINT || "DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5";
-const SOLSCAN_API_KEY = process.env.SOLSCAN_API_KEY;
 const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -56,53 +55,6 @@ export async function GET() {
     mint: TOKEN_MINT,
     errors: [],
   };
-
-  // Solscan Pro API V2 - latest price
-  if (SOLSCAN_API_KEY) {
-    try {
-      const priceRes = await fetch(
-        `https://pro-api.solscan.io/v2.0/token/price/latest?address=${TOKEN_MINT}`,
-        {
-          headers: { token: SOLSCAN_API_KEY },
-          next: { revalidate: 60 },
-        }
-      );
-      if (priceRes.ok) {
-        const priceData = await priceRes.json();
-        const tokenPrice = priceData?.data?.find((item: any) => item.address === TOKEN_MINT);
-        if (tokenPrice) {
-          stats.price = tokenPrice.price ?? null;
-          stats.priceChange24h = tokenPrice.price_change_24h ?? null;
-          stats.marketCap = tokenPrice.market_cap ?? null;
-        }
-      } else {
-        stats.errors.push(`Solscan price API error: ${priceRes.status}`);
-      }
-    } catch (err) {
-      stats.errors.push(`Solscan price fetch failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // Solscan Pro API V2 - holders
-    try {
-      const holdersRes = await fetch(
-        `https://pro-api.solscan.io/v2.0/token/holders?address=${TOKEN_MINT}&page=1&page_size=10`,
-        {
-          headers: { token: SOLSCAN_API_KEY },
-          next: { revalidate: 300 },
-        }
-      );
-      if (holdersRes.ok) {
-        const holdersData = await holdersRes.json();
-        stats.holders = holdersData?.data?.total ?? null;
-      } else {
-        stats.errors.push(`Solscan holders API error: ${holdersRes.status}`);
-      }
-    } catch (err) {
-      stats.errors.push(`Solscan holders fetch failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  } else {
-    stats.errors.push("SOLSCAN_API_KEY not configured");
-  }
 
   // Birdeye API - price, liquidity, market cap, holders (single call, cached 1 hour)
   if (BIRDEYE_API_KEY) {
