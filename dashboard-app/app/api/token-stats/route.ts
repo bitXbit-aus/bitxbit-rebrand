@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 const TOKEN_MINT = process.env.BITXBIT_TOKEN_MINT || "DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5";
 const SOLSCAN_API_KEY = process.env.SOLSCAN_API_KEY;
-const TOKEN_CREATED_AT = "2021-10-17";
+const TOKEN_CREATED_AT = "2021-10-17"; // bitxbit token creation date
 
 interface TokenStats {
   price: number | null;
