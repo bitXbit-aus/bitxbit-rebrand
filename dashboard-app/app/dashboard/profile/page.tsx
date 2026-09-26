@@ -58,7 +58,7 @@ export default async function ProfilePage() {
               <div className="space-y-2">
                 <Label htmlFor="walletAddress">Wallet Address</Label>
                 <Input id="walletAddress" name="walletAddress" defaultValue={profile?.wallet_address ?? ""} placeholder="Solana wallet address" />
-                <p className="text-xs text-muted-foreground">Used for BxB token reward distribution.</p>
+                <p className="text-xs text-muted-foreground">Used for bitxbit token reward distribution.</p>
               </div>
               <Button type="submit">Save Changes</Button>
             </form>

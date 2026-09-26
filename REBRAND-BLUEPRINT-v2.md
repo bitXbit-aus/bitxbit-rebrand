@@ -122,7 +122,7 @@ bitxbit.com.au
 |   |-- /category/:slug (filtered views)
 |
 |-- /token-economy
-|   |-- What BxB is + allocation model + transparency principles + future utility
+|   |-- What bitxbit is + allocation model + transparency principles + future utility
 |
 |-- /projects
 |   |-- New Earth Healing Clinic + liquidity + buybacks + future initiatives
@@ -214,7 +214,7 @@ Horizontal 5-step flow (vertical on mobile):
 
 4 stat cards:
 - **Liquidity Built** — $X,XXX | "Supporting healthy markets"
-- **Tokens Bought Back** — XXX,XXX BxB | "Community-supported stability"
+- **Tokens Bought Back** — XXX,XXX bitxbit | "Community-supported stability"
 - **Projects Funded** — X | "Starting with the New Earth Healing Clinic"
 - **Community Members** — X,XXX | "And growing"
 
@@ -293,7 +293,7 @@ Disclaimer, Privacy Policy, Terms of Use, Affiliate Disclosure, Crypto Risk Warn
 bitXbit is simple: we gather trusted referral and affiliate links in one place. When you use those links to sign up for products and services you actually need, the partner pays us a referral fee. That fee doesn't go to shareholders — it flows back into the ecosystem. Here's how:
 
 **Step 1: Join the Ecosystem**
-Create your free bitXbit account. Connect your Solana wallet if you want to receive BxB ecosystem credits. No purchase is required to participate. Eligibility depends on your local laws — you must be 18 or older.
+Create your free bitXbit account. Connect your Solana wallet if you want to receive bitxbit ecosystem credits. No purchase is required to participate. Eligibility depends on your local laws — you must be 18 or older.
 
 **Step 2: Explore Trusted Opportunities**
 Browse curated referral links across categories: crypto exchanges, wallets, financial tools, AI platforms, wellness, education, business tools, and regenerative living. Every offer is vetted.
@@ -305,7 +305,7 @@ Click through and sign up or purchase only when it genuinely makes sense for you
 Generated revenue is allocated according to our published model: community rewards, liquidity creation, token buybacks, project funding, and operations.
 
 **Step 5: Shared Abundance**
-A percentage of affiliate income is distributed back to active participants as bitXbit ecosystem credits (BxB), according to the published allocation model and your activity level.
+A percentage of affiliate income is distributed back to active participants as bitXbit ecosystem credits (bitxbit), according to the published allocation model and your activity level.
 
 **Visual:** Circular flow diagram. Income enters at top, splits into 5 streams, flows back to community.
 
@@ -331,7 +331,7 @@ A percentage of affiliate income is distributed back to active participants as b
 - "Benefit to you: [e.g., 'Get $20 in BTC on signup']"
 - [Button: "Get Started" — links to referral URL]
 - *Small text: "bitXbit may receive affiliate income from this partner. This supports the ecosystem."*
-- *[Optional badge: "Eligible for BxB Rewards"]*
+- *[Optional badge: "Eligible for bitxbit Rewards"]*
 
 **Sample cards (populate via CMS):**
 
@@ -368,11 +368,11 @@ A percentage of affiliate income is distributed back to active participants as b
 
 **Section 1: What is the bitXbit Token?**
 
-The bitXbit token (BxB) is an ecosystem participation credit issued on the Solana blockchain. It is not a security, share, investment product, or guaranteed income source.
+The bitXbit token (bitxbit) is an ecosystem participation credit issued on the Solana blockchain. It is not a security, share, investment product, or guaranteed income source.
 
 **Contract Address:** `DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5`
 **Blockchain:** Solana
-**Max Supply:** 1,000,000 BxB
+**Max Supply:** 1,000,000 bitxbit
 
 Current uses within the ecosystem:
 - Recognising community participation and contribution
@@ -385,7 +385,7 @@ Visual: Interactive donut chart with editable placeholder percentages.
 
 | Allocation | Percentage | Purpose |
 |------------|-----------|---------|
-| Community Token Rewards | 40% | Distributed to participants as BxB ecosystem credits |
+| Community Token Rewards | 40% | Distributed to participants as bitxbit ecosystem credits |
 | Liquidity Creation | 25% | Building and sustaining token liquidity pools |
 | Token Buybacks | 15% | Supporting market stability by purchasing circulating supply |
 | Project Funding | 10% | Directly funding regenerative and healing initiatives |
@@ -407,14 +407,14 @@ The following liquidity pools exist as on-chain infrastructure. Providing liquid
 - BITXBIT/USDC on Orca
 
 **Section 5: Future Utility (Not Guaranteed)**
-Potential future uses for BxB, subject to development and community input:
+Potential future uses for bitxbit, subject to development and community input:
 - Governance voting on project funding priorities
 - Premium dashboard features or early access
 - Exclusive partner discounts
 - Enhanced reward multipliers for long-term participants
 
 **Disclaimer block:**
-"BxB is a community ecosystem credit, not a financial product. Nothing herein constitutes an offer to sell, solicitation to buy, or recommendation for any security or investment. Cryptocurrency markets are volatile. You may lose all value. Always do your own research."
+"bitxbit is a community ecosystem credit, not a financial product. Nothing herein constitutes an offer to sell, solicitation to buy, or recommendation for any security or investment. Cryptocurrency markets are volatile. You may lose all value. Always do your own research."
 
 ---
 
@@ -438,12 +438,12 @@ A percentage of every dollar generated through the bitXbit referral ecosystem go
 
 **Token Liquidity Building**
 - Status: Ongoing
-- Description: Sustained allocation to liquidity pools ensures smoother trading and market depth for BxB.
+- Description: Sustained allocation to liquidity pools ensures smoother trading and market depth for bitxbit.
 - This is infrastructure, not an investment recommendation.
 
 **Token Buyback Reserve**
 - Status: Active
-- Description: A portion of affiliate income is used to purchase BxB from the open market. This is a community-supported stability mechanism, not a price guarantee.
+- Description: A portion of affiliate income is used to purchase bitxbit from the open market. This is a community-supported stability mechanism, not a price guarantee.
 
 **Future Initiatives (In Planning):**
 - Community regenerative education fund
@@ -497,7 +497,7 @@ A: bitXbit is a community ecosystem that gathers referral and affiliate opportun
 A: We partner with companies that offer referral programs. When you click a link on our site and complete a qualifying action (like signing up or making a purchase), that company pays us a commission. This is standard affiliate marketing.
 
 **Q: Do I need to buy tokens?**
-A: No. Creating an account and browsing referrals is completely free. You only need to connect a wallet if you want to receive BxB ecosystem credits.
+A: No. Creating an account and browsing referrals is completely free. You only need to connect a wallet if you want to receive bitxbit ecosystem credits.
 
 **Token & Rewards**
 
@@ -508,7 +508,7 @@ A: A percentage of total affiliate income is allocated to community rewards each
 A: No. bitXbit tokens are community incentives, not guaranteed income. If no affiliate income is generated, no rewards are distributed. Past periods do not guarantee future rewards.
 
 **Q: What are token buybacks?**
-A: Buybacks use a portion of ecosystem income to purchase BxB tokens from the open market. This is a community-supported mechanism. It is not a price guarantee and does not imply any expectation of profit.
+A: Buybacks use a portion of ecosystem income to purchase bitxbit tokens from the open market. This is a community-supported mechanism. It is not a price guarantee and does not imply any expectation of profit.
 
 **Q: What is liquidity?**
 A: Liquidity refers to the pool of tokens available for trading on decentralised exchanges. bitXbit allocates income to liquidity pools to support orderly trading. Providing liquidity yourself carries risks, including impermanent loss.
@@ -542,19 +542,19 @@ A: bitXbit is not a financial institution, investment manager, or securities iss
 bitXbit participates in affiliate and referral programs. When you click certain links on this site and make a purchase or sign up, we may receive a commission at no additional cost to you. This income is used to support the bitXbit ecosystem, including community rewards, liquidity creation, token buybacks, and regenerative project funding.
 
 **Token Reward Disclaimer**
-bitXbit tokens (BxB) are ecosystem participation credits, not securities, investments, shares, or guaranteed income products. Token rewards are discretionary, depend on actual affiliate income, and are subject to the published allocation model. Past distributions do not guarantee future rewards. BxB has no inherent monetary value guaranteed by bitXbit.
+bitXbit tokens (bitxbit) are ecosystem participation credits, not securities, investments, shares, or guaranteed income products. Token rewards are discretionary, depend on actual affiliate income, and are subject to the published allocation model. Past distributions do not guarantee future rewards. bitxbit has no inherent monetary value guaranteed by bitXbit.
 
 **No Financial Advice**
 All content on this site is for informational purposes only. It does not constitute financial, legal, tax, or investment advice. You should consult a qualified professional before making any financial decisions.
 
 **Cryptocurrency Risk Warning**
-Cryptocurrencies and tokens are highly volatile. You may lose all value. bitXbit does not guarantee the value, liquidity, or utility of BxB. Never participate with funds you cannot afford to lose.
+Cryptocurrencies and tokens are highly volatile. You may lose all value. bitXbit does not guarantee the value, liquidity, or utility of bitxbit. Never participate with funds you cannot afford to lose.
 
 **Eligibility & Jurisdiction**
 Participation is void where prohibited by law. You must be at least 18 years old. Australian participants should ensure their activities comply with all applicable laws, including ASIC and ACCC guidance. Participants from other jurisdictions are responsible for their own compliance.
 
 **No Liability**
-bitXbit is not liable for any losses arising from your use of this site, referral links, or holding of BxB tokens. Use at your own risk.
+bitXbit is not liable for any losses arising from your use of this site, referral links, or holding of bitxbit tokens. Use at your own risk.
 
 ---
 
@@ -609,8 +609,8 @@ Both connect to the same Supabase backend. Role-based access control (RBAC) gate
 
 *Card row 2 (highlighted panel, 2/3 width):*
 **Your bitXbit Rewards**
-- Estimated BxB for current period: X,XXX
-- Total BxB allocated to date: X,XXX
+- Estimated bitxbit for current period: X,XXX
+- Total bitxbit allocated to date: X,XXX
 - Last distribution: [Date] or "None yet"
 - "View Reward History" link
 
@@ -621,7 +621,7 @@ Both connect to the same Supabase backend. Role-based access control (RBAC) gate
 
 *Card row 4 (3 small stat cards):*
 - **Liquidity Built** — Global: $XXX,XXX
-- **Tokens Bought Back** — Global: XXX,XXX BxB
+- **Tokens Bought Back** — Global: XXX,XXX bitxbit
 - **Projects Funded** — Global: $XX,XXX
 
 *Card row 5:*
@@ -645,7 +645,7 @@ Both connect to the same Supabase backend. Role-based access control (RBAC) gate
 ---
 
 **Screen: My Rewards**
-- Table: Period | Estimated AUD Value | BxB Amount | Status | Tx Hash
+- Table: Period | Estimated AUD Value | bitxbit Amount | Status | Tx Hash
 - Filters: Status, Date Range
 - "Export CSV" button
 - Empty state: "No rewards yet. Start exploring referrals to generate ecosystem value."
@@ -667,7 +667,7 @@ Both connect to the same Supabase backend. Role-based access control (RBAC) gate
 - "Copy Address" button
 - "Disconnect / Change Wallet"
 - "How wallet connection works" explainer:
-  > "We only read your public wallet address. We cannot access your funds. We use this address to send BxB ecosystem credits. Always verify you are on bitxbit.com.au before connecting."
+  > "We only read your public wallet address. We cannot access your funds. We use this address to send bitxbit ecosystem credits. Always verify you are on bitxbit.com.au before connecting."
 
 ---
 
@@ -744,7 +744,7 @@ Both connect to the same Supabase backend. Role-based access control (RBAC) gate
 **Screen: Reward Distribution**
 - Step 1: Select period (start / end date)
 - Step 2: "Calculate Rewards" — system runs allocation logic
-- Step 3: Review table (User | Activity Score | Estimated AUD | BxB Amount)
+- Step 3: Review table (User | Activity Score | Estimated AUD | bitxbit Amount)
 - Step 4: Approve or Adjust
 - Step 5: "Mark as Distributed" (with optional on-chain tx hash batch upload)
 - Export: CSV for bulk token distribution
@@ -907,7 +907,7 @@ Project ||--o{ ProjectAllocation : funded_by
 | user_id | UUID | FK → users, INDEX |
 | reward_period_id | UUID | FK → reward_periods |
 | estimated_aud_value | DECIMAL(12,2) | |
-| bxb_amount | DECIMAL(18,8) | |
+| bitxbit_amount | DECIMAL(18,8) | |
 | status | VARCHAR(20) | DEFAULT 'pending', CHECK ('pending', 'approved', 'distributed', 'rejected') |
 | distribution_tx_hash | VARCHAR(100) | nullable |
 | distributed_at | TIMESTAMPTZ | |
@@ -1040,7 +1040,7 @@ Marketing site content is managed in Webflow CMS. Dashboard data lives in Supaba
 4. User selects wallet (Phantom, Solflare, etc.)
 5. App receives public key only
 6. Address saved to user profile
-7. Future BxB credits sent to this address
+7. Future bitxbit credits sent to this address
 
 **Security Requirements:**
 - NEVER request seed phrase or private key
@@ -1177,7 +1177,7 @@ bitxbit.com.au          app.bitxbit.com.au
 **Next.js** = dashboard UI (member + admin), wallet connection
 **Supabase** = database, auth, file storage, serverless functions
 **Vercel/Netlify** = host Next.js app
-**Solana** = blockchain for BxB token (existing)
+**Solana** = blockchain for bitxbit token (existing)
 
 ---
 

@@ -128,7 +128,7 @@ CREATE TABLE public.user_rewards (
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   reward_period_id UUID NOT NULL REFERENCES public.reward_periods(id) ON DELETE CASCADE,
   estimated_aud_value DECIMAL(12,2),
-  bxb_amount DECIMAL(18,8),
+  bitxbit_amount DECIMAL(18,8),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'distributed', 'rejected')),
   distribution_tx_hash TEXT,
   distributed_at TIMESTAMPTZ,
@@ -299,5 +299,5 @@ INSERT INTO public.allocation_models (name, community_rewards_pct, liquidity_pct
 
 INSERT INTO public.projects (name, description, funding_goal, amount_allocated, status, impact_statement, display_order) VALUES
   ('New Earth Healing Clinic', 'A regenerative healing centre offering holistic therapies and accessible community wellness programs.', 50000, 12000, 'active', 'Every referral click helps fund accessible healing for people who need it most.', 1),
-  ('Token Liquidity Building', 'Sustained allocation to liquidity pools ensures smoother trading and market depth for BxB.', NULL, 8500, 'active', 'Building healthy markets, bit by bit.', 2),
-  ('Token Buyback Reserve', 'A portion of affiliate income is used to purchase BxB from the open market.', NULL, 6200, 'active', 'Community-supported stability mechanism.', 3);
+  ('Token Liquidity Building', 'Sustained allocation to liquidity pools ensures smoother trading and market depth for bitxbit.', NULL, 8500, 'active', 'Building healthy markets, bit by bit.', 2),
+  ('Token Buyback Reserve', 'A portion of affiliate income is used to purchase bitxbit from the open market.', NULL, 6200, 'active', 'Community-supported stability mechanism.', 3);

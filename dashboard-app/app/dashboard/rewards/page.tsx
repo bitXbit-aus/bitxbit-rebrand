@@ -20,7 +20,7 @@ export default async function RewardsPage() {
     <div className="dashboard-container">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Rewards</h1>
-        <p className="text-muted-foreground mt-1">Your estimated and distributed BxB token rewards.</p>
+        <p className="text-muted-foreground mt-1">Your estimated and distributed bitxbit token rewards.</p>
       </div>
 
       <Card>
@@ -35,7 +35,7 @@ export default async function RewardsPage() {
                 <tr>
                   <th>Period</th>
                   <th>Estimated (AUD)</th>
-                  <th>BxB Amount</th>
+                  <th>bitxbit Amount</th>
                   <th>Status</th>
                   <th>Date</th>
                 </tr>
@@ -49,7 +49,7 @@ export default async function RewardsPage() {
                         : "—"}
                     </td>
                     <td>{formatCurrency(reward.estimated_aud_value)}</td>
-                    <td>{reward.bxb_amount ? reward.bxb_amount.toFixed(4) : "—"}</td>
+                    <td>{reward.bitxbit_amount ? reward.bitxbit_amount.toFixed(4) : "—"}</td>
                     <td>
                       <Badge variant={reward.status === "distributed" ? "default" : "secondary"}>
                         {reward.status}

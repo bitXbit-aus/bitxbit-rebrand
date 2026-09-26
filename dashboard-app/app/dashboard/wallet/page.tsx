@@ -38,7 +38,7 @@ export default function WalletPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Wallet</h1>
         <p className="text-muted-foreground mt-1">
-          Connect your Solana wallet to receive BxB rewards.
+          Connect your Solana wallet to receive bitxbit rewards.
         </p>
       </div>
 
@@ -47,7 +47,7 @@ export default function WalletPage() {
           <CardHeader>
             <CardTitle>Wallet Connection</CardTitle>
             <CardDescription>
-              Connect a Solana wallet to track your BxB tokens.
+              Connect a Solana wallet to track your bitxbit tokens.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -81,12 +81,12 @@ export default function WalletPage() {
         <Card>
           <CardHeader>
             <CardTitle>Token Information</CardTitle>
-            <CardDescription>BxB token contract details.</CardDescription>
+            <CardDescription>bitxbit token contract details.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Token</span>
-              <span className="font-medium">BxB (bitXbit)</span>
+              <span className="font-medium">bitxbit</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Network</span>

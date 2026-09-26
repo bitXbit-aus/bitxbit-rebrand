@@ -33,7 +33,7 @@ export default async function AdminRewardsPage() {
                   <th>User</th>
                   <th>Period</th>
                   <th>Estimated</th>
-                  <th>BxB</th>
+                  <th>bitxbit</th>
                   <th>Status</th>
                   <th>Date</th>
                 </tr>
@@ -51,7 +51,7 @@ export default async function AdminRewardsPage() {
                         : "—"}
                     </td>
                     <td>{formatCurrency(reward.estimated_aud_value)}</td>
-                    <td>{reward.bxb_amount ? reward.bxb_amount.toFixed(4) : "—"}</td>
+                    <td>{reward.bitxbit_amount ? reward.bitxbit_amount.toFixed(4) : "—"}</td>
                     <td>
                       <Badge variant={reward.status === "distributed" ? "default" : "secondary"}>{reward.status}</Badge>
                     </td>

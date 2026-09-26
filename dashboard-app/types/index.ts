@@ -91,7 +91,7 @@ export interface UserReward {
   reward_period_id: string;
   period?: RewardPeriod;
   estimated_aud_value: number | null;
-  bxb_amount: number | null;
+  bitxbit_amount: number | null;
   status: RewardStatus;
   distribution_tx_hash: string | null;
   distributed_at: string | null;

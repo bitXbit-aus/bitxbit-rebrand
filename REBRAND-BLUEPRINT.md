@@ -113,7 +113,7 @@ bitxbit.com.au
 #### LIVE METRICS STRIP
 - "Ecosystem Pulse" — 3-4 live or recently updated numbers:
   - "Liquidity Built: $X,XXX"
-  - "Tokens Bought Back: XXX,XXX BxB"
+  - "Tokens Bought Back: XXX,XXX bitxbit"
   - "Projects Funded: X"
   - "Community Participants: X,XXX"
 - Links to Transparency page
@@ -189,7 +189,7 @@ bitxbit.com.au
 - Benefit to user (e.g., "Get $20 in BTC when you sign up")
 - CTA button: "Get Started"
 - Small text: "bitXbit may receive affiliate income. This supports the ecosystem."
-- Optional badge: "Eligible for BxB Rewards"
+- Optional badge: "Eligible for bitxbit Rewards"
 
 **Sample Card Copy (Binance example):**
 - Category: Crypto Exchange
@@ -198,7 +198,7 @@ bitxbit.com.au
 - Benefit: Reduced trading fees for new users.
 - CTA: Get Started
 - Disclosure: bitXbit may earn affiliate income.
-- Badge: Eligible for BxB Rewards
+- Badge: Eligible for bitxbit Rewards
 
 **Bottom section:** "Have a referral opportunity?" — contact/admin link
 
@@ -210,7 +210,7 @@ bitxbit.com.au
 **Subhead:** How affiliate income flows back to the community and the ecosystem.
 
 **Section 1: What is the bitXbit Token?**
-The bitXbit token (BxB) is an ecosystem participation credit. It is not a security, share, or investment product. BxB is used to:
+The bitXbit token (bitxbit) is an ecosystem participation credit. It is not a security, share, or investment product. bitxbit is used to:
 - Recognize community participation
 - Track contribution within the ecosystem
 - Access future utility features as the platform grows
@@ -220,7 +220,7 @@ Visual: Donut/pie chart with editable placeholder percentages.
 
 | Allocation | Purpose |
 |------------|---------|
-| 40% Community Token Rewards | Distributed to participants as BxB ecosystem credits |
+| 40% Community Token Rewards | Distributed to participants as bitxbit ecosystem credits |
 | 25% Liquidity Creation | Used to build and sustain token liquidity pools |
 | 15% Token Buybacks | Supports market stability by buying back circulating tokens |
 | 10% Project Funding | Directly funds regenerative and healing initiatives |
@@ -235,7 +235,7 @@ Visual: Donut/pie chart with editable placeholder percentages.
 - Allocation model may evolve with community input.
 
 **Section 4: Future Utility**
-Potential future uses for BxB (not guaranteed, subject to development):
+Potential future uses for bitxbit (not guaranteed, subject to development):
 - Governance voting on project funding
 - Premium dashboard features
 - Exclusive access to new referral opportunities
@@ -387,8 +387,8 @@ The dashboard is split into two portals: **Member** and **Admin**.
    - Eligible Rewards Status: "Calculating" / "Pending" / "Distributed"
 
 3. **Your bitXbit Rewards (prominent panel)**
-   - Estimated BxB Rewards: X,XXX (placeholder logic)
-   - Token Balance / Allocated: X,XXX BxB
+   - Estimated bitxbit Rewards: X,XXX (placeholder logic)
+   - Token Balance / Allocated: X,XXX bitxbit
    - Last Distribution Date: [Date]
    - "View Reward History" link
 
@@ -413,7 +413,7 @@ The dashboard is split into two portals: **Member** and **Admin**.
 - Notification preferences
 
 **My Rewards Screen:**
-- Table: Date | Source | Estimated Value | BxB Amount | Status
+- Table: Date | Source | Estimated Value | bitxbit Amount | Status
 - Filter by status and date range
 - Export (CSV) option
 
@@ -570,7 +570,7 @@ The dashboard is split into two portals: **Member** and **Admin**.
 - user_id (FK)
 - reward_period_id (FK)
 - estimated_aud_value
-- bxb_amount
+- bitxbit_amount
 - status (pending / approved / distributed / rejected)
 - distribution_tx_hash (nullable)
 - distributed_at (nullable)
