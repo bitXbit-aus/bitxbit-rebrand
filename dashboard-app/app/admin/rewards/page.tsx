@@ -1,29 +1,123 @@
 import { createClient } from "@/lib/supabase/server";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { createRewardPeriod, calculateRewards, approveRewards, distributeRewards } from "@/lib/actions";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export default async function AdminRewardsPage() {
   const supabase = createClient();
+  const { data: periods } = await supabase
+    .from("reward_periods")
+    .select("*, allocation_model:allocation_models(name, community_rewards_pct)")
+    .order("created_at", { ascending: false });
+  const { data: models } = await supabase.from("allocation_models").select("id, name").eq("is_active", true);
   const { data: rewards } = await supabase
     .from("user_rewards")
-    .select(`
-      *,
-      user:users(display_name, email),
-      period:reward_periods(start_date, end_date)
-    `)
-    .order("created_at", { ascending: false });
+    .select("*, user:users(display_name, email), period:reward_periods(start_date, end_date)")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  const totalsByPeriod = new Map<string, { count: number; aud: number; bitxbit: number }>();
+  rewards?.forEach((r) => {
+    const current = totalsByPeriod.get(r.reward_period_id) || { count: 0, aud: 0, bitxbit: 0 };
+    current.count += 1;
+    current.aud += r.estimated_aud_value || 0;
+    current.bitxbit += r.bitxbit_amount || 0;
+    totalsByPeriod.set(r.reward_period_id, current);
+  });
 
   return (
     <div className="dashboard-container">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white">Rewards</h1>
-        <p className="text-muted-foreground mt-1">Review and manage user reward allocations.</p>
+        <h1 className="text-3xl font-bold text-white">Reward Periods</h1>
+        <p className="text-muted-foreground mt-1">Create periods, calculate rewards, approve and distribute.</p>
+      </div>
+
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>Create Reward Period</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form action={createRewardPeriod} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div>
+              <label className="block text-sm font-medium mb-1">Start Date</label>
+              <input name="startDate" type="date" className="input w-full" required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">End Date</label>
+              <input name="endDate" type="date" className="input w-full" required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Allocation Model</label>
+              <select name="allocationModelId" className="input w-full" required>
+                <option value="">Select model</option>
+                {models?.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+            <Button type="submit">Create Period</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-6 mb-8">
+        {periods?.map((period) => {
+          const totals = totalsByPeriod.get(period.id);
+          return (
+            <Card key={period.id}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>{formatDate(period.start_date)} – {formatDate(period.end_date)}</CardTitle>
+                    <CardDescription>
+                      Model: {period.allocation_model?.name ?? "None"} · Community rewards: {period.allocation_model?.community_rewards_pct ?? 0}%
+                    </CardDescription>
+                  </div>
+                  <Badge variant={period.status === "distributed" ? "default" : "secondary"}>{period.status}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                  <div className="p-3 rounded-lg bg-muted">
+                    <div className="text-xs text-muted-foreground">Total Income</div>
+                    <div className="font-semibold">{formatCurrency(period.total_income)}</div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted">
+                    <div className="text-xs text-muted-foreground">Recipients</div>
+                    <div className="font-semibold">{totals?.count ?? 0}</div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted">
+                    <div className="text-xs text-muted-foreground">Estimated AUD</div>
+                    <div className="font-semibold">{formatCurrency(totals?.aud ?? 0)}</div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted">
+                    <div className="text-xs text-muted-foreground">bitxbit</div>
+                    <div className="font-semibold">{(totals?.bitxbit ?? 0).toFixed(4)}</div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <form action={calculateRewards.bind(null, period.id)}>
+                    <Button type="submit" size="sm" variant="outline">Calculate</Button>
+                  </form>
+                  <form action={approveRewards.bind(null, period.id)}>
+                    <Button type="submit" size="sm" variant="outline">Approve</Button>
+                  </form>
+                  <form action={distributeRewards.bind(null, period.id, "manual-tx-hash")}>
+                    <Button type="submit" size="sm">Mark Distributed</Button>
+                  </form>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>All Rewards</CardTitle>
+          <CardTitle>Recent Reward Records</CardTitle>
         </CardHeader>
         <CardContent>
           {rewards && rewards.length > 0 ? (
@@ -35,7 +129,6 @@ export default async function AdminRewardsPage() {
                   <th>Estimated</th>
                   <th>bitxbit</th>
                   <th>Status</th>
-                  <th>Date</th>
                 </tr>
               </thead>
               <tbody>
@@ -55,13 +148,12 @@ export default async function AdminRewardsPage() {
                     <td>
                       <Badge variant={reward.status === "distributed" ? "default" : "secondary"}>{reward.status}</Badge>
                     </td>
-                    <td>{formatDate(reward.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : (
-            <p className="text-sm text-muted-foreground">No rewards in the system yet.</p>
+            <p className="text-sm text-muted-foreground">No rewards calculated yet.</p>
           )}
         </CardContent>
       </Card>

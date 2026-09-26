@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { createCategory } from "@/lib/actions";
+import { createCategory, updateCategory, deleteCategory } from "@/lib/actions";
 
 export default async function AdminCategoriesPage() {
   const supabase = createClient();
@@ -38,27 +38,44 @@ export default async function AdminCategoriesPage() {
       </Card>
 
       <Card>
-        <CardContent className="pt-6">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Slug</th>
-                <th>Order</th>
-                <th>Active</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categories?.map((cat) => (
-                <tr key={cat.id}>
-                  <td className="font-medium">{cat.name}</td>
-                  <td>{cat.slug}</td>
-                  <td>{cat.display_order}</td>
-                  <td>{cat.active ? "Yes" : "No"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <CardHeader>
+          <CardTitle>Manage Categories</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {categories?.map((cat) => (
+              <div key={cat.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 rounded-lg border border-border bg-card/50 items-end">
+                <form action={updateCategory.bind(null, cat.id)} className="contents">
+                  <div className="md:col-span-3">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
+                    <input name="name" defaultValue={cat.name} className="input w-full" required />
+                  </div>
+                  <div className="md:col-span-3">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Slug</label>
+                    <input name="slug" defaultValue={cat.slug} className="input w-full" required />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Order</label>
+                    <input name="displayOrder" type="number" defaultValue={cat.display_order} className="input w-full" />
+                  </div>
+                  <div className="md:col-span-2 flex items-center pb-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="active" defaultChecked={cat.active} />
+                      Active
+                    </label>
+                  </div>
+                  <div className="md:col-span-2 flex justify-end gap-2">
+                    <Button type="submit" size="sm">Save</Button>
+                  </div>
+                </form>
+                <div className="md:col-span-12 flex justify-end border-t border-border pt-3">
+                  <form action={deleteCategory.bind(null, cat.id)}>
+                    <Button variant="destructive" size="sm" type="submit">Delete Category</Button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </div>

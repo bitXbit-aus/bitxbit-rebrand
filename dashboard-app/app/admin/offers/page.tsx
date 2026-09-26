@@ -1,9 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { createOffer, deleteOffer } from "@/lib/actions";
-import Link from "next/link";
+import { createOffer, updateOffer, deleteOffer } from "@/lib/actions";
 
 export default async function AdminOffersPage() {
   const supabase = createClient();
@@ -12,11 +10,9 @@ export default async function AdminOffersPage() {
 
   return (
     <div className="dashboard-container">
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Affiliate Offers</h1>
-          <p className="text-muted-foreground mt-1">Manage referral and affiliate links.</p>
-        </div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-white">Affiliate Offers</h1>
+        <p className="text-muted-foreground mt-1">Manage referral and affiliate links.</p>
       </div>
 
       <Card className="mb-8">
@@ -35,7 +31,7 @@ export default async function AdminOffersPage() {
             <input name="referralUrl" placeholder="Referral URL" className="input" required />
             <input name="description" placeholder="Description" className="input" />
             <input name="benefitText" placeholder="Benefit text" className="input" />
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-6">
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" name="rewardEligible" defaultChecked />
                 Reward eligible
@@ -58,36 +54,57 @@ export default async function AdminOffersPage() {
           <CardDescription>{offers?.length ?? 0} offers in the system.</CardDescription>
         </CardHeader>
         <CardContent>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Category</th>
-                <th>Status</th>
-                <th>Rewards</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {offers?.map((offer) => (
-                <tr key={offer.id}>
-                  <td className="font-medium">{offer.name}</td>
-                  <td>{offer.category?.name ?? "—"}</td>
-                  <td>
-                    <Badge variant={offer.active ? "default" : "secondary"}>{offer.active ? "Active" : "Inactive"}</Badge>
-                  </td>
-                  <td>
-                    <Badge variant={offer.reward_eligible ? "default" : "outline"}>{offer.reward_eligible ? "Eligible" : "N/A"}</Badge>
-                  </td>
-                  <td>
-                    <form action={deleteOffer.bind(null, offer.id)}>
-                      <Button variant="destructive" size="sm" type="submit">Delete</Button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="space-y-4">
+            {offers?.map((offer) => (
+              <div key={offer.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 rounded-lg border border-border bg-card/50 items-end">
+                <form action={updateOffer.bind(null, offer.id)} className="contents">
+                  <div className="md:col-span-3">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
+                    <input name="name" defaultValue={offer.name} className="input w-full" required />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Category</label>
+                    <select name="categoryId" defaultValue={offer.category_id ?? ""} className="input w-full">
+                      <option value="">None</option>
+                      {categories?.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="md:col-span-4">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Referral URL</label>
+                    <input name="referralUrl" defaultValue={offer.referral_url} className="input w-full" required />
+                  </div>
+                  <div className="md:col-span-3 flex items-center gap-4 pb-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="rewardEligible" defaultChecked={offer.reward_eligible} />
+                      Reward
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="active" defaultChecked={offer.active} />
+                      Active
+                    </label>
+                  </div>
+                  <div className="md:col-span-6">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
+                    <input name="description" defaultValue={offer.description ?? ""} className="input w-full" />
+                  </div>
+                  <div className="md:col-span-4">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Benefit text</label>
+                    <input name="benefitText" defaultValue={offer.benefit_text ?? ""} className="input w-full" />
+                  </div>
+                  <div className="md:col-span-2 flex justify-end">
+                    <Button type="submit" size="sm">Save</Button>
+                  </div>
+                </form>
+                <div className="md:col-span-12 flex justify-end border-t border-border pt-3">
+                  <form action={deleteOffer.bind(null, offer.id)}>
+                    <Button variant="destructive" size="sm" type="submit">Delete Offer</Button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -85,6 +85,174 @@ export async function createIncome(formData: FormData) {
   revalidatePath("/admin/income");
 }
 
+export async function updateIncome(id: string, formData: FormData) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("affiliate_income")
+    .update({
+      source: formData.get("source") as string,
+      offer_id: (formData.get("offerId") as string) || null,
+      amount: parseFloat(formData.get("amount") as string),
+      currency: formData.get("currency") as string,
+      date_received: formData.get("dateReceived") as string,
+      notes: formData.get("notes") as string,
+    })
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/income");
+}
+
+export async function deleteIncome(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from("affiliate_income").delete().eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/income");
+}
+
+export async function updateCategory(id: string, formData: FormData) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("categories")
+    .update({
+      name: formData.get("name") as string,
+      slug: formData.get("slug") as string,
+      display_order: parseInt(formData.get("displayOrder") as string) || 0,
+      active: formData.get("active") === "on",
+    })
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/categories");
+}
+
+export async function deleteCategory(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from("categories").delete().eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/categories");
+}
+
+export async function updateUser(id: string, formData: FormData) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("users")
+    .update({
+      role: formData.get("role") as string,
+      status: formData.get("status") as string,
+      display_name: (formData.get("displayName") as string) || null,
+      wallet_address: (formData.get("walletAddress") as string) || null,
+    })
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/users");
+}
+
+export async function createRewardPeriod(formData: FormData) {
+  const supabase = createClient();
+  const { error } = await supabase.from("reward_periods").insert({
+    start_date: formData.get("startDate") as string,
+    end_date: formData.get("endDate") as string,
+    allocation_model_id: (formData.get("allocationModelId") as string) || null,
+  });
+  if (error) throw error;
+  revalidatePath("/admin/rewards");
+}
+
+const ACTIVITY_POINTS: Record<string, number> = {
+  click: 1,
+  signup: 5,
+  purchase: 10,
+  other: 1,
+};
+
+export async function calculateRewards(periodId: string) {
+  const supabase = createClient();
+
+  const { data: period, error: periodError } = await supabase
+    .from("reward_periods")
+    .select("*, allocation_model:allocation_models(*)")
+    .eq("id", periodId)
+    .single();
+  if (periodError || !period) throw periodError || new Error("Period not found");
+
+  const { data: incomeRows } = await supabase
+    .from("affiliate_income")
+    .select("amount")
+    .gte("date_received", period.start_date)
+    .lte("date_received", period.end_date);
+  const totalIncome = incomeRows?.reduce((sum, row) => sum + (row.amount || 0), 0) ?? 0;
+
+  const communityPct = period.allocation_model?.community_rewards_pct ?? 0;
+  const communityPool = totalIncome * (communityPct / 100);
+
+  const { data: activities } = await supabase
+    .from("user_activities")
+    .select("user_id, activity_type")
+    .gte("created_at", `${period.start_date}T00:00:00Z`)
+    .lte("created_at", `${period.end_date}T23:59:59Z`);
+
+  const pointsByUser = new Map<string, number>();
+  let totalPoints = 0;
+  activities?.forEach((a) => {
+    const points = ACTIVITY_POINTS[a.activity_type] ?? 1;
+    const current = pointsByUser.get(a.user_id) || 0;
+    pointsByUser.set(a.user_id, current + points);
+    totalPoints += points;
+  });
+
+  if (totalPoints === 0 || communityPool === 0) {
+    await supabase.from("reward_periods").update({ total_income: totalIncome, status: "calculating" }).eq("id", periodId);
+    return;
+  }
+
+  const rewards = Array.from(pointsByUser.entries()).map(([userId, points]) => {
+    const estimated = (points / totalPoints) * communityPool;
+    return {
+      user_id: userId,
+      reward_period_id: periodId,
+      estimated_aud_value: Number(estimated.toFixed(2)),
+      bitxbit_amount: Number(estimated.toFixed(4)),
+      status: "pending",
+    };
+  });
+
+  await supabase.from("user_rewards").delete().eq("reward_period_id", periodId);
+  const { error: insertError } = await supabase.from("user_rewards").insert(rewards);
+  if (insertError) throw insertError;
+
+  await supabase
+    .from("reward_periods")
+    .update({ total_income: totalIncome, status: "calculating" })
+    .eq("id", periodId);
+
+  revalidatePath("/admin/rewards");
+}
+
+export async function approveRewards(periodId: string) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("user_rewards")
+    .update({ status: "approved" })
+    .eq("reward_period_id", periodId)
+    .eq("status", "pending");
+  if (error) throw error;
+
+  await supabase.from("reward_periods").update({ status: "approved" }).eq("id", periodId);
+  revalidatePath("/admin/rewards");
+}
+
+export async function distributeRewards(periodId: string, txHash: string) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("user_rewards")
+    .update({ status: "distributed", distribution_tx_hash: txHash, distributed_at: new Date().toISOString() })
+    .eq("reward_period_id", periodId)
+    .eq("status", "approved");
+  if (error) throw error;
+
+  await supabase.from("reward_periods").update({ status: "distributed" }).eq("id", periodId);
+  revalidatePath("/admin/rewards");
+}
+
 export async function createProject(formData: FormData) {
   const supabase = createClient();
   const { error } = await supabase.from("projects").insert({

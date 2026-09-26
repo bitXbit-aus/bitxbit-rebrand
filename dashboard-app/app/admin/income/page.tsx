@@ -1,8 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { createIncome } from "@/lib/actions";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { createIncome, updateIncome, deleteIncome } from "@/lib/actions";
 
 export default async function AdminIncomePage() {
   const supabase = createClient();
@@ -48,26 +47,53 @@ export default async function AdminIncomePage() {
           <CardTitle>Income History</CardTitle>
         </CardHeader>
         <CardContent>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Source</th>
-                <th>Amount</th>
-                <th>Date</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {income?.map((item) => (
-                <tr key={item.id}>
-                  <td className="font-medium">{item.source}</td>
-                  <td>{formatCurrency(item.amount)}</td>
-                  <td>{formatDate(item.date_received)}</td>
-                  <td className="max-w-xs truncate">{item.notes}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="space-y-4">
+            {income?.map((item) => (
+              <div key={item.id} className="p-4 rounded-lg border border-border bg-card/50">
+                <form action={updateIncome.bind(null, item.id)}>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Source</label>
+                      <input name="source" defaultValue={item.source} className="input w-full" required />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Linked Offer</label>
+                      <select name="offerId" defaultValue={item.offer_id ?? ""} className="input w-full">
+                        <option value="">None</option>
+                        {offers?.map((o) => (
+                          <option key={o.id} value={o.id}>{o.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Amount</label>
+                      <input name="amount" type="number" step="0.01" defaultValue={item.amount} className="input w-full" required />
+                    </div>
+                    <div className="md:col-span-1">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Currency</label>
+                      <input name="currency" defaultValue={item.currency} className="input w-full" />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Date</label>
+                      <input name="dateReceived" type="date" defaultValue={item.date_received} className="input w-full" required />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Notes</label>
+                      <input name="notes" defaultValue={item.notes ?? ""} className="input w-full" />
+                    </div>
+                    <div className="md:col-span-12 flex justify-end gap-2 border-t border-border pt-3">
+                      <Button type="submit" size="sm">Save Changes</Button>
+                    </div>
+                  </div>
+                </form>
+                <div className="flex justify-end mt-2">
+                  <form action={deleteIncome.bind(null, item.id)}>
+                    <Button variant="destructive" size="sm" type="submit">Delete Income</Button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -13,6 +13,13 @@ import {
   LogOut,
   Shield,
   Store,
+  Tags,
+  Coins,
+  TrendingUp,
+  Briefcase,
+  PieChart,
+  Megaphone,
+  Users,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -28,13 +35,25 @@ const memberLinks = [
 ];
 
 const adminLinks = [
-  { name: "Admin Overview", href: "/admin", icon: Shield },
+  { name: "Overview", href: "/admin", icon: Shield },
+  { name: "Offers", href: "/admin/offers", icon: Megaphone },
+  { name: "Categories", href: "/admin/categories", icon: Tags },
+  { name: "Income", href: "/admin/income", icon: TrendingUp },
+  { name: "Projects", href: "/admin/projects", icon: Briefcase },
+  { name: "Allocations", href: "/admin/allocations", icon: PieChart },
+  { name: "Users", href: "/admin/users", icon: Users },
+  { name: "Rewards", href: "/admin/rewards", icon: Coins },
 ];
 
 export function DashboardSidebar({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
+
+  const isActive = (href: string) =>
+    href === "/dashboard" || href === "/admin"
+      ? pathname === href
+      : pathname.startsWith(href);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -59,7 +78,7 @@ export function DashboardSidebar({ isAdmin }: { isAdmin: boolean }) {
             href={link.href}
             className={cn(
               "flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-              pathname === link.href
+              isActive(link.href)
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
@@ -80,7 +99,7 @@ export function DashboardSidebar({ isAdmin }: { isAdmin: boolean }) {
                 href={link.href}
                 className={cn(
                   "flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                  pathname === link.href
+                  isActive(link.href)
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}

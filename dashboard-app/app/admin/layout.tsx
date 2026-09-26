@@ -22,12 +22,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <DashboardSidebar isAdmin />
       <main className="flex-1 min-w-0">
         <div className="lg:hidden h-16 border-b border-border flex items-center px-4">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">Bx</span>
-            </div>
-            <span className="font-bold text-lg text-white">bitXbit Admin</span>
-          </div>
+          <span className="font-bold text-lg text-white">bitXbit Admin</span>
         </div>
         {children}
       </main>
