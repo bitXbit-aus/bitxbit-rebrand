@@ -390,6 +390,35 @@ export async function getAirdropWalletBalanceAction() {
   return getAirdropWalletBalance();
 }
 
+export async function sendTestAirdrop(formData: FormData) {
+  const walletAddress = formData.get("walletAddress") as string;
+  if (!walletAddress) {
+    throw new Error("Wallet address is required");
+  }
+
+  const TEST_AMOUNT = 0.001;
+  const balance = await getAirdropWalletBalance();
+
+  if (balance.token < TEST_AMOUNT) {
+    throw new Error(`Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, needed: ${TEST_AMOUNT}`);
+  }
+
+  if (balance.sol < 0.005) {
+    throw new Error(`Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL`);
+  }
+
+  const results = await distributeTokens([
+    { userId: "test", walletAddress, amount: TEST_AMOUNT },
+  ]);
+
+  const result = results[0];
+  if (!result.txHash) {
+    throw new Error(result.error ?? "Test airdrop failed");
+  }
+
+  revalidatePath("/admin/rewards");
+}
+
 export async function airdropRewards(periodId: string) {
   const supabase = createClient();
 

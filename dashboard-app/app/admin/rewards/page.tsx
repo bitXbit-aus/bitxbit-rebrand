@@ -9,6 +9,7 @@ import {
   distributeRewardsWithTx,
   getAirdropWalletBalanceAction,
   airdropRewards,
+  sendTestAirdrop,
 } from "@/lib/actions";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
@@ -85,7 +86,7 @@ export default async function AdminRewardsPage() {
             <CardDescription>Balance available for token distributions.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="p-3 rounded-lg bg-muted">
                 <div className="text-xs text-muted-foreground">bitxbit Balance</div>
                 <div className="font-semibold">{airdropBalance.token.toFixed(4)}</div>
@@ -95,6 +96,15 @@ export default async function AdminRewardsPage() {
                 <div className="font-semibold">{airdropBalance.sol.toFixed(4)}</div>
               </div>
             </div>
+            <form action={sendTestAirdrop} className="flex flex-col sm:flex-row gap-2">
+              <input
+                name="walletAddress"
+                placeholder="Test wallet address"
+                className="input flex-1 text-sm"
+                required
+              />
+              <Button type="submit" size="sm" variant="outline">Send 0.001 Test</Button>
+            </form>
           </CardContent>
         </Card>
       </div>
