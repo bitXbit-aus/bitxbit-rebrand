@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency, formatNumber } from "@/lib/utils";
-import { Activity, DollarSign, Users, Wallet } from "lucide-react";
+import { formatCurrency, formatDate, formatNumber } from "@/lib/utils";
+import { Activity, DollarSign, Gift, Wallet } from "lucide-react";
+import Link from "next/link";
 
 export default async function DashboardPage() {
   const supabase = createClient();
@@ -17,6 +18,27 @@ export default async function DashboardPage() {
     .from("user_rewards")
     .select("estimated_aud_value, status")
     .eq("user_id", user?.id);
+
+  const { data: recentActivities } = await supabase
+    .from("user_activities")
+    .select(`
+      *,
+      offer:affiliate_offers(name)
+    `)
+    .eq("user_id", user?.id)
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  const { data: featuredOffers } = await supabase
+    .from("affiliate_offers")
+    .select(`
+      *,
+      category:categories(name)
+    `)
+    .eq("active", true)
+    .eq("reward_eligible", true)
+    .order("display_order", { ascending: true })
+    .limit(3);
 
   const totalActivities = activities?.length ?? 0;
   const pendingRewards = rewards?.filter((r) => r.status === "pending").length ?? 0;
@@ -47,6 +69,81 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Featured Opportunities</CardTitle>
+            <CardDescription>Reward-eligible referral links hand-picked for you.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {featuredOffers && featuredOffers.length > 0 ? (
+              <div className="space-y-3">
+                {featuredOffers.map((offer) => (
+                  <Link
+                    key={offer.id}
+                    href={`/dashboard/offers#${offer.category?.name.toLowerCase().replace(/\s+/g, "-") ?? "all"}`}
+                    className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted transition-colors"
+                  >
+                    <div>
+                      <p className="font-medium text-sm">{offer.name}</p>
+                      <p className="text-xs text-muted-foreground">{offer.category?.name ?? "Offer"}</p>
+                    </div>
+                    <Gift className="h-4 w-4 text-muted-foreground" />
+                  </Link>
+                ))}
+                <Link
+                  href="/dashboard/offers"
+                  className="inline-flex items-center text-sm text-primary hover:underline pt-2"
+                >
+                  Browse all offers →
+                </Link>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No offers available yet.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Activity</CardTitle>
+            <CardDescription>Your latest referral link clicks.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {recentActivities && recentActivities.length > 0 ? (
+              <div className="space-y-3">
+                {recentActivities.map((activity) => (
+                  <div
+                    key={activity.id}
+                    className="flex items-center justify-between py-2 border-b border-border last:border-0"
+                  >
+                    <div>
+                      <p className="text-sm font-medium capitalize">{activity.activity_type}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {activity.offer?.name ?? "Direct"}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(activity.created_at)}
+                    </span>
+                  </div>
+                ))}
+                <Link
+                  href="/dashboard/activity"
+                  className="inline-flex items-center text-sm text-primary hover:underline pt-2"
+                >
+                  View all activity →
+                </Link>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No activity yet. Visit an offer to start tracking.
+              </p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -80,20 +177,32 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Latest Opportunities</CardTitle>
-            <CardDescription>New referral links added recently.</CardDescription>
+            <CardTitle>Next Steps</CardTitle>
+            <CardDescription>Get the most out of bitXbit.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Visit the Referrals page on the marketing site to explore all available opportunities.</p>
-              <a
-                href="https://bitxbit.com.au/referrals"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center text-sm text-primary hover:underline"
+              <Link
+                href="/dashboard/offers"
+                className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted transition-colors"
               >
-                Explore Referrals →
-              </a>
+                <span className="text-sm font-medium">Explore referral offers</span>
+                <span className="text-primary text-sm">→</span>
+              </Link>
+              <Link
+                href="/dashboard/wallet"
+                className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted transition-colors"
+              >
+                <span className="text-sm font-medium">Connect your Solana wallet</span>
+                <span className="text-primary text-sm">→</span>
+              </Link>
+              <Link
+                href="/dashboard/transparency"
+                className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted transition-colors"
+              >
+                <span className="text-sm font-medium">View transparency reports</span>
+                <span className="text-primary text-sm">→</span>
+              </Link>
             </div>
           </CardContent>
         </Card>

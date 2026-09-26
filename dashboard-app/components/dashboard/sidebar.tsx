@@ -12,16 +12,18 @@ import {
   FileText,
   LogOut,
   Shield,
+  Store,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
 const memberLinks = [
   { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Profile", href: "/dashboard/profile", icon: User },
+  { name: "Offers", href: "/dashboard/offers", icon: Store },
   { name: "Rewards", href: "/dashboard/rewards", icon: Gift },
   { name: "Activity", href: "/dashboard/activity", icon: Activity },
   { name: "Wallet", href: "/dashboard/wallet", icon: Wallet },
+  { name: "Profile", href: "/dashboard/profile", icon: User },
   { name: "Transparency", href: "/dashboard/transparency", icon: FileText },
 ];
 

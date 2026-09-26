@@ -129,3 +129,38 @@ export async function createTransparencyReport(formData: FormData) {
   if (error) throw error;
   revalidatePath("/admin/transparency-updates");
 }
+
+export async function trackOfferClick(offerId: string) {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("You must be signed in to track offer clicks.");
+  }
+
+  const { error } = await supabase.from("user_activities").insert({
+    user_id: user.id,
+    offer_id: offerId,
+    activity_type: "click",
+  });
+
+  if (error) throw error;
+}
+
+export async function saveWalletAddress(walletAddress: string) {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("You must be signed in to save a wallet address.");
+  }
+
+  const { error } = await supabase
+    .from("users")
+    .update({ wallet_address: walletAddress })
+    .eq("id", user.id);
+
+  if (error) throw error;
+  revalidatePath("/dashboard/wallet");
+  revalidatePath("/dashboard/profile");
+}
