@@ -124,11 +124,16 @@
         <p>Real numbers. Real flow. Updated regularly.</p>
         <p class="text-sm text-muted" style="margin-top: 0.5rem;">Token launched 17 Oct 2021</p>
       </div>
-      <div class="grid grid-4">
+      <div class="grid grid-5">
         <div class="stat-card reveal">
           <div class="stat-value" id="stat-price">—</div>
           <div class="stat-label">Token Price</div>
           <div class="stat-sublabel" id="stat-price-sublabel">USD per bitxbit</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="stat-market-cap">—</div>
+          <div class="stat-label">Market Cap</div>
+          <div class="stat-sublabel">Fully diluted valuation</div>
         </div>
         <div class="stat-card reveal">
           <div class="stat-value" id="stat-liquidity">—</div>
@@ -326,6 +331,11 @@
         return "$" + value.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       }
 
+      function formatCurrencyWhole(value) {
+        if (value === null || value === undefined || isNaN(value)) return "—";
+        return "$" + Math.round(value).toLocaleString("en-AU");
+      }
+
       function formatNumber(value) {
         if (value === null || value === undefined || isNaN(value)) return "—";
         return value.toLocaleString("en-AU");
@@ -339,6 +349,7 @@
 
           const priceEl = document.getElementById("stat-price");
           const priceSubEl = document.getElementById("stat-price-sublabel");
+          const marketCapEl = document.getElementById("stat-market-cap");
           const liquidityEl = document.getElementById("stat-liquidity");
           const holdersEl = document.getElementById("stat-holders");
 
@@ -353,7 +364,8 @@
               priceSubEl.textContent = "USD per bitxbit";
             }
           }
-          if (liquidityEl) liquidityEl.textContent = formatCurrency(data.liquidity);
+          if (marketCapEl) marketCapEl.textContent = formatCurrencyWhole(data.marketCap);
+          if (liquidityEl) liquidityEl.textContent = formatCurrencyWhole(data.liquidity);
           if (holdersEl) holdersEl.textContent = formatNumber(data.holders);
         } catch (err) {
           console.error("Failed to load token stats:", err);
