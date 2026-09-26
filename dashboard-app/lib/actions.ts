@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { distributeTokens, getAirdropWalletBalance, AirdropResult } from "@/lib/solana";
 
 export async function updateProfile(formData: FormData) {
   const supabase = createClient();
@@ -383,4 +384,54 @@ export async function saveWalletAddress(walletAddress: string) {
   if (error) throw error;
   revalidatePath("/dashboard/wallet");
   revalidatePath("/dashboard/profile");
+}
+
+export async function getAirdropWalletBalanceAction() {
+  return getAirdropWalletBalance();
+}
+
+export async function airdropRewards(periodId: string) {
+  const supabase = createClient();
+
+  const { data: rewards } = await supabase
+    .from("user_rewards")
+    .select("id, user_id, bitxbit_amount, users!inner(wallet_address)")
+    .eq("reward_period_id", periodId)
+    .eq("status", "approved");
+
+  const distributions = rewards
+    ?.map((r: any) => ({
+      userId: r.user_id,
+      walletAddress: r.users?.wallet_address,
+      amount: r.bitxbit_amount ?? 0,
+      rewardId: r.id,
+    }))
+    .filter((d) => d.walletAddress && d.amount > 0) ?? [];
+
+  if (distributions.length === 0) {
+    throw new Error("No approved rewards with wallet addresses found for this period.");
+  }
+
+  const results = await distributeTokens(distributions);
+
+  for (const result of results) {
+    if (result.txHash) {
+      await supabase
+        .from("user_rewards")
+        .update({
+          status: "distributed",
+          distribution_tx_hash: result.txHash,
+          distributed_at: new Date().toISOString(),
+        })
+        .eq("reward_period_id", periodId)
+        .eq("user_id", result.userId);
+    }
+  }
+
+  await supabase
+    .from("reward_periods")
+    .update({ status: "distributed" })
+    .eq("id", periodId);
+
+  revalidatePath("/admin/rewards");
 }

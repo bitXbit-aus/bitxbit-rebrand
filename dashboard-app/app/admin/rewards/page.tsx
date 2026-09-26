@@ -2,7 +2,14 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { createRewardPeriod, calculateRewards, approveRewards, distributeRewardsWithTx } from "@/lib/actions";
+import {
+  createRewardPeriod,
+  calculateRewards,
+  approveRewards,
+  distributeRewardsWithTx,
+  getAirdropWalletBalanceAction,
+  airdropRewards,
+} from "@/lib/actions";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export default async function AdminRewardsPage() {
@@ -27,6 +34,13 @@ export default async function AdminRewardsPage() {
     totalsByPeriod.set(r.reward_period_id, current);
   });
 
+  let airdropBalance = { sol: 0, token: 0 };
+  try {
+    airdropBalance = await getAirdropWalletBalanceAction();
+  } catch {
+    airdropBalance = { sol: 0, token: 0 };
+  }
+
   return (
     <div className="dashboard-container">
       <div className="mb-8">
@@ -34,37 +48,61 @@ export default async function AdminRewardsPage() {
         <p className="text-muted-foreground mt-1">Create periods, calculate rewards, approve and distribute.</p>
       </div>
 
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle>Create Reward Period</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form action={createRewardPeriod} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-            <div>
-              <label className="block text-sm font-medium mb-1">Start Date</label>
-              <input name="startDate" type="date" className="input w-full" required />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Create Reward Period</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form action={createRewardPeriod} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div>
+                <label className="block text-sm font-medium mb-1">Start Date</label>
+                <input name="startDate" type="date" className="input w-full" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">End Date</label>
+                <input name="endDate" type="date" className="input w-full" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Allocation Model</label>
+                <select name="allocationModelId" className="input w-full" required>
+                  <option value="">Select model</option>
+                  {models?.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-3">
+                <Button type="submit">Create Period</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Airdrop Wallet</CardTitle>
+            <CardDescription>Balance available for token distributions.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-3 rounded-lg bg-muted">
+                <div className="text-xs text-muted-foreground">bitxbit Balance</div>
+                <div className="font-semibold">{airdropBalance.token.toFixed(4)}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-muted">
+                <div className="text-xs text-muted-foreground">SOL Balance</div>
+                <div className="font-semibold">{airdropBalance.sol.toFixed(4)}</div>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">End Date</label>
-              <input name="endDate" type="date" className="input w-full" required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Allocation Model</label>
-              <select name="allocationModelId" className="input w-full" required>
-                <option value="">Select model</option>
-                {models?.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-            </div>
-            <Button type="submit">Create Period</Button>
-          </form>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="space-y-6 mb-8">
         {periods?.map((period) => {
           const totals = totalsByPeriod.get(period.id);
+          const canAirdrop = period.status === "approved" && (totals?.bitxbit ?? 0) > 0;
           return (
             <Card key={period.id}>
               <CardHeader>
@@ -105,14 +143,19 @@ export default async function AdminRewardsPage() {
                   <form action={approveRewards.bind(null, period.id)}>
                     <Button type="submit" size="sm" variant="outline">Approve</Button>
                   </form>
+                  {canAirdrop && (
+                    <form action={airdropRewards.bind(null, period.id)}>
+                      <Button type="submit" size="sm">Airdrop Tokens</Button>
+                    </form>
+                  )}
                   <form action={distributeRewardsWithTx.bind(null, period.id)} className="flex gap-2 items-end">
                     <input
                       name="txHash"
-                      placeholder="Solana tx signature"
-                      className="input text-sm w-64"
+                      placeholder="Manual tx signature"
+                      className="input text-sm w-48"
                       required
                     />
-                    <Button type="submit" size="sm">Mark Distributed</Button>
+                    <Button type="submit" size="sm" variant="outline">Mark Distributed</Button>
                   </form>
                 </div>
               </CardContent>
