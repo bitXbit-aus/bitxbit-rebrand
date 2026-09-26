@@ -30,10 +30,10 @@ export default async function AdminUsersPage() {
               <div key={user.id} className="p-4 rounded-lg border border-border bg-card/50">
                 <form action={updateUser.bind(null, user.id)}>
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                    <div className="md:col-span-3">
+                    <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-muted-foreground mb-1">Email</label>
                       <div className="text-sm font-medium truncate">{user.email}</div>
-                      <div className="text-xs text-muted-foreground">{user.id.slice(0, 8)}...</div>
+                      <div className="text-xs text-muted-foreground">{user.referral_code}</div>
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-muted-foreground mb-1">Display Name</label>
@@ -42,6 +42,12 @@ export default async function AdminUsersPage() {
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-muted-foreground mb-1">Wallet</label>
                       <input name="walletAddress" defaultValue={user.wallet_address ?? ""} className="input w-full" placeholder="Solana address" />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Referred By</label>
+                      <div className="text-sm text-muted-foreground truncate">
+                        {user.referred_by ? user.referred_by.slice(0, 8) + "..." : "—"}
+                      </div>
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-muted-foreground mb-1">Role</label>
@@ -57,7 +63,7 @@ export default async function AdminUsersPage() {
                         <option value="suspended">Suspended</option>
                       </select>
                     </div>
-                    <div className="md:col-span-1 flex justify-end">
+                    <div className="md:col-span-12 flex justify-end">
                       <Button type="submit" size="sm">Save</Button>
                     </div>
                   </div>

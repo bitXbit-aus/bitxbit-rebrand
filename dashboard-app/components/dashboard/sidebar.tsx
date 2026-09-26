@@ -28,6 +28,7 @@ const memberLinks = [
   { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { name: "Offers", href: "/dashboard/offers", icon: Store },
   { name: "Rewards", href: "/dashboard/rewards", icon: Gift },
+  { name: "Referrals", href: "/dashboard/referrals", icon: Users },
   { name: "Activity", href: "/dashboard/activity", icon: Activity },
   { name: "Wallet", href: "/dashboard/wallet", icon: Wallet },
   { name: "Profile", href: "/dashboard/profile", icon: User },
@@ -42,6 +43,7 @@ const adminLinks = [
   { name: "Projects", href: "/admin/projects", icon: Briefcase },
   { name: "Allocations", href: "/admin/allocations", icon: PieChart },
   { name: "Users", href: "/admin/users", icon: Users },
+  { name: "Referrals", href: "/admin/referrals", icon: TrendingUp },
   { name: "Rewards", href: "/admin/rewards", icon: Coins },
 ];
 

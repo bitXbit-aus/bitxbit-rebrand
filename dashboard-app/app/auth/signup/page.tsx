@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,28 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [referrerId, setReferrerId] = useState<string | null>(null);
+  const [referrerName, setReferrerName] = useState<string | null>(null);
   const supabase = createClient();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (!ref) return;
+
+    const lookupReferrer = async () => {
+      const { data } = await supabase
+        .from("users")
+        .select("id, display_name, referral_code")
+        .or(`referral_code.eq.${ref},id.eq.${ref}`)
+        .single();
+      if (data) {
+        setReferrerId(data.id);
+        setReferrerName(data.display_name ?? data.referral_code ?? "a member");
+      }
+    };
+    lookupReferrer();
+  }, [supabase]);
 
   const appUrl = typeof window !== "undefined"
     ? (process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin)
@@ -34,6 +55,9 @@ export default function SignupPage() {
       password,
       options: {
         emailRedirectTo: `${appUrl}/auth/callback`,
+        data: {
+          referred_by: referrerId,
+        },
       },
     });
 
@@ -52,10 +76,13 @@ export default function SignupPage() {
 
   const handleOAuth = async (provider: "google" | "github") => {
     setLoading(true);
+    const redirectTo = referrerId
+      ? `${appUrl}/auth/callback?ref=${referrerId}`
+      : `${appUrl}/auth/callback`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${appUrl}/auth/callback`,
+        redirectTo,
       },
     });
     setLoading(false);
@@ -70,6 +97,9 @@ export default function SignupPage() {
       <div className="text-center space-y-2">
         <h1 className="text-2xl font-bold text-white">Join bitXbit</h1>
         <p className="text-muted-foreground">Create an account to start participating.</p>
+        {referrerName && (
+          <p className="text-sm text-primary">Referred by {referrerName}</p>
+        )}
       </div>
 
       <form onSubmit={handleSignup} className="space-y-4">

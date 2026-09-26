@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS public.users (
   wallet_address TEXT,
   role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+  referral_code TEXT UNIQUE,
+  referred_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_login TIMESTAMPTZ,
   email_verified BOOLEAN NOT NULL DEFAULT FALSE
@@ -146,6 +148,7 @@ CREATE INDEX IF NOT EXISTS idx_user_activities_created_at ON public.user_activit
 CREATE INDEX IF NOT EXISTS idx_affiliate_income_date ON public.affiliate_income(date_received);
 CREATE INDEX IF NOT EXISTS idx_user_rewards_user_id ON public.user_rewards(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_rewards_period ON public.user_rewards(reward_period_id);
+CREATE INDEX IF NOT EXISTS idx_users_referred_by ON public.users(referred_by);
 
 -- ============================================
 -- ROW LEVEL SECURITY
@@ -276,11 +279,48 @@ END $$;
 -- FUNCTIONS & TRIGGERS
 -- ============================================
 
+CREATE OR REPLACE FUNCTION public.generate_referral_code(input_email TEXT)
+RETURNS TEXT AS $$
+DECLARE
+  base TEXT;
+  suffix TEXT;
+  candidate TEXT;
+  exists_check BOOLEAN;
+BEGIN
+  base := lower(split_part(input_email, '@', 1));
+  base := regexp_replace(base, '[^a-z0-9]', '', 'g');
+  base := left(base, 10);
+
+  LOOP
+    suffix := substr(md5(random()::text || clock_timestamp()::text), 1, 4);
+    candidate := base || '-' || suffix;
+    SELECT EXISTS (SELECT 1 FROM public.users WHERE referral_code = candidate) INTO exists_check;
+    EXIT WHEN NOT exists_check;
+  END LOOP;
+
+  RETURN candidate;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.users (id, email, display_name, email_verified)
-  VALUES (NEW.id, NEW.email, COALESCE(NEW.raw_user_meta_data->>'display_name', split_part(NEW.email, '@', 1)), NEW.email_confirmed_at IS NOT NULL);
+  INSERT INTO public.users (
+    id,
+    email,
+    display_name,
+    email_verified,
+    referral_code,
+    referred_by
+  )
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'display_name', split_part(NEW.email, '@', 1)),
+    NEW.email_confirmed_at IS NOT NULL,
+    public.generate_referral_code(NEW.email),
+    (NEW.raw_user_meta_data->>'referred_by')::UUID
+  );
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

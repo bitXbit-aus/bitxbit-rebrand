@@ -190,13 +190,36 @@ export async function calculateRewards(periodId: string) {
     .gte("created_at", `${period.start_date}T00:00:00Z`)
     .lte("created_at", `${period.end_date}T23:59:59Z`);
 
-  const pointsByUser = new Map<string, number>();
-  let totalPoints = 0;
+  const { data: users } = await supabase
+    .from("users")
+    .select("id, referred_by");
+
+  const directPointsByUser = new Map<string, number>();
   activities?.forEach((a) => {
     const points = ACTIVITY_POINTS[a.activity_type] ?? 1;
-    const current = pointsByUser.get(a.user_id) || 0;
-    pointsByUser.set(a.user_id, current + points);
-    totalPoints += points;
+    const current = directPointsByUser.get(a.user_id) || 0;
+    directPointsByUser.set(a.user_id, current + points);
+  });
+
+  const REFERRAL_BONUS_PCT = 5;
+  const pointsByUser = new Map<string, number>();
+  let totalPoints = 0;
+
+  users?.forEach((user) => {
+    let points = directPointsByUser.get(user.id) || 0;
+
+    // Add 5% of each referred user's direct points
+    users.forEach((potentialReferral) => {
+      if (potentialReferral.referred_by === user.id) {
+        const referralPoints = directPointsByUser.get(potentialReferral.id) || 0;
+        points += referralPoints * (REFERRAL_BONUS_PCT / 100);
+      }
+    });
+
+    if (points > 0) {
+      pointsByUser.set(user.id, points);
+      totalPoints += points;
+    }
   });
 
   if (totalPoints === 0 || communityPool === 0) {

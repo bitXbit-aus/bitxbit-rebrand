@@ -59,6 +59,7 @@ export default async function AdminOverviewPage() {
                 { name: "Income", href: "/admin/income" },
                 { name: "Rewards", href: "/admin/rewards" },
                 { name: "Users", href: "/admin/users" },
+                { name: "Referrals", href: "/admin/referrals" },
                 { name: "Projects", href: "/admin/projects" },
                 { name: "Reports", href: "/admin/reports" },
                 { name: "Transparency", href: "/admin/transparency-updates" },

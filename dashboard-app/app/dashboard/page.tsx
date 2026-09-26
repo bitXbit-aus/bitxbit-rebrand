@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/utils";
-import { Activity, DollarSign, Gift, Wallet } from "lucide-react";
+import { Activity, DollarSign, Gift, Users, Wallet } from "lucide-react";
 import Link from "next/link";
 
 export default async function DashboardPage() {
@@ -18,6 +18,11 @@ export default async function DashboardPage() {
     .from("user_rewards")
     .select("estimated_aud_value, status")
     .eq("user_id", user?.id);
+
+  const { data: referrals } = await supabase
+    .from("users")
+    .select("id")
+    .eq("referred_by", user?.id);
 
   const { data: recentActivities } = await supabase
     .from("user_activities")
@@ -53,6 +58,7 @@ export default async function DashboardPage() {
     { name: "Your Activities", value: totalActivities, icon: Activity, format: formatNumber },
     { name: "Pending Rewards", value: pendingRewards, icon: Wallet, format: formatNumber },
     { name: "Estimated Earnings", value: totalEarned, icon: DollarSign, format: formatCurrency },
+    { name: "Referrals", value: referrals?.length ?? 0, icon: Users, format: formatNumber },
   ];
 
   return (
@@ -62,7 +68,7 @@ export default async function DashboardPage() {
         <p className="text-muted-foreground mt-1">Overview of your participation in the bitXbit ecosystem.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {stats.map((stat) => (
           <Card key={stat.name}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

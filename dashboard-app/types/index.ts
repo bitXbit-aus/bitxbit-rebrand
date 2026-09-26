@@ -12,6 +12,8 @@ export interface User {
   wallet_address: string | null;
   role: UserRole;
   status: UserStatus;
+  referral_code: string | null;
+  referred_by: string | null;
   created_at: string;
   last_login: string | null;
   email_verified: boolean;
