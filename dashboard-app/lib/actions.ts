@@ -29,6 +29,8 @@ export async function createOffer(formData: FormData) {
     benefit_text: formData.get("benefitText") as string,
     reward_eligible: formData.get("rewardEligible") === "on",
     active: formData.get("active") === "on",
+    display_order: parseInt(formData.get("displayOrder") as string) || 0,
+    logo_url: (formData.get("logoUrl") as string) || null,
   });
   if (error) throw error;
   revalidatePath("/admin/offers");
@@ -46,6 +48,8 @@ export async function updateOffer(id: string, formData: FormData) {
       benefit_text: formData.get("benefitText") as string,
       reward_eligible: formData.get("rewardEligible") === "on",
       active: formData.get("active") === "on",
+      display_order: parseInt(formData.get("displayOrder") as string) || 0,
+      logo_url: (formData.get("logoUrl") as string) || null,
     })
     .eq("id", id);
   if (error) throw error;

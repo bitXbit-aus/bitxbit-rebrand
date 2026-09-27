@@ -1,12 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createOffer, updateOffer, deleteOffer } from "@/lib/actions";
 
 export default async function AdminOffersPage() {
   const supabase = createClient();
-  const { data: offers } = await supabase.from("affiliate_offers").select("*, category:categories(name)").order("display_order");
+  const { data: offers } = await supabase
+    .from("affiliate_offers")
+    .select("*, category:categories(name)")
+    .order("display_order")
+    .order("created_at", { ascending: false });
   const { data: categories } = await supabase.from("categories").select("id, name").order("display_order");
 
   return (
@@ -34,9 +39,11 @@ export default async function AdminOffersPage() {
               ))}
             </select>
             <input name="referralUrl" placeholder="Referral URL" className="input" required />
-            <input name="description" placeholder="Description" className="input" />
+            <input name="logoUrl" placeholder="Logo URL (optional)" className="input" />
             <input name="benefitText" placeholder="Benefit text" className="input" />
-            <div className="flex items-center gap-6">
+            <input name="displayOrder" type="number" placeholder="Display order" className="input" defaultValue="0" />
+            <input name="description" placeholder="Description" className="input md:col-span-2" />
+            <div className="flex items-center gap-6 md:col-span-2">
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" name="rewardEligible" defaultChecked />
                 Reward eligible
@@ -59,63 +66,84 @@ export default async function AdminOffersPage() {
           <CardDescription>{offers?.length ?? 0} offers in the system.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {offers?.map((offer) => (
-              <div key={offer.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 rounded-lg border border-border bg-card/50 items-end">
-                <FormWithToast
-                  action={updateOffer.bind(null, offer.id)}
-                  successMessage="Offer updated"
-                  className="contents"
-                >
-                  <div className="md:col-span-3">
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
-                    <input name="name" defaultValue={offer.name} className="input w-full" required />
+              <Card key={offer.id} className="border-border bg-card/50">
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-4">
+                    <CardTitle className="text-lg">{offer.name}</CardTitle>
+                    <div className="flex items-center gap-2">
+                      {offer.reward_eligible && <Badge variant="outline">Reward</Badge>}
+                      <Badge variant={offer.active ? "default" : "secondary"}>{offer.active ? "Active" : "Inactive"}</Badge>
+                    </div>
                   </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">Category</label>
-                    <select name="categoryId" defaultValue={offer.category_id ?? ""} className="input w-full">
-                      <option value="">None</option>
-                      {categories?.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="md:col-span-4">
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">Referral URL</label>
-                    <input name="referralUrl" defaultValue={offer.referral_url} className="input w-full" required />
-                  </div>
-                  <div className="md:col-span-3 flex items-center gap-4 pb-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" name="rewardEligible" defaultChecked={offer.reward_eligible} />
-                      Reward
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" name="active" defaultChecked={offer.active} />
-                      Active
-                    </label>
-                  </div>
-                  <div className="md:col-span-6">
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
-                    <input name="description" defaultValue={offer.description ?? ""} className="input w-full" />
-                  </div>
-                  <div className="md:col-span-4">
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">Benefit text</label>
-                    <input name="benefitText" defaultValue={offer.benefit_text ?? ""} className="input w-full" />
-                  </div>
-                  <div className="md:col-span-2 flex justify-end">
-                    <Button type="submit" size="sm">Save</Button>
-                  </div>
-                </FormWithToast>
-                <div className="md:col-span-12 flex justify-end border-t border-border pt-3">
+                </CardHeader>
+                <CardContent>
                   <FormWithToast
-                    action={deleteOffer.bind(null, offer.id)}
-                    successMessage="Offer deleted"
-                    errorMessage="Could not delete offer"
+                    action={updateOffer.bind(null, offer.id)}
+                    successMessage="Offer updated"
+                    className="space-y-4"
                   >
-                    <Button variant="destructive" size="sm" type="submit">Delete Offer</Button>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Name</label>
+                        <input name="name" defaultValue={offer.name} className="input w-full" required />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Category</label>
+                        <select name="categoryId" defaultValue={offer.category_id ?? ""} className="input w-full">
+                          <option value="">None</option>
+                          {categories?.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-xs text-muted-foreground">Referral URL</label>
+                        <input name="referralUrl" defaultValue={offer.referral_url} className="input w-full" required />
+                      </div>
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-xs text-muted-foreground">Logo URL</label>
+                        <input name="logoUrl" defaultValue={offer.logo_url ?? ""} className="input w-full" />
+                      </div>
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-xs text-muted-foreground">Description</label>
+                        <input name="description" defaultValue={offer.description ?? ""} className="input w-full" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Benefit text</label>
+                        <input name="benefitText" defaultValue={offer.benefit_text ?? ""} className="input w-full" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Display order</label>
+                        <input name="displayOrder" type="number" defaultValue={offer.display_order} className="input w-full" />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-6">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="rewardEligible" defaultChecked={offer.reward_eligible} />
+                        Reward eligible
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="active" defaultChecked={offer.active} />
+                        Active
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-4 border-t border-border">
+                      <Button type="submit" size="sm">Save Changes</Button>
+                      <FormWithToast
+                        action={deleteOffer.bind(null, offer.id)}
+                        successMessage="Offer deleted"
+                        errorMessage="Could not delete offer"
+                      >
+                        <Button variant="destructive" size="sm" type="submit">Delete</Button>
+                      </FormWithToast>
+                    </div>
                   </FormWithToast>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         </CardContent>
