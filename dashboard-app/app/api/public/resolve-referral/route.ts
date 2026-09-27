@@ -15,12 +15,21 @@ export async function GET(request: Request) {
   }
 
   const supabase = createServiceClient();
+  const normalizedCode = code.trim().toLowerCase();
 
-  const { data, error } = await supabase
-    .from("users")
-    .select("id, display_name, referral_code")
-    .or(`referral_code.eq.${code},id.eq.${code}`)
-    .single();
+  // Referral codes are stored in lowercase. Only fall back to id lookup for UUID-shaped refs
+  // so we don't compare a UUID column to non-UUID text (which causes PostgREST to error).
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalizedCode);
+
+  let query = supabase.from("users").select("id, display_name, referral_code");
+
+  if (isUuid) {
+    query = query.or(`referral_code.eq.${normalizedCode},id.eq.${normalizedCode}`);
+  } else {
+    query = query.eq("referral_code", normalizedCode);
+  }
+
+  const { data, error } = await query.single();
 
   if (error || !data) {
     return NextResponse.json(
