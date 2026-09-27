@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createOffer, updateOffer, deleteOffer } from "@/lib/actions";
 
 export default async function AdminOffersPage() {
@@ -20,7 +21,11 @@ export default async function AdminOffersPage() {
           <CardTitle>Add New Offer</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={createOffer} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormWithToast
+            action={createOffer}
+            successMessage="Offer created"
+            className="grid grid-cols-1 md:grid-cols-2 gap-4"
+          >
             <input name="name" placeholder="Offer name" className="input" required />
             <select name="categoryId" className="input">
               <option value="">No category</option>
@@ -44,7 +49,7 @@ export default async function AdminOffersPage() {
             <div className="md:col-span-2">
               <Button type="submit">Create Offer</Button>
             </div>
-          </form>
+          </FormWithToast>
         </CardContent>
       </Card>
 
@@ -57,7 +62,11 @@ export default async function AdminOffersPage() {
           <div className="space-y-4">
             {offers?.map((offer) => (
               <div key={offer.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 rounded-lg border border-border bg-card/50 items-end">
-                <form action={updateOffer.bind(null, offer.id)} className="contents">
+                <FormWithToast
+                  action={updateOffer.bind(null, offer.id)}
+                  successMessage="Offer updated"
+                  className="contents"
+                >
                   <div className="md:col-span-3">
                     <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
                     <input name="name" defaultValue={offer.name} className="input w-full" required />
@@ -96,11 +105,15 @@ export default async function AdminOffersPage() {
                   <div className="md:col-span-2 flex justify-end">
                     <Button type="submit" size="sm">Save</Button>
                   </div>
-                </form>
+                </FormWithToast>
                 <div className="md:col-span-12 flex justify-end border-t border-border pt-3">
-                  <form action={deleteOffer.bind(null, offer.id)}>
+                  <FormWithToast
+                    action={deleteOffer.bind(null, offer.id)}
+                    successMessage="Offer deleted"
+                    errorMessage="Could not delete offer"
+                  >
                     <Button variant="destructive" size="sm" type="submit">Delete Offer</Button>
-                  </form>
+                  </FormWithToast>
                 </div>
               </div>
             ))}

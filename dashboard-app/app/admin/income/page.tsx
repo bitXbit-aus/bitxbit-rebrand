@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createIncome, updateIncome, deleteIncome } from "@/lib/actions";
 
 export default async function AdminIncomePage() {
@@ -23,7 +24,11 @@ export default async function AdminIncomePage() {
           <CardTitle>Record Income</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={createIncome} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <FormWithToast
+            action={createIncome}
+            successMessage="Income recorded"
+            className="grid grid-cols-1 md:grid-cols-3 gap-4"
+          >
             <input name="source" placeholder="Source (e.g. Exchange)" className="input" required />
             <select name="offerId" className="input">
               <option value="">No linked offer</option>
@@ -38,7 +43,7 @@ export default async function AdminIncomePage() {
             <div className="md:col-span-3">
               <Button type="submit">Record Income</Button>
             </div>
-          </form>
+          </FormWithToast>
         </CardContent>
       </Card>
 
@@ -50,7 +55,10 @@ export default async function AdminIncomePage() {
           <div className="space-y-4">
             {income?.map((item) => (
               <div key={item.id} className="p-4 rounded-lg border border-border bg-card/50">
-                <form action={updateIncome.bind(null, item.id)}>
+                <FormWithToast
+                  action={updateIncome.bind(null, item.id)}
+                  successMessage="Income updated"
+                >
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-muted-foreground mb-1">Source</label>
@@ -85,11 +93,15 @@ export default async function AdminIncomePage() {
                       <Button type="submit" size="sm">Save Changes</Button>
                     </div>
                   </div>
-                </form>
+                </FormWithToast>
                 <div className="flex justify-end mt-2">
-                  <form action={deleteIncome.bind(null, item.id)}>
+                  <FormWithToast
+                    action={deleteIncome.bind(null, item.id)}
+                    successMessage="Income deleted"
+                    errorMessage="Could not delete income"
+                  >
                     <Button variant="destructive" size="sm" type="submit">Delete Income</Button>
-                  </form>
+                  </FormWithToast>
                 </div>
               </div>
             ))}

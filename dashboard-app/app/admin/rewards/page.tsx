@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import {
   createRewardPeriod,
   calculateRewards,
@@ -55,7 +56,11 @@ export default async function AdminRewardsPage() {
             <CardTitle>Create Reward Period</CardTitle>
           </CardHeader>
           <CardContent>
-            <form action={createRewardPeriod} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <FormWithToast
+              action={createRewardPeriod}
+              successMessage="Reward period created"
+              className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end"
+            >
               <div>
                 <label className="block text-sm font-medium mb-1">Start Date</label>
                 <input name="startDate" type="date" className="input w-full" required />
@@ -76,7 +81,7 @@ export default async function AdminRewardsPage() {
               <div className="md:col-span-3">
                 <Button type="submit">Create Period</Button>
               </div>
-            </form>
+            </FormWithToast>
           </CardContent>
         </Card>
 
@@ -96,7 +101,12 @@ export default async function AdminRewardsPage() {
                 <div className="font-semibold">{airdropBalance.sol.toFixed(4)}</div>
               </div>
             </div>
-            <form action={sendTestAirdrop} className="flex flex-col sm:flex-row gap-2">
+            <FormWithToast
+              action={sendTestAirdrop}
+              successMessage="Test airdrop sent"
+              errorMessage="Test airdrop failed"
+              className="flex flex-col sm:flex-row gap-2"
+            >
               <input
                 name="walletAddress"
                 placeholder="Test wallet address"
@@ -104,7 +114,7 @@ export default async function AdminRewardsPage() {
                 required
               />
               <Button type="submit" size="sm" variant="outline">Send 0.001 Test</Button>
-            </form>
+            </FormWithToast>
           </CardContent>
         </Card>
       </div>
@@ -152,20 +162,37 @@ export default async function AdminRewardsPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2 items-end">
-                  <form action={calculateRewards.bind(null, period.id)}>
+                  <FormWithToast
+                    action={calculateRewards.bind(null, period.id)}
+                    successMessage="Rewards calculated"
+                    errorMessage="Reward calculation failed"
+                  >
                     <Button type="submit" size="sm" variant="outline">Calculate</Button>
-                  </form>
-                  <form action={approveRewards.bind(null, period.id)}>
+                  </FormWithToast>
+                  <FormWithToast
+                    action={approveRewards.bind(null, period.id)}
+                    successMessage="Rewards approved"
+                    errorMessage="Could not approve rewards"
+                  >
                     <Button type="submit" size="sm" variant="outline">Approve</Button>
-                  </form>
+                  </FormWithToast>
                   {canAirdrop && (
-                    <form action={airdropRewards.bind(null, period.id)}>
+                    <FormWithToast
+                      action={airdropRewards.bind(null, period.id)}
+                      successMessage="Airdrop complete"
+                      errorMessage="Airdrop failed"
+                    >
                       <Button type="submit" size="sm" disabled={!canRunAirdrop}>
                         Airdrop Tokens
                       </Button>
-                    </form>
+                    </FormWithToast>
                   )}
-                  <form action={distributeRewardsWithTx.bind(null, period.id)} className="flex gap-2 items-end">
+                  <FormWithToast
+                    action={distributeRewardsWithTx.bind(null, period.id)}
+                    successMessage="Marked as distributed"
+                    errorMessage="Could not mark distributed"
+                    className="flex gap-2 items-end"
+                  >
                     <input
                       name="txHash"
                       placeholder="Manual tx signature"
@@ -173,7 +200,7 @@ export default async function AdminRewardsPage() {
                       required
                     />
                     <Button type="submit" size="sm" variant="outline">Mark Distributed</Button>
-                  </form>
+                  </FormWithToast>
                 </div>
                 {canAirdrop && !canRunAirdrop && (
                   <div className="mt-3 text-xs text-amber-400">

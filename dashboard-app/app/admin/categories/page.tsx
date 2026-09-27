@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createCategory, updateCategory, deleteCategory } from "@/lib/actions";
 
 export default async function AdminCategoriesPage() {
@@ -19,7 +20,11 @@ export default async function AdminCategoriesPage() {
           <CardTitle>Add Category</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={createCategory} className="flex gap-4 items-end">
+          <FormWithToast
+            action={createCategory}
+            successMessage="Category created"
+            className="flex gap-4 items-end"
+          >
             <div className="flex-1">
               <label className="block text-sm font-medium mb-1">Name</label>
               <input name="name" className="input w-full" placeholder="Category name" required />
@@ -33,7 +38,7 @@ export default async function AdminCategoriesPage() {
               <input name="displayOrder" type="number" defaultValue={0} className="input w-full" />
             </div>
             <Button type="submit">Add</Button>
-          </form>
+          </FormWithToast>
         </CardContent>
       </Card>
 
@@ -45,7 +50,11 @@ export default async function AdminCategoriesPage() {
           <div className="space-y-4">
             {categories?.map((cat) => (
               <div key={cat.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 rounded-lg border border-border bg-card/50 items-end">
-                <form action={updateCategory.bind(null, cat.id)} className="contents">
+                <FormWithToast
+                  action={updateCategory.bind(null, cat.id)}
+                  successMessage="Category updated"
+                  className="contents"
+                >
                   <div className="md:col-span-3">
                     <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
                     <input name="name" defaultValue={cat.name} className="input w-full" required />
@@ -67,11 +76,15 @@ export default async function AdminCategoriesPage() {
                   <div className="md:col-span-2 flex justify-end gap-2">
                     <Button type="submit" size="sm">Save</Button>
                   </div>
-                </form>
+                </FormWithToast>
                 <div className="md:col-span-12 flex justify-end border-t border-border pt-3">
-                  <form action={deleteCategory.bind(null, cat.id)}>
+                  <FormWithToast
+                    action={deleteCategory.bind(null, cat.id)}
+                    successMessage="Category deleted"
+                    errorMessage="Could not delete category"
+                  >
                     <Button variant="destructive" size="sm" type="submit">Delete Category</Button>
-                  </form>
+                  </FormWithToast>
                 </div>
               </div>
             ))}

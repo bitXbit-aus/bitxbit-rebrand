@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { updateUser } from "@/lib/actions";
 import { formatDate, truncateAddress } from "@/lib/utils";
 
@@ -28,7 +29,10 @@ export default async function AdminUsersPage() {
           <div className="space-y-4">
             {users?.map((user) => (
               <div key={user.id} className="p-4 rounded-lg border border-border bg-card/50">
-                <form action={updateUser.bind(null, user.id)}>
+                <FormWithToast
+                  action={updateUser.bind(null, user.id)}
+                  successMessage="User updated"
+                >
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-muted-foreground mb-1">Email</label>
@@ -67,7 +71,7 @@ export default async function AdminUsersPage() {
                       <Button type="submit" size="sm">Save</Button>
                     </div>
                   </div>
-                </form>
+                </FormWithToast>
                 <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
                   <Badge variant={user.role === "admin" ? "default" : "outline"}>{user.role}</Badge>
                   <Badge variant={user.status === "active" ? "default" : "secondary"}>{user.status}</Badge>

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { updateProfile } from "@/lib/actions";
+import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { formatDate } from "@/lib/utils";
 
 export default async function ProfilePage() {
@@ -49,7 +50,11 @@ export default async function ProfilePage() {
             <CardDescription>Change your display name and wallet address.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form action={updateProfile} className="space-y-4">
+            <FormWithToast
+              action={updateProfile}
+              successMessage="Profile updated successfully"
+              className="space-y-4"
+            >
               <input type="hidden" name="userId" value={profile?.id} />
               <div className="space-y-2">
                 <Label htmlFor="displayName">Display Name</Label>
@@ -61,7 +66,7 @@ export default async function ProfilePage() {
                 <p className="text-xs text-muted-foreground">Used for bitxbit token reward distribution.</p>
               </div>
               <Button type="submit">Save Changes</Button>
-            </form>
+            </FormWithToast>
           </CardContent>
         </Card>
       </div>

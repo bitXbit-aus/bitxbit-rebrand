@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createTransparencyReport, publishTransparencyReport, unpublishTransparencyReport } from "@/lib/actions";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
@@ -25,7 +26,11 @@ export default async function AdminTransparencyPage() {
           <CardTitle>Publish Report</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={createTransparencyReport} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <FormWithToast
+            action={createTransparencyReport}
+            successMessage="Transparency report published"
+            className="grid grid-cols-1 md:grid-cols-3 gap-4"
+          >
             <input name="reportMonth" placeholder="Month (e.g. January)" className="input" required />
             <input name="reportYear" type="number" placeholder="Year" className="input" required />
             <input name="totalIncome" type="number" step="0.01" placeholder="Total Income (AUD)" className="input" />
@@ -33,7 +38,7 @@ export default async function AdminTransparencyPage() {
             <div className="md:col-span-3">
               <Button type="submit">Publish Report</Button>
             </div>
-          </form>
+          </FormWithToast>
         </CardContent>
       </Card>
 
@@ -61,13 +66,19 @@ export default async function AdminTransparencyPage() {
                 <p className="text-sm text-muted-foreground mb-4">{report.summary_text}</p>
                 <div className="flex gap-2">
                   {report.published_at ? (
-                    <form action={unpublishTransparencyReport.bind(null, report.id)}>
+                    <FormWithToast
+                      action={unpublishTransparencyReport.bind(null, report.id)}
+                      successMessage="Report unpublished"
+                    >
                       <Button type="submit" size="sm" variant="outline">Unpublish</Button>
-                    </form>
+                    </FormWithToast>
                   ) : (
-                    <form action={publishTransparencyReport.bind(null, report.id)}>
+                    <FormWithToast
+                      action={publishTransparencyReport.bind(null, report.id)}
+                      successMessage="Report published"
+                    >
                       <Button type="submit" size="sm">Publish</Button>
-                    </form>
+                    </FormWithToast>
                   )}
                 </div>
               </div>

@@ -3,8 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Clock, Coins, DollarSign, Download, Wallet } from "lucide-react";
+import { Clock, Coins, DollarSign, Wallet } from "lucide-react";
 import Link from "next/link";
+import { RewardsExportButton } from "@/components/dashboard/rewards-export-button";
 import { RewardsPageChart } from "./rewards-page-chart";
 
 export default async function RewardsPage() {
@@ -83,11 +84,7 @@ export default async function RewardsPage() {
             <CardTitle>Reward History</CardTitle>
             <CardDescription>All reward allocations across periods.</CardDescription>
           </div>
-          {rewards && rewards.length > 0 && (
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/dashboard/rewards">Export CSV</Link>
-            </Button>
-          )}
+          <RewardsExportButton rewards={rewards ?? []} />
         </CardHeader>
         <CardContent>
           {rewards && rewards.length > 0 ? (

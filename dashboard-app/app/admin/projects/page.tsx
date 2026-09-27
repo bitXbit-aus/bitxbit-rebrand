@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createProject } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
 
@@ -22,7 +23,11 @@ export default async function AdminProjectsPage() {
           <CardTitle>Add Project</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={createProject} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormWithToast
+            action={createProject}
+            successMessage="Project created"
+            className="grid grid-cols-1 md:grid-cols-2 gap-4"
+          >
             <input name="name" placeholder="Project name" className="input" required />
             <select name="status" className="input">
               <option value="planning">Planning</option>
@@ -36,7 +41,7 @@ export default async function AdminProjectsPage() {
             <div className="md:col-span-2">
               <Button type="submit">Create Project</Button>
             </div>
-          </form>
+          </FormWithToast>
         </CardContent>
       </Card>
 
