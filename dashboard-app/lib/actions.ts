@@ -350,11 +350,39 @@ export async function deleteProject(id: string) {
 export async function createTransparencyReport(formData: FormData) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
+
+  const totalIncome = parseFloat(formData.get("totalIncome") as string) || 0;
+  const communityRewardsPct = parseFloat(formData.get("communityRewardsPct") as string) || 0;
+  const liquidityPct = parseFloat(formData.get("liquidityPct") as string) || 0;
+  const buybacksPct = parseFloat(formData.get("buybacksPct") as string) || 0;
+  const projectsPct = parseFloat(formData.get("projectsPct") as string) || 0;
+  const operationsPct = parseFloat(formData.get("operationsPct") as string) || 0;
+
+  const allocationSnapshot = {
+    community_rewards_pct: communityRewardsPct,
+    liquidity_pct: liquidityPct,
+    buybacks_pct: buybacksPct,
+    projects_pct: projectsPct,
+    operations_pct: operationsPct,
+    community_rewards_aud: Number(((totalIncome * communityRewardsPct) / 100).toFixed(2)),
+    liquidity_aud: Number(((totalIncome * liquidityPct) / 100).toFixed(2)),
+    buybacks_aud: Number(((totalIncome * buybacksPct) / 100).toFixed(2)),
+    projects_aud: Number(((totalIncome * projectsPct) / 100).toFixed(2)),
+    operations_aud: Number(((totalIncome * operationsPct) / 100).toFixed(2)),
+  };
+
+  const proofUrls = (formData.get("proofUrls") as string)
+    ?.split("\n")
+    .map((url) => url.trim())
+    .filter(Boolean) ?? [];
+
   const { error } = await supabase.from("transparency_reports").insert({
     report_month: formData.get("reportMonth") as string,
     report_year: parseInt(formData.get("reportYear") as string),
-    total_income: parseFloat(formData.get("totalIncome") as string) || null,
+    total_income: totalIncome || null,
+    allocation_snapshot: allocationSnapshot,
     summary_text: formData.get("summaryText") as string,
+    proof_urls: proofUrls,
     published_by: user?.id,
     published_at: new Date().toISOString(),
   });

@@ -14,11 +14,27 @@ export default async function AdminTransparencyPage() {
     .order("report_year", { ascending: false })
     .order("report_month", { ascending: false });
 
+  const { data: activeModel } = await supabase
+    .from("allocation_models")
+    .select("*")
+    .eq("is_active", true)
+    .order("effective_date", { ascending: false })
+    .limit(1)
+    .single();
+
+  const defaultPct = {
+    community_rewards_pct: activeModel?.community_rewards_pct ?? 40,
+    liquidity_pct: activeModel?.liquidity_pct ?? 25,
+    buybacks_pct: activeModel?.buybacks_pct ?? 15,
+    projects_pct: activeModel?.projects_pct ?? 10,
+    operations_pct: activeModel?.operations_pct ?? 10,
+  };
+
   return (
     <div className="dashboard-container">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Transparency Updates</h1>
-        <p className="text-muted-foreground mt-1">Publish monthly transparency reports.</p>
+        <p className="text-muted-foreground mt-1">Publish monthly transparency reports with income and allocation breakdown.</p>
       </div>
 
       <Card className="mb-8">
@@ -33,8 +49,41 @@ export default async function AdminTransparencyPage() {
           >
             <input name="reportMonth" placeholder="Month (e.g. January)" className="input" required />
             <input name="reportYear" type="number" placeholder="Year" className="input" required />
-            <input name="totalIncome" type="number" step="0.01" placeholder="Total Income (AUD)" className="input" />
+            <input name="totalIncome" type="number" step="0.01" placeholder="Total Income (AUD)" className="input" required />
+
+            <div className="md:col-span-3">
+              <p className="text-sm text-muted-foreground mb-2">Allocation breakdown (percentages)</p>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div>
+                  <label className="text-xs text-muted-foreground">Rewards %</label>
+                  <input name="communityRewardsPct" type="number" step="0.01" defaultValue={defaultPct.community_rewards_pct} className="input w-full" required />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Liquidity %</label>
+                  <input name="liquidityPct" type="number" step="0.01" defaultValue={defaultPct.liquidity_pct} className="input w-full" required />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Buybacks %</label>
+                  <input name="buybacksPct" type="number" step="0.01" defaultValue={defaultPct.buybacks_pct} className="input w-full" required />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Projects %</label>
+                  <input name="projectsPct" type="number" step="0.01" defaultValue={defaultPct.projects_pct} className="input w-full" required />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Operations %</label>
+                  <input name="operationsPct" type="number" step="0.01" defaultValue={defaultPct.operations_pct} className="input w-full" required />
+                </div>
+              </div>
+            </div>
+
             <textarea name="summaryText" placeholder="Summary text" className="input md:col-span-3 h-24" />
+            <textarea
+              name="proofUrls"
+              placeholder="Proof URLs (one per line)"
+              className="input md:col-span-3 h-20"
+            />
+
             <div className="md:col-span-3">
               <Button type="submit">Publish Report</Button>
             </div>
