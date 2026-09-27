@@ -23,14 +23,17 @@ export default function SignupPage() {
     if (!ref) return;
 
     const lookupReferrer = async () => {
-      const { data } = await supabase
-        .from("users")
-        .select("id, display_name, referral_code")
-        .or(`referral_code.eq.${ref},id.eq.${ref}`)
-        .single();
-      if (data) {
-        setReferrerId(data.id);
-        setReferrerName(data.display_name ?? data.referral_code ?? "a member");
+      try {
+        const response = await fetch(
+          `/api/public/resolve-referral?code=${encodeURIComponent(ref)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          setReferrerId(data.id);
+          setReferrerName(data.display_name ?? data.referral_code ?? "a member");
+        }
+      } catch {
+        // Silently fail — signup should still work without a referrer.
       }
     };
     lookupReferrer();
