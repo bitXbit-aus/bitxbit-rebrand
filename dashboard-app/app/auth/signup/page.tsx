@@ -15,6 +15,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [referrerId, setReferrerId] = useState<string | null>(null);
   const [referrerName, setReferrerName] = useState<string | null>(null);
+  const [referrerError, setReferrerError] = useState<string | null>(null);
   const supabase = createClient();
 
   useEffect(() => {
@@ -31,6 +32,8 @@ export default function SignupPage() {
           const data = await response.json();
           setReferrerId(data.id);
           setReferrerName(data.display_name ?? data.referral_code ?? "a member");
+        } else {
+          setReferrerError(`Referral code "${ref}" not found. Signup will continue without a referrer.`);
         }
       } catch {
         // Silently fail — signup should still work without a referrer.
@@ -102,6 +105,9 @@ export default function SignupPage() {
         <p className="text-muted-foreground">Create an account to start participating.</p>
         {referrerName && (
           <p className="text-sm text-primary">Referred by {referrerName}</p>
+        )}
+        {referrerError && (
+          <p className="text-sm text-amber-400">{referrerError}</p>
         )}
       </div>
 
