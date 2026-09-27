@@ -61,64 +61,13 @@
       <p class="text-lg reveal">A percentage of every dollar generated through the bitXbit referral ecosystem goes directly to projects that regenerate people, communities, and the planet. This is not charity — it is circular economy design.</p>
 
       <h2 class="reveal" style="margin-top: var(--space-16);">Featured Project</h2>
-      <div class="project-card reveal" style="max-width: 700px;">
-        <div class="project-image" style="background: linear-gradient(135deg, #1e3a5f, #0f172a); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white;">
-          <h3 style="margin: 0; font-size: 1.5rem;">New Earth Healing Clinic</h3>
-          <p style="margin: var(--space-2) 0 0; opacity: 0.7;">Regenerative Healing Centre</p>
-        </div>
-        <div class="project-body">
-          <span class="status-tag status-active">Active — Accepting Ecosystem Funding</span>
-          <h4>New Earth Healing Clinic</h4>
-          <p class="text-secondary text-sm mb-4">A regenerative healing centre offering holistic therapies, community wellness programs, and accessible health services for underserved populations.</p>
-          <div class="flex justify-between text-sm mb-2">
-            <span class="text-muted">Funding Goal</span>
-            <span class="text-primary font-semibold">$250,000 AUD</span>
-          </div>
-          <div class="flex justify-between text-sm mb-2">
-            <span class="text-muted">Allocated to Date</span>
-            <span class="text-primary font-semibold">$0 AUD</span>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: 0%;"></div>
-          </div>
-          <p class="text-gold text-sm mt-4 font-medium">"Every referral click helps fund accessible healing for people who need it most."</p>
-        </div>
+      <div id="featured-project" class="reveal" style="max-width: 700px;">
+        <div class="card"><p class="text-muted">Loading project…</p></div>
       </div>
 
       <h2 class="reveal" style="margin-top: var(--space-16);">Infrastructure Projects</h2>
-      <div class="grid grid-2 reveal">
-        <div class="project-card">
-          <div class="project-image" style="background: linear-gradient(135deg, #1e293b, #0f172a);">Token Liquidity Building</div>
-          <div class="project-body">
-            <span class="status-tag status-active">Ongoing</span>
-            <h4>Token Liquidity Building</h4>
-            <p class="text-secondary text-sm mb-4">Sustained allocation to liquidity pools ensures smoother trading and market depth for bitxbit.</p>
-            <div class="flex justify-between text-sm mb-2">
-              <span class="text-muted">Status</span>
-              <span class="text-primary font-semibold">Active Infrastructure</span>
-            </div>
-            <div class="progress-bar">
-              <div class="progress-fill" style="width: 65%;"></div>
-            </div>
-            <p class="text-muted text-xs mt-2">Building healthy markets, bit by bit.</p>
-          </div>
-        </div>
-        <div class="project-card">
-          <div class="project-image" style="background: linear-gradient(135deg, #1e293b, #0f172a);">Token Buyback Reserve</div>
-          <div class="project-body">
-            <span class="status-tag status-active">Active</span>
-            <h4>Token Buyback Reserve</h4>
-            <p class="text-secondary text-sm mb-4">A portion of affiliate income is used to purchase bitxbit from the open market. Community-supported stability mechanism.</p>
-            <div class="flex justify-between text-sm mb-2">
-              <span class="text-muted">Tokens Bought Back</span>
-              <span class="text-primary font-semibold">0 bitxbit</span>
-            </div>
-            <div class="progress-bar">
-              <div class="progress-fill" style="width: 0%;"></div>
-            </div>
-            <p class="text-muted text-xs mt-2">Not a price guarantee.</p>
-          </div>
-        </div>
+      <div id="infrastructure-projects" class="grid grid-2 reveal">
+        <div class="card"><p class="text-muted">Loading projects…</p></div>
       </div>
 
       <h2 class="reveal" style="margin-top: var(--space-16);">Future Initiatives</h2>
@@ -173,5 +122,218 @@
   </footer>
 
   <script src="js/main.js"></script>
+  <script>
+    (function () {
+      const API_URL = 'https://app.bitxbit.com.au/api/public/projects';
+      const featuredEl = document.getElementById('featured-project');
+      const infraEl = document.getElementById('infrastructure-projects');
+
+      function escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function formatCurrency(value) {
+        const num = Number(value ?? 0);
+        return '$' + num.toLocaleString('en-AU') + ' AUD';
+      }
+
+      function isBuyback(project) {
+        return project.name.toLowerCase().includes('buyback');
+      }
+
+      function createImage(project) {
+        if (project.image_url) {
+          const img = document.createElement('img');
+          img.src = project.image_url;
+          img.alt = escapeHtml(project.name);
+          img.className = 'project-image';
+          img.style.width = '100%';
+          img.style.objectFit = 'cover';
+          return img;
+        }
+        const placeholder = document.createElement('div');
+        placeholder.className = 'project-image';
+        placeholder.style.background = 'linear-gradient(135deg, #1e3a5f, #0f172a)';
+        placeholder.style.display = 'flex';
+        placeholder.style.alignItems = 'center';
+        placeholder.style.justifyContent = 'center';
+        placeholder.style.color = 'white';
+        placeholder.textContent = project.name;
+        return placeholder;
+      }
+
+      function createStatusTag(status) {
+        const tag = document.createElement('span');
+        tag.className = 'status-tag status-' + (status || 'active');
+        tag.textContent = (status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Active');
+        return tag;
+      }
+
+      function createProgress(allocated, goal) {
+        const pct = goal && Number(goal) > 0
+          ? Math.min(100, Math.round((Number(allocated || 0) / Number(goal)) * 100))
+          : 0;
+        const wrap = document.createElement('div');
+        wrap.className = 'progress-bar';
+        const fill = document.createElement('div');
+        fill.className = 'progress-fill';
+        fill.style.width = pct + '%';
+        wrap.appendChild(fill);
+        return wrap;
+      }
+
+      function createFeaturedCard(project) {
+        const card = document.createElement('div');
+        card.className = 'project-card';
+
+        card.appendChild(createImage(project));
+
+        const body = document.createElement('div');
+        body.className = 'project-body';
+
+        body.appendChild(createStatusTag(project.status));
+
+        const title = document.createElement('h4');
+        title.textContent = project.name;
+        body.appendChild(title);
+
+        if (project.description) {
+          const desc = document.createElement('p');
+          desc.className = 'text-secondary text-sm mb-4';
+          desc.textContent = project.description;
+          body.appendChild(desc);
+        }
+
+        const goal = project.funding_goal;
+        const allocated = project.amount_allocated || 0;
+
+        if (goal && Number(goal) > 0) {
+          const goalRow = document.createElement('div');
+          goalRow.className = 'flex justify-between text-sm mb-2';
+          goalRow.innerHTML = '<span class="text-muted">Funding Goal</span><span class="text-primary font-semibold">' + formatCurrency(goal) + '</span>';
+          body.appendChild(goalRow);
+        }
+
+        const allocRow = document.createElement('div');
+        allocRow.className = 'flex justify-between text-sm mb-2';
+        if (isBuyback(project)) {
+          allocRow.innerHTML = '<span class="text-muted">Tokens Bought Back</span><span class="text-primary font-semibold">' + Number(allocated).toLocaleString('en-AU') + ' bitxbit</span>';
+        } else {
+          allocRow.innerHTML = '<span class="text-muted">Allocated to Date</span><span class="text-primary font-semibold">' + formatCurrency(allocated) + '</span>';
+        }
+        body.appendChild(allocRow);
+
+        body.appendChild(createProgress(allocated, goal));
+
+        if (project.impact_statement) {
+          const impact = document.createElement('p');
+          impact.className = 'text-gold text-sm mt-4 font-medium';
+          impact.textContent = '"' + project.impact_statement + '"';
+          body.appendChild(impact);
+        }
+
+        card.appendChild(body);
+        return card;
+      }
+
+      function createInfraCard(project) {
+        const card = document.createElement('div');
+        card.className = 'project-card';
+
+        card.appendChild(createImage(project));
+
+        const body = document.createElement('div');
+        body.className = 'project-body';
+
+        body.appendChild(createStatusTag(project.status));
+
+        const title = document.createElement('h4');
+        title.textContent = project.name;
+        body.appendChild(title);
+
+        if (project.description) {
+          const desc = document.createElement('p');
+          desc.className = 'text-secondary text-sm mb-4';
+          desc.textContent = project.description;
+          body.appendChild(desc);
+        }
+
+        const goal = project.funding_goal;
+        const allocated = project.amount_allocated || 0;
+
+        if (goal && Number(goal) > 0) {
+          const goalRow = document.createElement('div');
+          goalRow.className = 'flex justify-between text-sm mb-2';
+          goalRow.innerHTML = '<span class="text-muted">Funding Goal</span><span class="text-primary font-semibold">' + formatCurrency(goal) + '</span>';
+          body.appendChild(goalRow);
+
+          const allocRow = document.createElement('div');
+          allocRow.className = 'flex justify-between text-sm mb-2';
+          allocRow.innerHTML = '<span class="text-muted">Allocated to Date</span><span class="text-primary font-semibold">' + formatCurrency(allocated) + '</span>';
+          body.appendChild(allocRow);
+        } else {
+          const statusRow = document.createElement('div');
+          statusRow.className = 'flex justify-between text-sm mb-2';
+          statusRow.innerHTML = '<span class="text-muted">Status</span><span class="text-primary font-semibold">Active Infrastructure</span>';
+          body.appendChild(statusRow);
+        }
+
+        body.appendChild(createProgress(allocated, goal));
+
+        if (isBuyback(project)) {
+          const note = document.createElement('p');
+          note.className = 'text-muted text-xs mt-2';
+          note.textContent = 'Not a price guarantee.';
+          body.appendChild(note);
+        }
+
+        card.appendChild(body);
+        return card;
+      }
+
+      async function loadProjects() {
+        try {
+          const res = await fetch(API_URL);
+          if (!res.ok) throw new Error('Network response was not ok');
+          const data = await res.json();
+          const projects = (data.projects || []).filter((p) => p.status !== 'paused');
+
+          featuredEl.innerHTML = '';
+          infraEl.innerHTML = '';
+
+          if (projects.length === 0) {
+            featuredEl.innerHTML = '<div class="card"><p class="text-muted">No projects published yet.</p></div>';
+            infraEl.style.display = 'none';
+            return;
+          }
+
+          const featured = projects[0];
+          const infra = projects.slice(1);
+
+          featuredEl.appendChild(createFeaturedCard(featured));
+
+          if (infra.length > 0) {
+            infra.forEach((project) => {
+              infraEl.appendChild(createInfraCard(project));
+            });
+          } else {
+            infraEl.style.display = 'none';
+          }
+        } catch (err) {
+          console.error('Failed to load projects:', err);
+          featuredEl.innerHTML = '<div class="card"><p class="text-muted">Unable to load projects. Please try again later.</p></div>';
+          infraEl.style.display = 'none';
+        }
+      }
+
+      loadProjects();
+    })();
+  </script>
 </body>
 </html>
