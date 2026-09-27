@@ -65,6 +65,11 @@
   status = 200
 
 [[redirects]]
+  from = "/ecosystem"
+  to = "/ecosystem.html"
+  status = 200
+
+[[redirects]]
   from = "/projects"
   to = "/projects.html"
   status = 200

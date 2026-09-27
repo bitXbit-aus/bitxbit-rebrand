@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ecosystem Dashboard — bitXbit</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <meta name="description" content="Live ecosystem dashboard for bitXbit. Token stats, transparency, projects, and community activity.">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/design-system.css">
+</head>
+<body>
+
+  <nav class="navbar" role="navigation" aria-label="Main navigation">
+    <div class="container navbar-inner">
+      <a href="index.html" class="logo">bit<span>X</span>bit</a>
+      <ul class="nav-links">
+        <li><a href="how-it-works.html">How It Works</a></li>
+        <li><a href="referrals.html">Referrals</a></li>
+        <li><a href="token-economy.html">Token Economy</a>
+    <a href="ecosystem.html">Ecosystem</a></li>
+        <li><a href="ecosystem.html">Ecosystem</a></li>
+        <li><a href="projects.html">Projects</a></li>
+        <li><a href="transparency.html">Transparency</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+      <div class="nav-ctas">
+        <a href="https://app.bitxbit.com.au/auth/login" class="btn btn-secondary btn-sm">Sign In</a>
+        <a href="https://app.bitxbit.com.au" class="btn btn-primary btn-sm">View Dashboard</a>
+      </div>
+      <button class="mobile-toggle" aria-label="Toggle menu" aria-expanded="false">&#9776;</button>
+    </div>
+  </nav>
+
+  <div class="mobile-menu">
+    <a href="how-it-works.html">How It Works</a>
+    <a href="referrals.html">Referrals</a>
+    <a href="token-economy.html">Token Economy</a>
+    <a href="ecosystem.html">Ecosystem</a>
+    <a href="projects.html">Projects</a>
+    <a href="transparency.html">Transparency</a>
+    <a href="faq.html">FAQ</a>
+    <div class="mobile-ctas">
+      <a href="https://app.bitxbit.com.au/auth/login" class="btn btn-secondary">Sign In</a>
+      <a href="https://app.bitxbit.com.au" class="btn btn-primary">View Dashboard</a>
+    </div>
+  </div>
+
+  <header class="section" style="padding-top: var(--space-24); text-align: center;">
+    <div class="container">
+      <h1 class="animate-fade-in-up">Ecosystem Dashboard</h1>
+      <p class="text-lg animate-fade-in-up delay-1" style="max-width: 700px; margin: var(--space-4) auto 0;">Real numbers. Real flow. Updated regularly from the bitXbit dashboard.</p>
+    </div>
+  </header>
+
+  <!-- Token Pulse -->
+  <section class="section" style="padding-top: 0;">
+    <div class="container">
+      <div class="section-header reveal" style="margin-bottom: var(--space-8);">
+        <h2>Token Pulse</h2>
+        <p>Live on-chain metrics for the bitxbit token.</p>
+      </div>
+      <div class="grid grid-5">
+        <div class="stat-card reveal">
+          <div class="stat-value" id="stat-price">—</div>
+          <div class="stat-label">Token Price</div>
+          <div class="stat-sublabel" id="stat-price-sublabel">USD per bitxbit</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="stat-market-cap">—</div>
+          <div class="stat-label">Market Cap</div>
+          <div class="stat-sublabel">Fully diluted valuation</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="stat-liquidity">—</div>
+          <div class="stat-label">Liquidity</div>
+          <div class="stat-sublabel">Total DEX liquidity</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="stat-holders">—</div>
+          <div class="stat-label">Holders</div>
+          <div class="stat-sublabel">On-chain token holders</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="stat-created">17 Oct 2021</div>
+          <div class="stat-label">Launched</div>
+          <div class="stat-sublabel">Token creation date</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Rewards Summary -->
+  <section class="section" style="background: var(--bg-secondary);">
+    <div class="container">
+      <div class="section-header reveal" style="margin-bottom: var(--space-8);">
+        <h2>Community Rewards</h2>
+        <p>How affiliate income has flowed back to the community.</p>
+      </div>
+      <div class="grid grid-4">
+        <div class="stat-card reveal">
+          <div class="stat-value" id="reward-income">—</div>
+          <div class="stat-label">Total Affiliate Income</div>
+          <div class="stat-sublabel">AUD received</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="reward-distributed">—</div>
+          <div class="stat-label">bitxbit Distributed</div>
+          <div class="stat-sublabel">Tokens sent to members</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="reward-approved">—</div>
+          <div class="stat-label">bitxbit Approved</div>
+          <div class="stat-sublabel">Pending distribution</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-value" id="reward-periods">—</div>
+          <div class="stat-label">Reward Periods</div>
+          <div class="stat-sublabel">Completed cycles</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Projects -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header reveal" style="margin-bottom: var(--space-8);">
+        <h2>Funded Projects</h2>
+        <p>Where community energy is being directed.</p>
+      </div>
+      <div class="grid grid-3" id="projects-grid">
+        <div class="card reveal"><p class="text-muted">Loading projects…</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Transparency Feed -->
+  <section class="section" style="background: var(--bg-secondary);">
+    <div class="container">
+      <div class="section-header reveal" style="margin-bottom: var(--space-8);">
+        <h2>Transparency Ledger</h2>
+        <p>Monthly reports published by the bitXbit team.</p>
+      </div>
+      <div id="transparency-feed">
+        <div class="card reveal"><p class="text-muted">Loading reports…</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Activity & Referrers -->
+  <section class="section">
+    <div class="container">
+      <div class="grid grid-2" style="gap: var(--space-8); align-items: start;">
+        <div>
+          <div class="section-header reveal" style="text-align: left; margin-bottom: var(--space-6);">
+            <h2>Recent Activity</h2>
+            <p>Anonymized community actions.</p>
+          </div>
+          <div class="card reveal" id="activity-feed">
+            <p class="text-muted">Loading activity…</p>
+          </div>
+        </div>
+        <div>
+          <div class="section-header reveal" style="text-align: left; margin-bottom: var(--space-6);">
+            <h2>Top Referrers</h2>
+            <p>Community members growing the ecosystem.</p>
+          </div>
+          <div class="card reveal" id="referrers-feed">
+            <p class="text-muted">Loading referrers…</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-col"><h4>Navigate</h4><ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="how-it-works.html">How It Works</a></li>
+          <li><a href="referrals.html">Referrals</a></li>
+          <li><a href="token-economy.html">Token Economy</a>
+    <a href="ecosystem.html">Ecosystem</a></li>
+        <li><a href="ecosystem.html">Ecosystem</a></li>
+          <li><a href="projects.html">Projects</a></li>
+          <li><a href="transparency.html">Transparency</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+        </ul></div>
+        <div class="footer-col"><h4>Legal</h4><ul>
+          <li><a href="legal-disclaimer.html">Disclaimer</a></li>
+          <li><a href="legal-disclaimer.html#privacy">Privacy Policy</a></li>
+          <li><a href="legal-disclaimer.html#terms">Terms of Use</a></li>
+          <li><a href="legal-disclaimer.html#affiliate">Affiliate Disclosure</a></li>
+          <li><a href="legal-disclaimer.html#risk">Crypto Risk Warning</a></li>
+        </ul></div>
+        <div class="footer-col"><h4>Ecosystem</h4><ul>
+          <li><a href="https://app.bitxbit.com.au">Member Dashboard</a></li>
+          <li><a href="transparency.html">Transparency Ledger</a></li>
+          <li><a href="projects.html">Funded Projects</a></li>
+        </ul></div>
+        <div class="footer-col"><h4>Connect</h4><ul>
+          <li><a href="#">Twitter / X</a></li>
+          <li><a href="#">Discord</a></li>
+          <li><a href="#">Contact</a></li>
+        </ul></div>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2025 bitXbit. A community ecosystem, not an investment product. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+  <script>
+    (function () {
+      const API_BASE = "https://app.bitxbit.com.au/api";
+
+      function formatCurrency(value) {
+        if (value === null || value === undefined || isNaN(value)) return "—";
+        if (value < 0.01) return "$" + value.toFixed(6);
+        if (value < 1) return "$" + value.toFixed(4);
+        return "$" + value.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+
+      function formatCurrencyWhole(value) {
+        if (value === null || value === undefined || isNaN(value)) return "—";
+        return "$" + Math.round(value).toLocaleString("en-AU");
+      }
+
+      function formatNumber(value) {
+        if (value === null || value === undefined || isNaN(value)) return "—";
+        return value.toLocaleString("en-AU");
+      }
+
+      function formatCompact(value) {
+        if (value === null || value === undefined || isNaN(value)) return "—";
+        if (value >= 1_000_000) return (value / 1_000_000).toFixed(2) + "M";
+        if (value >= 1_000) return (value / 1_000).toFixed(1) + "k";
+        return value.toLocaleString("en-AU");
+      }
+
+      async function fetchJson(path) {
+        const res = await fetch(API_BASE + path, { cache: "no-store" });
+        if (!res.ok) throw new Error(res.status + " " + res.statusText);
+        return res.json();
+      }
+
+      async function loadTokenStats() {
+        try {
+          const data = await fetchJson("/token-stats");
+          const priceEl = document.getElementById("stat-price");
+          const priceSubEl = document.getElementById("stat-price-sublabel");
+          const marketCapEl = document.getElementById("stat-market-cap");
+          const liquidityEl = document.getElementById("stat-liquidity");
+          const holdersEl = document.getElementById("stat-holders");
+
+          if (priceEl) priceEl.textContent = formatCurrency(data.price);
+          if (priceSubEl) {
+            const change = data.priceChange24h;
+            if (change !== null && change !== undefined) {
+              const sign = change >= 0 ? "+" : "";
+              priceSubEl.textContent = `24h ${sign}${change.toFixed(2)}%`;
+              priceSubEl.style.color = change >= 0 ? "#34d399" : "#f87171";
+            } else {
+              priceSubEl.textContent = "USD per bitxbit";
+            }
+          }
+          if (marketCapEl) marketCapEl.textContent = formatCurrencyWhole(data.marketCap);
+          if (liquidityEl) liquidityEl.textContent = formatCurrencyWhole(data.liquidity);
+          if (holdersEl) holdersEl.textContent = formatNumber(data.holders);
+        } catch (err) {
+          console.error("Token stats failed:", err);
+        }
+      }
+
+      async function loadRewards() {
+        try {
+          const data = await fetchJson("/public/rewards-summary");
+          const s = data.summary;
+          const incomeEl = document.getElementById("reward-income");
+          const distributedEl = document.getElementById("reward-distributed");
+          const approvedEl = document.getElementById("reward-approved");
+          const periodsEl = document.getElementById("reward-periods");
+
+          if (incomeEl) incomeEl.textContent = formatCurrencyWhole(s.totalIncome);
+          if (distributedEl) distributedEl.textContent = formatCompact(s.totalDistributed);
+          if (approvedEl) approvedEl.textContent = formatCompact(s.totalApproved);
+          if (periodsEl) periodsEl.textContent = formatNumber(s.periodCount);
+        } catch (err) {
+          console.error("Rewards summary failed:", err);
+        }
+      }
+
+      async function loadProjects() {
+        try {
+          const data = await fetchJson("/public/projects");
+          const container = document.getElementById("projects-grid");
+          if (!container) return;
+
+          if (!data.projects || data.projects.length === 0) {
+            container.innerHTML = '<div class="card reveal"><p class="text-muted">No projects published yet.</p></div>';
+            return;
+          }
+
+          // Deduplicate by name
+          const seen = new Set();
+          const unique = data.projects.filter((p) => {
+            if (seen.has(p.name)) return false;
+            seen.add(p.name);
+            return true;
+          });
+
+          container.innerHTML = unique.map((p) => {
+            const goal = p.funding_goal ? Number(p.funding_goal) : null;
+            const allocated = Number(p.amount_allocated ?? 0);
+            const pct = goal && goal > 0 ? Math.min(100, Math.round((allocated / goal) * 100)) : null;
+            return `
+              <div class="card reveal">
+                <h4 style="margin-bottom: var(--space-2);">${escapeHtml(p.name)}</h4>
+                <p class="text-sm text-muted" style="margin-bottom: var(--space-3);">${escapeHtml(p.description || "")}</p>
+                <p class="text-sm" style="margin-bottom: var(--space-3);">${escapeHtml(p.impact_statement || "")}</p>
+                ${pct !== null ? `
+                  <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); height: 8px; overflow: hidden; margin-bottom: var(--space-2);">
+                    <div style="width: ${pct}%; background: var(--accent-blue); height: 100%;"></div>
+                  </div>
+                  <p class="text-sm text-muted">${formatCurrencyWhole(allocated)} of ${formatCurrencyWhole(goal)} (${pct}%)</p>
+                ` : `
+                  <p class="text-sm text-muted">Allocated: ${formatCurrencyWhole(allocated)}</p>
+                `}
+              </div>
+            `;
+          }).join("");
+        } catch (err) {
+          console.error("Projects failed:", err);
+          document.getElementById("projects-grid").innerHTML = '<div class="card reveal"><p class="text-muted">Unable to load projects.</p></div>';
+        }
+      }
+
+      async function loadTransparency() {
+        try {
+          const data = await fetchJson("/public/transparency");
+          const container = document.getElementById("transparency-feed");
+          if (!container) return;
+
+          if (!data.reports || data.reports.length === 0) {
+            container.innerHTML = '<div class="card reveal"><p class="text-muted">No transparency reports published yet.</p></div>';
+            return;
+          }
+
+          container.innerHTML = data.reports.slice(0, 6).map((r) => `
+            <div class="card reveal" style="margin-bottom: var(--space-4);">
+              <div class="flex" style="justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: var(--space-2);">
+                <h4 style="margin-bottom: var(--space-1);">${escapeHtml(r.report_month)} ${r.report_year}</h4>
+                <span class="text-sm text-muted">${r.published_at ? new Date(r.published_at).toLocaleDateString("en-AU") : ""}</span>
+              </div>
+              <p class="text-sm text-muted" style="margin-bottom: var(--space-2);">Total income: ${formatCurrencyWhole(r.total_income)}</p>
+              <p class="text-sm">${escapeHtml(r.summary_text || "")}</p>
+            </div>
+          `).join("");
+        } catch (err) {
+          console.error("Transparency failed:", err);
+          document.getElementById("transparency-feed").innerHTML = '<div class="card reveal"><p class="text-muted">Unable to load transparency reports.</p></div>';
+        }
+      }
+
+      async function loadActivity() {
+        try {
+          const data = await fetchJson("/public/activity");
+          const container = document.getElementById("activity-feed");
+          if (!container) return;
+
+          if (!data.activities || data.activities.length === 0) {
+            container.innerHTML = '<p class="text-muted">No recent activity.</p>';
+            return;
+          }
+
+          const labels = {
+            click: "Offer clicked",
+            signup: "New member joined",
+            purchase: "Purchase completed",
+            other: "Activity recorded",
+          };
+
+          container.innerHTML = data.activities.slice(0, 8).map((a) => `
+            <div style="padding: var(--space-3) 0; border-bottom: 1px solid var(--border-subtle);">
+              <p class="text-sm" style="margin-bottom: 0;"><strong>${labels[a.type] || a.type}</strong>${a.offer ? " — " + escapeHtml(a.offer) : ""}</p>
+              <p class="text-xs text-muted" style="margin-top: 2px;">${timeAgo(a.createdAt)}</p>
+            </div>
+          `).join("");
+        } catch (err) {
+          console.error("Activity failed:", err);
+          document.getElementById("activity-feed").innerHTML = '<p class="text-muted">Unable to load activity.</p>';
+        }
+      }
+
+      async function loadReferrers() {
+        try {
+          const data = await fetchJson("/public/referrers");
+          const container = document.getElementById("referrers-feed");
+          if (!container) return;
+
+          if (!data.leaderboard || data.leaderboard.length === 0) {
+            container.innerHTML = '<p class="text-muted">No referrers yet.</p>';
+            return;
+          }
+
+          container.innerHTML = data.leaderboard.slice(0, 8).map((r, i) => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-3) 0; border-bottom: 1px solid var(--border-subtle);">
+              <span class="text-sm"><span class="text-muted" style="margin-right: var(--space-3);">#${i + 1}</span> ${escapeHtml(r.referralCode)}</span>
+              <span class="text-sm font-medium">${r.referredCount} ${r.referredCount === 1 ? "referral" : "referrals"}</span>
+            </div>
+          `).join("");
+        } catch (err) {
+          console.error("Referrers failed:", err);
+          document.getElementById("referrers-feed").innerHTML = '<p class="text-muted">Unable to load referrers.</p>';
+        }
+      }
+
+      function escapeHtml(text) {
+        if (!text) return "";
+        return text
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      function timeAgo(dateString) {
+        const date = new Date(dateString);
+        const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+        if (seconds < 60) return "just now";
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
+      }
+
+      function init() {
+        loadTokenStats();
+        loadRewards();
+        loadProjects();
+        loadTransparency();
+        loadActivity();
+        loadReferrers();
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>
