@@ -36,3 +36,4 @@ Thumbs.db
 .vercel
 .netlify
 *.patch
+dashboard-app/supabase/.temp/
