@@ -336,6 +336,13 @@ export async function updateProject(id: string, formData: FormData) {
   revalidatePath("/admin/projects");
 }
 
+export async function deleteProject(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from("projects").delete().eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/projects");
+}
+
 export async function createTransparencyReport(formData: FormData) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
