@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { distributeTokens, getAirdropWalletBalance, AirdropResult } from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
@@ -174,7 +175,7 @@ export async function deleteCategory(id: string) {
 }
 
 export async function updateUser(id: string, formData: FormData) {
-  const supabase = createClient();
+  const supabase = createServiceClient();
   const { error } = await supabase
     .from("users")
     .update({
@@ -184,6 +185,27 @@ export async function updateUser(id: string, formData: FormData) {
       wallet_address: (formData.get("walletAddress") as string) || null,
     })
     .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/admin/users");
+}
+
+export async function bulkUpdateUsersRole(ids: string[], role: string) {
+  const supabase = createServiceClient();
+  const { error } = await supabase.from("users").update({ role }).in("id", ids);
+  if (error) throw error;
+  revalidatePath("/admin/users");
+}
+
+export async function bulkUpdateUsersStatus(ids: string[], status: string) {
+  const supabase = createServiceClient();
+  const { error } = await supabase.from("users").update({ status }).in("id", ids);
+  if (error) throw error;
+  revalidatePath("/admin/users");
+}
+
+export async function bulkDeleteUsers(ids: string[]) {
+  const supabase = createServiceClient();
+  const { error } = await supabase.from("users").delete().in("id", ids);
   if (error) throw error;
   revalidatePath("/admin/users");
 }

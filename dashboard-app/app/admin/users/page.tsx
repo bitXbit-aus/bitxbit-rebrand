@@ -1,87 +1,79 @@
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { FormWithToast } from "@/components/dashboard/form-with-toast";
-import { updateUser } from "@/lib/actions";
-import { formatDate, truncateAddress } from "@/lib/utils";
+import { UsersTable } from "@/components/admin/users-table";
 
-export default async function AdminUsersPage() {
-  const supabase = createClient();
-  const { data: users, count } = await supabase
-    .from("users")
-    .select("*", { count: "exact" })
-    .order("created_at", { ascending: false });
+interface PageProps {
+  searchParams: {
+    search?: string;
+    role?: string;
+    status?: string;
+    page?: string;
+  };
+}
+
+export default async function AdminUsersPage({ searchParams }: PageProps) {
+  const supabase = createServiceClient();
+
+  const search = (searchParams.search ?? "").trim();
+  const roleFilter = searchParams.role ?? "all";
+  const statusFilter = searchParams.status ?? "all";
+  const page = Math.max(1, parseInt(searchParams.page ?? "1", 10) || 1);
+  const pageSize = 20;
+
+  let query = supabase.from("users").select("*", { count: "exact" });
+
+  if (roleFilter !== "all") {
+    query = query.eq("role", roleFilter);
+  }
+
+  if (statusFilter !== "all") {
+    query = query.eq("status", statusFilter);
+  }
+
+  if (search) {
+    const pattern = `%${search}%`;
+    query = query.or(
+      `email.ilike.${pattern},display_name.ilike.${pattern},wallet_address.ilike.${pattern},referral_code.ilike.${pattern}`
+    );
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const { data: users, count, error } = await query
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    console.error("Failed to load users:", error);
+  }
 
   return (
     <div className="dashboard-container">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Users</h1>
-        <p className="text-muted-foreground mt-1">Manage members and admins. Total: {count ?? 0}</p>
+        <p className="text-muted-foreground mt-1">
+          Manage members and admins. Total: {count ?? 0}
+        </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>All Users</CardTitle>
-          <CardDescription>Edit roles, status, display name and wallet address.</CardDescription>
+          <CardDescription>
+            Search, filter, edit roles, status, display name and wallet address.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {users?.map((user) => (
-              <div key={user.id} className="p-4 rounded-lg border border-border bg-card/50">
-                <FormWithToast
-                  action={updateUser.bind(null, user.id)}
-                  successMessage="User updated"
-                >
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">Email</label>
-                      <div className="text-sm font-medium truncate">{user.email}</div>
-                      <div className="text-xs text-muted-foreground">{user.referral_code}</div>
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">Display Name</label>
-                      <input name="displayName" defaultValue={user.display_name ?? ""} className="input w-full" />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">Wallet</label>
-                      <input name="walletAddress" defaultValue={user.wallet_address ?? ""} className="input w-full" placeholder="Solana address" />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">Referred By</label>
-                      <div className="text-sm text-muted-foreground truncate">
-                        {user.referred_by ? user.referred_by.slice(0, 8) + "..." : "—"}
-                      </div>
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">Role</label>
-                      <select name="role" defaultValue={user.role} className="input w-full">
-                        <option value="member">Member</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">Status</label>
-                      <select name="status" defaultValue={user.status} className="input w-full">
-                        <option value="active">Active</option>
-                        <option value="suspended">Suspended</option>
-                      </select>
-                    </div>
-                    <div className="md:col-span-12 flex justify-end">
-                      <Button type="submit" size="sm">Save</Button>
-                    </div>
-                  </div>
-                </FormWithToast>
-                <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
-                  <Badge variant={user.role === "admin" ? "default" : "outline"}>{user.role}</Badge>
-                  <Badge variant={user.status === "active" ? "default" : "secondary"}>{user.status}</Badge>
-                  <span>Joined {formatDate(user.created_at)}</span>
-                  {user.last_login && <span>· Last login {formatDate(user.last_login)}</span>}
-                  {user.wallet_address && <span className="font-mono">· {truncateAddress(user.wallet_address)}</span>}
-                </div>
-              </div>
-            ))}
-          </div>
+          <UsersTable
+            users={(users ?? []) as any}
+            total={count ?? 0}
+            page={page}
+            pageSize={pageSize}
+            search={search}
+            roleFilter={roleFilter}
+            statusFilter={statusFilter}
+          />
         </CardContent>
       </Card>
     </div>
