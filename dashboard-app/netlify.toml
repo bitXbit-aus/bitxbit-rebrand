@@ -1,5 +1,5 @@
 [build]
-  command = "rm -rf .next .netlify/functions-internal && next build"
+  command = "rm -rf .next && next build"
   publish = ".next"
 
 [build.environment]
