@@ -25,6 +25,7 @@ export interface AirdropResult {
   amount: number;
   txHash: string | null;
   error: string | null;
+  rewardId?: string;
 }
 
 function getConnection() {
@@ -61,8 +62,35 @@ export async function getAirdropWalletBalance(): Promise<{ sol: number; token: n
   };
 }
 
+export function isValidSolanaAddress(address: string): boolean {
+  try {
+    new PublicKey(address);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getTokenBalance(walletAddress: string): Promise<number> {
+  if (!isValidSolanaAddress(walletAddress)) {
+    throw new Error("Invalid Solana wallet address");
+  }
+
+  const connection = getConnection();
+  const mint = new PublicKey(MINT!);
+  const owner = new PublicKey(walletAddress);
+  const ata = await getAssociatedTokenAddress(mint, owner);
+
+  try {
+    const account = await getAccount(connection, ata);
+    return Number(account.amount) / Math.pow(10, DECIMALS);
+  } catch {
+    return 0;
+  }
+}
+
 export async function distributeTokens(
-  distributions: { userId: string; walletAddress: string; amount: number }[]
+  distributions: { userId: string; walletAddress: string; amount: number; rewardId?: string }[]
 ): Promise<AirdropResult[]> {
   const connection = getConnection();
   const signer = getSigner();
@@ -113,6 +141,7 @@ export async function distributeTokens(
         amount: dist.amount,
         txHash,
         error: null,
+        rewardId: dist.rewardId,
       });
     } catch (err) {
       results.push({
@@ -121,6 +150,7 @@ export async function distributeTokens(
         amount: dist.amount,
         txHash: null,
         error: err instanceof Error ? err.message : String(err),
+        rewardId: dist.rewardId,
       });
     }
   }

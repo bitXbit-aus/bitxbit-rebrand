@@ -13,6 +13,7 @@ import {
   sendTestAirdrop,
 } from "@/lib/actions";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { SolanaAddress } from "@/components/dashboard/solana-address";
 
 export default async function AdminRewardsPage() {
   const supabase = createClient();
@@ -36,12 +37,26 @@ export default async function AdminRewardsPage() {
     totalsByPeriod.set(r.reward_period_id, current);
   });
 
+  const { data: airdropTxs } = await supabase
+    .from("user_rewards")
+    .select("id, bitxbit_amount, estimated_aud_value, distribution_tx_hash, distributed_at, user:users(display_name, email), period:reward_periods(start_date, end_date)")
+    .eq("status", "distributed")
+    .not("distribution_tx_hash", "is", null)
+    .order("distributed_at", { ascending: false })
+    .limit(50);
+
   let airdropBalance = { sol: 0, token: 0 };
   try {
     airdropBalance = await getAirdropWalletBalanceAction();
   } catch {
     airdropBalance = { sol: 0, token: 0 };
   }
+
+  const normalizedAirdropTxs = (airdropTxs ?? []).map((tx: any) => ({
+    ...tx,
+    user: Array.isArray(tx.user) ? tx.user[0] ?? null : tx.user,
+    period: Array.isArray(tx.period) ? tx.period[0] ?? null : tx.period,
+  }));
 
   return (
     <div className="dashboard-container">
@@ -217,6 +232,58 @@ export default async function AdminRewardsPage() {
           );
         })}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Airdrop Transactions</CardTitle>
+          <CardDescription>Recent on-chain distributions with Solscan links.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {normalizedAirdropTxs && normalizedAirdropTxs.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Period</th>
+                    <th>bitxbit</th>
+                    <th>Estimated</th>
+                    <th>Date</th>
+                    <th>Transaction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {normalizedAirdropTxs.map((tx: any) => (
+                    <tr key={tx.id}>
+                      <td>
+                        <div className="font-medium">{tx.user?.display_name ?? "—"}</div>
+                        <div className="text-xs text-muted-foreground">{tx.user?.email}</div>
+                      </td>
+                      <td>
+                        {tx.period
+                          ? `${formatDate(tx.period.start_date)} – ${formatDate(tx.period.end_date)}`
+                          : "—"}
+                      </td>
+                      <td>{tx.bitxbit_amount ? tx.bitxbit_amount.toFixed(4) : "—"}</td>
+                      <td>{formatCurrency(tx.estimated_aud_value)}</td>
+                      <td>{tx.distributed_at ? formatDate(tx.distributed_at) : "—"}</td>
+                      <td>
+                        {tx.distribution_tx_hash ? (
+                          <SolanaAddress address={tx.distribution_tx_hash} showCopy={false} />
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No airdrop transactions recorded yet.</p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

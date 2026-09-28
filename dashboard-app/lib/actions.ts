@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { distributeTokens, getAirdropWalletBalance, AirdropResult } from "@/lib/solana";
+import { distributeTokens, getAirdropWalletBalance, getTokenBalance, isValidSolanaAddress, AirdropResult } from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
 
 export async function updateProfile(formData: FormData) {
@@ -494,6 +494,10 @@ export async function saveWalletAddress(walletAddress: string) {
     throw new Error("You must be signed in to save a wallet address.");
   }
 
+  if (!isValidSolanaAddress(walletAddress)) {
+    throw new Error("Invalid Solana wallet address.");
+  }
+
   const { error } = await supabase
     .from("users")
     .update({ wallet_address: walletAddress })
@@ -508,10 +512,18 @@ export async function getAirdropWalletBalanceAction() {
   return getAirdropWalletBalance();
 }
 
+export async function getTokenBalanceAction(walletAddress: string) {
+  return getTokenBalance(walletAddress);
+}
+
 export async function sendTestAirdrop(formData: FormData) {
   const walletAddress = formData.get("walletAddress") as string;
   if (!walletAddress) {
     throw new Error("Wallet address is required");
+  }
+
+  if (!isValidSolanaAddress(walletAddress)) {
+    throw new Error("Invalid Solana wallet address.");
   }
 
   const TEST_AMOUNT = 0.001;
@@ -553,16 +565,23 @@ export async function airdropRewards(periodId: string) {
       amount: r.bitxbit_amount ?? 0,
       rewardId: r.id,
     }))
-    .filter((d) => d.walletAddress && d.amount > 0) ?? [];
+    .filter((d) => d.walletAddress && d.amount > 0 && isValidSolanaAddress(d.walletAddress)) ?? [];
 
-  const missingWalletCount = (rewards?.length ?? 0) - distributions.length;
+  const invalidWalletCount = rewards?.filter(
+    (r: any) => r.users?.wallet_address && !isValidSolanaAddress(r.users.wallet_address)
+  ).length ?? 0;
+  const missingWalletCount = (rewards?.length ?? 0) - distributions.length - invalidWalletCount;
 
   if (distributions.length === 0) {
-    throw new Error(
-      missingWalletCount > 0
-        ? `No approved rewards with wallet addresses found. ${missingWalletCount} member(s) are missing a wallet address.`
-        : "No approved rewards found for this period."
-    );
+    let message = "No approved rewards found for this period.";
+    if (missingWalletCount > 0 && invalidWalletCount > 0) {
+      message = `${missingWalletCount} member(s) are missing a wallet address and ${invalidWalletCount} have an invalid address.`;
+    } else if (missingWalletCount > 0) {
+      message = `${missingWalletCount} member(s) are missing a wallet address.`;
+    } else if (invalidWalletCount > 0) {
+      message = `${invalidWalletCount} member(s) have an invalid wallet address.`;
+    }
+    throw new Error(message);
   }
 
   // Pre-flight balance checks
@@ -584,6 +603,11 @@ export async function airdropRewards(periodId: string) {
 
   const results = await distributeTokens(distributions);
 
+  const failed = results.filter((r) => !r.txHash);
+  if (failed.length > 0) {
+    console.error("Some airdrops failed:", failed);
+  }
+
   for (const result of results) {
     if (result.txHash) {
       await supabase
@@ -593,8 +617,7 @@ export async function airdropRewards(periodId: string) {
           distribution_tx_hash: result.txHash,
           distributed_at: new Date().toISOString(),
         })
-        .eq("reward_period_id", periodId)
-        .eq("user_id", result.userId);
+        .eq("id", result.rewardId);
     }
   }
 
