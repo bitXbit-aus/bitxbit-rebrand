@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { SolanaWalletProvider } from "@/components/providers/wallet-provider";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
+import { CookieConsent } from "@/components/analytics/cookie-consent";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -33,6 +34,7 @@ export default function RootLayout({
         <SolanaWalletProvider>
           {children}
           <RegisterServiceWorker />
+          <CookieConsent />
         </SolanaWalletProvider>
       </body>
     </html>

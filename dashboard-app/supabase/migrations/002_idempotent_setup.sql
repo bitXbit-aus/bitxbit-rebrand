@@ -368,7 +368,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO public.projects (name, description, funding_goal, amount_allocated, status, impact_statement, display_order)
 SELECT v.name, v.description, v.funding_goal, v.amount_allocated, v.status, v.impact_statement, v.display_order
 FROM (VALUES
-  ('New Earth Healing Clinic', 'A regenerative healing centre offering holistic therapies and accessible community wellness programs.', 50000, 12000, 'active', 'Every referral click helps fund accessible healing for people who need it most.', 1),
+  ('New Earth Healing Clinic', 'A regenerative healing centre offering holistic therapies and accessible community wellness programs.', 250000, 0, 'active', 'Every referral click helps fund accessible healing for people who need it most.', 1),
   ('Token Liquidity Building', 'Sustained allocation to liquidity pools ensures smoother trading and market depth for bitxbit.', NULL, 8500, 'active', 'Building healthy markets, bit by bit.', 2),
   ('Token Buyback Reserve', 'A portion of affiliate income is used to purchase bitxbit from the open market.', NULL, 6200, 'active', 'Community-supported stability mechanism.', 3)
 ) AS v(name, description, funding_goal, amount_allocated, status, impact_statement, display_order)

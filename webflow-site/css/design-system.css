@@ -1075,3 +1075,103 @@ p {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- COOKIE CONSENT BANNER ---- */
+.cookie-consent-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-medium);
+  padding: var(--space-4) 0;
+  transform: translateY(100%);
+  opacity: 0;
+  transition: transform var(--transition-base), opacity var(--transition-base);
+}
+
+.cookie-consent-banner.cookie-consent-visible {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.cookie-consent-inner {
+  width: 100%;
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: 0 var(--container-padding);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.cookie-consent-text {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.cookie-consent-link {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  margin-left: var(--space-2);
+}
+
+.cookie-consent-link:hover {
+  color: var(--accent-blue-hover);
+}
+
+.cookie-consent-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.cookie-consent-btn {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.cookie-consent-btn-primary {
+  background: var(--accent-blue);
+  color: #fff;
+}
+
+.cookie-consent-btn-primary:hover {
+  background: var(--accent-blue-hover);
+}
+
+.cookie-consent-btn-secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border-medium);
+}
+
+.cookie-consent-btn-secondary:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+@media (max-width: 640px) {
+  .cookie-consent-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+  }
+
+  .cookie-consent-actions {
+    width: 100%;
+  }
+
+  .cookie-consent-btn {
+    flex: 1;
+  }
+}
