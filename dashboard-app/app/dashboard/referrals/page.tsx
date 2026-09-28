@@ -1,12 +1,11 @@
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { CopyButton } from "@/components/dashboard/copy-button";
+import { ReferralShareCard } from "@/components/dashboard/referral-share-card";
+import { ReferralsTable } from "@/components/dashboard/referrals-table";
 import { ReferralsSkeleton } from "@/components/dashboard/referrals-skeleton";
-import { formatCurrency, formatDate, formatRelativeTime } from "@/lib/utils";
-import { Users, MousePointer, TrendingUp, UserPlus } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
+import { Users, MousePointer, TrendingUp } from "lucide-react";
 
 interface ReferralWithStats {
   id: string;
@@ -129,76 +128,17 @@ async function ReferralsData() {
         </CardHeader>
         <CardContent>
           {referralLink ? (
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Input value={referralLink} readOnly className="flex-1 bg-muted/30" />
-              <CopyButton text={referralLink} />
-            </div>
+            <ReferralShareCard referralLink={referralLink} />
           ) : (
             <p className="text-sm text-muted-foreground">Your referral code is being generated.</p>
           )}
-          <p className="text-xs text-muted-foreground mt-3">
+          <p className="text-xs text-muted-foreground mt-4">
             You earn 5% of the reward-generating activity from anyone who joins through your link.
           </p>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Referred Members</CardTitle>
-          <CardDescription>People who joined using your link and the value they&apos;ve generated.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {referralsWithStats.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Member</th>
-                    <th>Joined</th>
-                    <th>Activities</th>
-                    <th>Rewards Generated</th>
-                    <th>Your Bonus</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {referralsWithStats.map((referral) => (
-                    <tr key={referral.id}>
-                      <td>
-                        <div className="font-medium">{referral.display_name ?? "Anonymous"}</div>
-                        <div className="text-xs text-muted-foreground">{referral.email}</div>
-                      </td>
-                      <td>
-                        <div>{formatDate(referral.created_at)}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {formatRelativeTime(referral.created_at)}
-                        </div>
-                      </td>
-                      <td>{referral.activities}</td>
-                      <td>{formatCurrency(referral.rewards)}</td>
-                      <td>{formatCurrency(referral.bonus)}</td>
-                      <td>
-                        <Badge variant={referral.wallet_address ? "default" : "outline"}>
-                          {referral.wallet_address ? "Wallet connected" : "No wallet"}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <UserPlus className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-medium mb-2">No referrals yet</h3>
-              <p className="text-sm text-muted-foreground mb-6">
-                Share your link to start building your network.
-              </p>
-              {referralLink && <CopyButton text={referralLink} label="Copy Link" />}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <ReferralsTable referrals={referralsWithStats} />
     </div>
   );
 }
