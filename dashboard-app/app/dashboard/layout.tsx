@@ -28,7 +28,7 @@ export default async function DashboardLayout({
     <div className="min-h-screen flex bg-background">
       <DashboardSidebar isAdmin={isAdmin} />
       <main className="flex-1 min-w-0">
-        <MobileNav isAdmin={isAdmin} userEmail={user?.email} brand="bitXbit" />
+        <MobileNav userEmail={user?.email} brand="bitXbit" />
         {children}
       </main>
       <Toaster />

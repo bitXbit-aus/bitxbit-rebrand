@@ -1,17 +1,10 @@
-const CACHE_NAME = 'bitxbit-dashboard-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/dashboard',
-  '/auth/login',
-  '/offline',
-];
+const CACHE_NAME = 'bitxbit-dashboard-v2';
+const OFFLINE_PAGE = '/offline';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    }).catch(() => {
-      // Fail silently if some static assets are missing.
+      return cache.addAll([OFFLINE_PAGE]);
     })
   );
   self.skipWaiting();
@@ -34,7 +27,7 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // API calls: network first, fallback to offline JSON if needed.
+  // API calls: network only with offline fallback.
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/rest/v1/')) {
     event.respondWith(
       fetch(request).catch(() => {
@@ -47,38 +40,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigation requests: try network, fall back to cached dashboard or offline page.
+  // Navigation requests: network first, fallback to offline page.
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          return response;
-        })
-        .catch(() => {
-          return caches.match(request).then((cached) => {
-            return cached || caches.match('/dashboard') || caches.match('/offline') || new Response('Offline');
-          });
-        })
+        .catch(() => caches.match(OFFLINE_PAGE))
+        .then((response) => response || caches.match(OFFLINE_PAGE) || new Response('Offline'))
     );
     return;
   }
 
-  // Static assets: cache first, network fallback.
+  // Static assets: stale-while-revalidate.
   event.respondWith(
     caches.match(request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
-      return fetch(request).then((response) => {
-        if (!response || response.status !== 200 || response.type !== 'basic') {
+      const fetchPromise = fetch(request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          }
           return response;
-        }
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        return response;
-      });
+        })
+        .catch(() => cached);
+      return cached || fetchPromise;
     })
   );
 });
