@@ -36,6 +36,7 @@ export const adminLinks = [
   { name: "Projects", href: "/admin/projects", icon: Briefcase },
   { name: "Allocations", href: "/admin/allocations", icon: PieChart },
   { name: "Users", href: "/admin/users", icon: Users },
+  { name: "Activity", href: "/admin/activity", icon: Activity },
   { name: "Referrals", href: "/admin/referrals", icon: TrendingUp },
   { name: "Rewards", href: "/admin/rewards", icon: Coins },
   { name: "Analytics", href: "/admin/analytics", icon: BarChart3 },
