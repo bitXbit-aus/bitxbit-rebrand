@@ -4,6 +4,7 @@ import "./globals.css";
 import { SolanaWalletProvider } from "@/components/providers/wallet-provider";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
 import { CookieConsent } from "@/components/analytics/cookie-consent";
+import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -70,6 +71,7 @@ export default function RootLayout({
           {children}
           <RegisterServiceWorker />
           <CookieConsent />
+          <Toaster />
         </SolanaWalletProvider>
       </body>
     </html>

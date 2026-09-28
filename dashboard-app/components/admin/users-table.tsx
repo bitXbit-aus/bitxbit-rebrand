@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FormWithToast } from "@/components/dashboard/form-with-toast";
+import { useToast } from "@/components/ui/use-toast";
 import {
   updateUser,
   bulkUpdateUsersRole,
@@ -66,6 +67,7 @@ export function UsersTable({
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isPending, startTransition] = useTransition();
+  const { toast } = useToast();
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = (page - 1) * pageSize + 1;
@@ -104,23 +106,34 @@ export function UsersTable({
     const ids = Array.from(selected);
     if (ids.length === 0) return;
 
-    if (action === "delete") {
-      if (!confirm(`Delete ${ids.length} user(s)? This cannot be undone.`)) return;
-      await bulkDeleteUsers(ids);
-    } else if (action === "role") {
-      const role = prompt("Set role to:", "member");
-      if (!role || !["member", "admin"].includes(role)) return;
-      await bulkUpdateUsersRole(ids, role);
-    } else if (action === "status") {
-      const status = prompt("Set status to:", "active");
-      if (!status || !["active", "suspended"].includes(status)) return;
-      await bulkUpdateUsersStatus(ids, status);
-    }
+    try {
+      if (action === "delete") {
+        if (!confirm(`Delete ${ids.length} user(s)? This cannot be undone.`)) return;
+        await bulkDeleteUsers(ids);
+        toast({ title: "Deleted", description: `${ids.length} user(s) removed.` });
+      } else if (action === "role") {
+        const role = prompt("Set role to:", "member");
+        if (!role || !["member", "admin"].includes(role)) return;
+        await bulkUpdateUsersRole(ids, role);
+        toast({ title: "Role updated", description: `${ids.length} user(s) set to ${role}.` });
+      } else if (action === "status") {
+        const status = prompt("Set status to:", "active");
+        if (!status || !["active", "suspended"].includes(status)) return;
+        await bulkUpdateUsersStatus(ids, status);
+        toast({ title: "Status updated", description: `${ids.length} user(s) set to ${status}.` });
+      }
 
-    setSelected(new Set());
-    startTransition(() => {
-      router.refresh();
-    });
+      setSelected(new Set());
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (error) {
+      toast({
+        title: "Action failed",
+        description: error instanceof Error ? error.message : "Something went wrong",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
