@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createOffer, updateOffer, deleteOffer } from "@/lib/actions";
+import { ImageUploadField } from "@/components/admin/image-upload-field";
 
 export default async function AdminOffersPage() {
   const supabase = createClient();
@@ -39,8 +40,10 @@ export default async function AdminOffersPage() {
               ))}
             </select>
             <input name="referralUrl" placeholder="Referral URL" className="input" required />
-            <input name="logoUrl" placeholder="Logo URL (optional)" className="input" />
             <input name="benefitText" placeholder="Benefit text" className="input" />
+            <div className="md:col-span-2">
+              <ImageUploadField name="logoFile" urlName="logoUrl" label="Offer Logo" />
+            </div>
             <input name="displayOrder" type="number" placeholder="Display order" className="input" defaultValue="0" />
             <input name="description" placeholder="Description" className="input md:col-span-2" />
             <div className="flex items-center gap-6 md:col-span-2">
@@ -103,8 +106,12 @@ export default async function AdminOffersPage() {
                         <input name="referralUrl" defaultValue={offer.referral_url} className="input w-full" required />
                       </div>
                       <div className="space-y-1 md:col-span-2">
-                        <label className="text-xs text-muted-foreground">Logo URL</label>
-                        <input name="logoUrl" defaultValue={offer.logo_url ?? ""} className="input w-full" />
+                        <ImageUploadField
+                          name="logoFile"
+                          urlName="logoUrl"
+                          label="Offer Logo"
+                          defaultUrl={offer.logo_url}
+                        />
                       </div>
                       <div className="space-y-1 md:col-span-2">
                         <label className="text-xs text-muted-foreground">Description</label>

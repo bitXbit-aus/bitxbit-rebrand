@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { distributeTokens, getAirdropWalletBalance, AirdropResult } from "@/lib/solana";
+import { uploadAsset, deleteAsset } from "@/lib/storage";
 
 export async function updateProfile(formData: FormData) {
   const supabase = createClient();
@@ -19,8 +20,28 @@ export async function updateProfile(formData: FormData) {
   revalidatePath("/dashboard/profile");
 }
 
+async function resolveImageUrl(
+  formData: FormData,
+  fileFieldName: string,
+  urlFieldName: string,
+  folder: string
+): Promise<string | null> {
+  const file = formData.get(fileFieldName) as File | null;
+  const url = (formData.get(urlFieldName) as string) || null;
+
+  if (file && file.size > 0) {
+    const { url: uploadedUrl, error } = await uploadAsset(file, folder);
+    if (error) throw new Error(error);
+    return uploadedUrl;
+  }
+
+  return url;
+}
+
 export async function createOffer(formData: FormData) {
   const supabase = createClient();
+  const logoUrl = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
+
   const { error } = await supabase.from("affiliate_offers").insert({
     name: formData.get("name") as string,
     category_id: (formData.get("categoryId") as string) || null,
@@ -30,7 +51,7 @@ export async function createOffer(formData: FormData) {
     reward_eligible: formData.get("rewardEligible") === "on",
     active: formData.get("active") === "on",
     display_order: parseInt(formData.get("displayOrder") as string) || 0,
-    logo_url: (formData.get("logoUrl") as string) || null,
+    logo_url: logoUrl,
   });
   if (error) throw error;
   revalidatePath("/admin/offers");
@@ -38,6 +59,22 @@ export async function createOffer(formData: FormData) {
 
 export async function updateOffer(id: string, formData: FormData) {
   const supabase = createClient();
+
+  // Fetch current logo URL to decide whether to delete old asset.
+  const { data: current } = await supabase
+    .from("affiliate_offers")
+    .select("logo_url")
+    .eq("id", id)
+    .single();
+
+  const logoUrl = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
+
+  // If a new file was uploaded and the old logo was in storage, delete it.
+  const newFile = formData.get("logoFile") as File | null;
+  if (newFile && newFile.size > 0 && current?.logo_url && current.logo_url !== logoUrl) {
+    await deleteAsset(current.logo_url);
+  }
+
   const { error } = await supabase
     .from("affiliate_offers")
     .update({
@@ -49,7 +86,7 @@ export async function updateOffer(id: string, formData: FormData) {
       reward_eligible: formData.get("rewardEligible") === "on",
       active: formData.get("active") === "on",
       display_order: parseInt(formData.get("displayOrder") as string) || 0,
-      logo_url: (formData.get("logoUrl") as string) || null,
+      logo_url: logoUrl,
     })
     .eq("id", id);
   if (error) throw error;
@@ -312,12 +349,15 @@ export async function unpublishTransparencyReport(id: string) {
 
 export async function createProject(formData: FormData) {
   const supabase = createClient();
+  const imageUrl = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
+
   const { error } = await supabase.from("projects").insert({
     name: formData.get("name") as string,
     description: formData.get("description") as string,
     funding_goal: parseFloat(formData.get("fundingGoal") as string) || null,
     status: formData.get("status") as string,
     impact_statement: formData.get("impactStatement") as string,
+    image_url: imageUrl,
   });
   if (error) throw error;
   revalidatePath("/admin/projects");
@@ -325,6 +365,22 @@ export async function createProject(formData: FormData) {
 
 export async function updateProject(id: string, formData: FormData) {
   const supabase = createClient();
+
+  // Fetch current image URL to decide whether to delete old asset.
+  const { data: current } = await supabase
+    .from("projects")
+    .select("image_url")
+    .eq("id", id)
+    .single();
+
+  const imageUrl = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
+
+  // If a new file was uploaded and the old image was in storage, delete it.
+  const newFile = formData.get("imageFile") as File | null;
+  if (newFile && newFile.size > 0 && current?.image_url && current.image_url !== imageUrl) {
+    await deleteAsset(current.image_url);
+  }
+
   const { error } = await supabase
     .from("projects")
     .update({
@@ -334,6 +390,7 @@ export async function updateProject(id: string, formData: FormData) {
       status: formData.get("status") as string,
       impact_statement: formData.get("impactStatement") as string,
       amount_allocated: parseFloat(formData.get("amountAllocated") as string) || 0,
+      image_url: imageUrl,
     })
     .eq("id", id);
   if (error) throw error;

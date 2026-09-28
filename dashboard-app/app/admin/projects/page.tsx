@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createProject, updateProject, deleteProject } from "@/lib/actions";
 import { formatCurrency } from "@/lib/utils";
+import { ImageUploadField } from "@/components/admin/image-upload-field";
 
 export default async function AdminProjectsPage() {
   const supabase = createClient();
@@ -38,6 +39,9 @@ export default async function AdminProjectsPage() {
             <input name="fundingGoal" type="number" step="0.01" placeholder="Funding goal (AUD)" className="input" />
             <input name="impactStatement" placeholder="Impact statement" className="input" />
             <textarea name="description" placeholder="Description" className="input md:col-span-2 h-24" />
+            <div className="md:col-span-2">
+              <ImageUploadField name="imageFile" urlName="imageUrl" label="Project Image" />
+            </div>
             <div className="md:col-span-2">
               <Button type="submit">Create Project</Button>
             </div>
@@ -105,6 +109,14 @@ export default async function AdminProjectsPage() {
                   <div className="space-y-1 md:col-span-2">
                     <label className="text-xs text-muted-foreground">Description</label>
                     <textarea name="description" defaultValue={project.description ?? ""} className="input w-full h-24" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <ImageUploadField
+                      name="imageFile"
+                      urlName="imageUrl"
+                      label="Project Image"
+                      defaultUrl={project.image_url}
+                    />
                   </div>
                 </div>
 
