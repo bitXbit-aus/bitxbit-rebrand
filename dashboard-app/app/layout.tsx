@@ -42,6 +42,9 @@ export const metadata: Metadata = {
     description: "Community referral ecosystem dashboard",
     images: [ogImage],
   },
+  verification: {
+    google: "V1dAjRChakzKpbBTiVfMcl6cdE50p-hJPASkSUvrLpk",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
