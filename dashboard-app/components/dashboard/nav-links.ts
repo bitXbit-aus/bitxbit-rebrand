@@ -14,6 +14,7 @@ import {
   PieChart,
   Megaphone,
   Users,
+  BarChart3,
 } from "lucide-react";
 
 export const memberLinks = [
@@ -37,4 +38,5 @@ export const adminLinks = [
   { name: "Users", href: "/admin/users", icon: Users },
   { name: "Referrals", href: "/admin/referrals", icon: TrendingUp },
   { name: "Rewards", href: "/admin/rewards", icon: Coins },
+  { name: "Analytics", href: "/admin/analytics", icon: BarChart3 },
 ];
