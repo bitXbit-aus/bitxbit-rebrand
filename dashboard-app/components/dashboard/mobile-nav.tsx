@@ -43,7 +43,7 @@ export function MobileNav({
   }
 
   return (
-    <div className="lg:hidden flex items-center justify-between h-16 px-4 border-b border-border w-full">
+    <div className="lg:hidden flex items-center justify-between h-16 px-4 border-b border-border w-full relative z-50">
       <Link
         href={isAdmin ? "/admin" : "/dashboard"}
         className="font-bold text-lg text-white"
