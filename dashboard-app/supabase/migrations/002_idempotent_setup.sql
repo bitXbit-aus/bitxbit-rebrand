@@ -361,7 +361,7 @@ INSERT INTO public.categories (name, slug, display_order) VALUES
 ON CONFLICT (slug) DO NOTHING;
 
 INSERT INTO public.allocation_models (name, community_rewards_pct, liquidity_pct, buybacks_pct, projects_pct, operations_pct, is_active, effective_date) VALUES
-  ('Initial Model 2025', 40, 25, 15, 10, 10, true, '2025-01-01')
+  ('Initial Model 2026 effective from 29th of September 2026', 40, 25, 15, 10, 10, true, '2026-09-29')
 ON CONFLICT DO NOTHING;
 
 -- Only seed projects if they don't already exist, to avoid duplicates across migrations.

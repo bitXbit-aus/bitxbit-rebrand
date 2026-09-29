@@ -295,7 +295,7 @@ INSERT INTO public.categories (name, slug, display_order) VALUES
   ('Regenerative Living', 'regenerative', 8);
 
 INSERT INTO public.allocation_models (name, community_rewards_pct, liquidity_pct, buybacks_pct, projects_pct, operations_pct, is_active, effective_date) VALUES
-  ('Initial Model 2025', 40, 25, 15, 10, 10, true, '2025-01-01');
+  ('Initial Model 2026 effective from 29th of September 2026', 40, 25, 15, 10, 10, true, '2026-09-29');
 
 INSERT INTO public.projects (name, description, funding_goal, amount_allocated, status, impact_statement, display_order) VALUES
   ('New Earth Healing Clinic', 'A regenerative healing centre offering holistic therapies and accessible community wellness programs.', 250000, 0, 'active', 'Every referral click helps fund accessible healing for people who need it most.', 1),
