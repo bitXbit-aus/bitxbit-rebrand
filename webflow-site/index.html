@@ -102,7 +102,6 @@
   <!-- The Circle (How It Works Preview) -->
   <section class="section">
     <div class="container">
-      <p class="text-sm text-muted font-medium text-center reveal" style="margin-bottom: var(--space-6);">Only available on Solana Decentralised Exchanges</p>
       <div class="section-header reveal" style="margin-top: 0;">
         <h2>Click by click, bit by bit.</h2>
         <p>See how everyday digital activity becomes shared abundance.</p>
@@ -148,7 +147,7 @@
         <p>Real numbers. Real flow. Updated regularly.</p>
         <p class="text-sm text-muted" style="margin-top: 0.5rem;">Token launched 17 Oct 2021</p>
       </div>
-      <div class="grid grid-5">
+      <div class="grid grid-4" style="max-width: 900px; margin: 0 auto;">
         <div class="stat-card reveal">
           <div class="stat-value" id="stat-price">—</div>
           <div class="stat-label">Token Price</div>
@@ -158,11 +157,6 @@
           <div class="stat-value" id="stat-market-cap">—</div>
           <div class="stat-label">Market Cap</div>
           <div class="stat-sublabel">Fully diluted valuation</div>
-        </div>
-        <div class="stat-card reveal">
-          <div class="stat-value" id="stat-liquidity">—</div>
-          <div class="stat-label">Liquidity</div>
-          <div class="stat-sublabel">Total DEX liquidity</div>
         </div>
         <div class="stat-card reveal">
           <div class="stat-value" id="stat-holders">—</div>
@@ -195,7 +189,7 @@
           <h4>Jupiter</h4>
           <p class="text-secondary text-sm">Solana's leading DEX aggregator for the best swap rates.</p>
           <p class="text-gold text-sm font-medium">Benefit: Best rates across Solana</p>
-          <a href="#" class="btn btn-primary btn-sm" style="width: 100%;">Get Started</a>
+          <a href="https://jup.ag/?sell=So11111111111111111111111111111111111111112&buy=DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="width: 100%;">Get Started</a>
           <p class="disclosure">bitXbit may earn affiliate income.</p>
         </div>
         <div class="referral-card reveal">
@@ -204,7 +198,7 @@
           <h4>Phantom</h4>
           <p class="text-secondary text-sm">The friendly Solana wallet trusted by millions.</p>
           <p class="text-gold text-sm font-medium">Benefit: Free, secure self-custody</p>
-          <a href="#" class="btn btn-primary btn-sm" style="width: 100%;">Get Started</a>
+          <a href="https://phantom.com/" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="width: 100%;">Get Started</a>
           <p class="disclosure">bitXbit may earn affiliate income.</p>
         </div>
         <div class="referral-card reveal">
@@ -213,7 +207,7 @@
           <h4>Orca</h4>
           <p class="text-secondary text-sm">User-friendly DEX with concentrated liquidity on Solana.</p>
           <p class="text-gold text-sm font-medium">Benefit: Low fees, intuitive UI</p>
-          <a href="#" class="btn btn-primary btn-sm" style="width: 100%;">Get Started</a>
+          <a href="https://www.orca.so/pools/FDbCi9yb9mVAVUNA4jSv5L9W9s2PgWFpRWvkjYAvZDFe" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="width: 100%;">Get Started</a>
           <p class="disclosure">bitXbit may earn affiliate income.</p>
         </div>
       </div>
@@ -334,7 +328,7 @@
           <ul>
             <li><a href="#">Twitter / X</a></li>
             <li><a href="#">Discord</a></li>
-            <li><a href="#">Contact</a></li>
+            <li><a href="mailto:bitxbit_support@pm.me">Contact</a></li>
           </ul>
         </div>
       </div>
@@ -375,7 +369,6 @@
           const priceEl = document.getElementById("stat-price");
           const priceSubEl = document.getElementById("stat-price-sublabel");
           const marketCapEl = document.getElementById("stat-market-cap");
-          const liquidityEl = document.getElementById("stat-liquidity");
           const holdersEl = document.getElementById("stat-holders");
 
           if (priceEl) priceEl.textContent = formatCurrency(data.price);
@@ -390,7 +383,6 @@
             }
           }
           if (marketCapEl) marketCapEl.textContent = formatCurrencyWhole(data.marketCap);
-          if (liquidityEl) liquidityEl.textContent = formatCurrencyWhole(data.liquidity);
           if (holdersEl) holdersEl.textContent = formatNumber(data.holders);
         } catch (err) {
           console.error("Failed to load token stats:", err);

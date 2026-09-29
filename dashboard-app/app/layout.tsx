@@ -43,6 +43,10 @@ export const metadata: Metadata = {
     description: "Community referral ecosystem dashboard",
     images: [ogImage],
   },
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
   verification: {
     google: "V1dAjRChakzKpbBTiVfMcl6cdE50p-hJPASkSUvrLpk",
   },
