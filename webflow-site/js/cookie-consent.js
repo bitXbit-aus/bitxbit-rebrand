@@ -6,6 +6,7 @@
   'use strict';
 
   const CONSENT_KEY = 'bxb_analytics_consent';
+  const PLAUSIBLE_DOMAIN = 'bitxbit.com.au';
   const PLAUSIBLE_SCRIPT = 'https://plausible.io/js/pa-4iO18xbWIudVPceEE0zrV.js';
 
   function getConsent() {
@@ -26,19 +27,23 @@
   }
 
   function loadPlausible() {
-    if (document.querySelector('script[src="' + PLAUSIBLE_SCRIPT + '"]')) return;
+    if (document.querySelector('script[data-domain="' + PLAUSIBLE_DOMAIN + '"]')) return;
 
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = PLAUSIBLE_SCRIPT;
-    document.head.appendChild(script);
-
+    // Set up the queue and init BEFORE appending the script element,
+    // matching the exact snippet Plausible provides.
     window.plausible = window.plausible || function () {
       (window.plausible.q = window.plausible.q || []).push(arguments);
     };
     window.plausible.init = window.plausible.init || function (opts) {
       window.plausible.o = opts || {};
     };
+
+    const script = document.createElement('script');
+    script.async = true;
+    script.setAttribute('data-domain', PLAUSIBLE_DOMAIN);
+    script.src = PLAUSIBLE_SCRIPT;
+    document.head.appendChild(script);
+
     window.plausible.init();
   }
 
