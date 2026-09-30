@@ -27,24 +27,17 @@
   }
 
   function loadPlausible() {
-    if (document.querySelector('script[data-domain="' + PLAUSIBLE_DOMAIN + '"]')) return;
+    if (document.querySelector('script[src*="pa-4iO18xbWIudVPceEE0zrV"]')) return;
 
-    // Set up the queue and init BEFORE appending the script element,
-    // matching the exact snippet Plausible provides.
-    window.plausible = window.plausible || function () {
-      (window.plausible.q = window.plausible.q || []).push(arguments);
-    };
-    window.plausible.init = window.plausible.init || function (opts) {
-      window.plausible.o = opts || {};
-    };
+    // Inject the exact Plausible snippet (two script tags).
+    const loader = document.createElement('script');
+    loader.async = true;
+    loader.src = 'https://plausible.io/js/pa-4iO18xbWIudVPceEE0zrV.js';
+    document.head.appendChild(loader);
 
-    const script = document.createElement('script');
-    script.async = true;
-    script.setAttribute('data-domain', PLAUSIBLE_DOMAIN);
-    script.src = PLAUSIBLE_SCRIPT;
-    document.head.appendChild(script);
-
-    window.plausible.init();
+    const inline = document.createElement('script');
+    inline.textContent = 'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()';
+    document.head.appendChild(inline);
   }
 
   function hideBanner() {
