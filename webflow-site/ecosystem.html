@@ -79,7 +79,7 @@
         <h2>Token Pulse</h2>
         <p>Live on-chain metrics for the bitxbit token.</p>
       </div>
-      <div class="grid grid-5">
+      <div class="grid grid-4">
         <div class="stat-card reveal">
           <div class="stat-value" id="stat-price">—</div>
           <div class="stat-label">Token Price</div>
@@ -89,11 +89,6 @@
           <div class="stat-value" id="stat-market-cap">—</div>
           <div class="stat-label">Market Cap</div>
           <div class="stat-sublabel">Fully diluted valuation</div>
-        </div>
-        <div class="stat-card reveal">
-          <div class="stat-value" id="stat-liquidity">—</div>
-          <div class="stat-label">Liquidity</div>
-          <div class="stat-sublabel">Total DEX liquidity</div>
         </div>
         <div class="stat-card reveal">
           <div class="stat-value" id="stat-holders">—</div>
@@ -271,7 +266,6 @@
           const priceEl = document.getElementById("stat-price");
           const priceSubEl = document.getElementById("stat-price-sublabel");
           const marketCapEl = document.getElementById("stat-market-cap");
-          const liquidityEl = document.getElementById("stat-liquidity");
           const holdersEl = document.getElementById("stat-holders");
 
           if (priceEl) priceEl.textContent = formatCurrency(data.price);
@@ -286,7 +280,6 @@
             }
           }
           if (marketCapEl) marketCapEl.textContent = formatCurrencyWhole(data.marketCap);
-          if (liquidityEl) liquidityEl.textContent = formatCurrencyWhole(data.liquidity);
           if (holdersEl) holdersEl.textContent = formatNumber(data.holders);
         } catch (err) {
           console.error("Token stats failed:", err);
