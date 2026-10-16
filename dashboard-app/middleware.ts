@@ -1,6 +1,11 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+interface MiddlewareAuthorization {
+  role: "member" | "admin";
+  status: "active" | "suspended" | "deactivated";
+}
+
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
     request: {
@@ -38,34 +43,40 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Protect admin routes
-  if (request.nextUrl.pathname.startsWith("/admin")) {
-    if (!user) {
-      return NextResponse.redirect(new URL("/auth/login", request.url));
-    }
-    const { data: dbUser } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-    if (dbUser?.role !== "admin") {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+  const pathname = request.nextUrl.pathname;
+  const isAdminRoute = pathname.startsWith("/admin");
+  const isDashboardRoute = pathname.startsWith("/dashboard");
+  const isAuthEntryRoute =
+    pathname.startsWith("/auth/login") || pathname.startsWith("/auth/signup");
+
+  if (!user && (isAdminRoute || isDashboardRoute)) {
+    return NextResponse.redirect(new URL("/auth/login", request.url));
+  }
+
+  let authorization: MiddlewareAuthorization | null = null;
+  if (user && (isAdminRoute || isDashboardRoute || isAuthEntryRoute)) {
+    const { data, error } = await supabase
+      .rpc("get_my_authorization")
+      .maybeSingle();
+
+    if (!error && data) {
+      authorization = data as MiddlewareAuthorization;
     }
   }
 
-  // Protect dashboard routes
-  if (request.nextUrl.pathname.startsWith("/dashboard")) {
-    if (!user) {
-      return NextResponse.redirect(new URL("/auth/login", request.url));
-    }
+  const isActive = authorization?.status === "active";
+
+  if (user && (isAdminRoute || isDashboardRoute) && !isActive) {
+    const loginUrl = new URL("/auth/login", request.url);
+    loginUrl.searchParams.set("error", "account_inactive");
+    return NextResponse.redirect(loginUrl);
   }
 
-  // Redirect logged-in users away from auth pages
-  if (
-    user &&
-    (request.nextUrl.pathname.startsWith("/auth/login") ||
-      request.nextUrl.pathname.startsWith("/auth/signup"))
-  ) {
+  if (user && isAdminRoute && authorization?.role !== "admin") {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  if (user && isAuthEntryRoute && isActive) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

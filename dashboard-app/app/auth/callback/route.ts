@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
@@ -16,7 +17,8 @@ export async function GET(request: Request) {
     if (!error && data.user) {
       // If a referrer was passed via OAuth redirect, attach it to the new user.
       if (ref) {
-        await supabase
+        const serviceClient = createServiceClient();
+        await serviceClient
           .from("users")
           .update({ referred_by: ref })
           .eq("id", data.user.id)

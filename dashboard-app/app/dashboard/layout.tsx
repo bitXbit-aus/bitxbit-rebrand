@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireActiveUser } from "@/lib/authz";
 import { redirect } from "next/navigation";
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { MobileNav } from "@/components/dashboard/mobile-nav";
@@ -9,26 +9,21 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  let context;
 
-  if (!user) {
-    redirect("/auth/login");
+  try {
+    context = await requireActiveUser();
+  } catch {
+    redirect("/auth/login?error=account_inactive");
   }
 
-  const { data: dbUser } = await supabase
-    .from("users")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  const isAdmin = dbUser?.role === "admin";
+  const isAdmin = context.authorization.role === "admin";
 
   return (
     <div className="min-h-screen flex bg-background">
       <DashboardSidebar isAdmin={isAdmin} />
       <main className="flex-1 min-w-0">
-        <MobileNav userEmail={user?.email} brand="bitXbit" />
+        <MobileNav userEmail={context.user.email} brand="bitXbit" />
         {children}
       </main>
       <Toaster />

@@ -5,17 +5,113 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { distributeTokens, getAirdropWalletBalance, getTokenBalance, isValidSolanaAddress, AirdropResult } from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
+import { requireActiveUser, requireCapability, type AuthorizationContext } from "@/lib/authz";
+import { writeSecurityAudit } from "@/lib/audit";
+import {
+  assertSecurityAdminRemovalSafe,
+  isUuid,
+  validateUserIds,
+  validateUserRole,
+  validateUserStatus,
+  requiresSecurityAuthorization,
+  type ManagedUserRole,
+  type ManagedUserStatus,
+  type SecurityAdminState,
+  OFFER_CLICK_DEDUPE_SECONDS,
+} from "@/lib/security-mutations";
+
+interface ManagedUserRow {
+  user_id: string;
+  role: ManagedUserRole;
+  status: ManagedUserStatus;
+  can_manage_security: boolean;
+}
+
+function toSecurityAdminState(row: ManagedUserRow): SecurityAdminState {
+  return {
+    id: row.user_id,
+    role: row.role,
+    status: row.status,
+    canManageSecurity: row.can_manage_security,
+  };
+}
+
+async function loadManagedUserStates(ids: string[]): Promise<SecurityAdminState[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("user_authorizations")
+    .select("user_id, role, status, can_manage_security")
+    .in("user_id", ids);
+  if (error) throw error;
+  if (!data || data.length !== ids.length) {
+    throw new Error("One or more selected users do not exist.");
+  }
+  return (data as ManagedUserRow[]).map(toSecurityAdminState);
+}
+
+async function loadActiveSecurityAdminIds(): Promise<string[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("user_authorizations")
+    .select("user_id")
+    .eq("role", "admin")
+    .eq("status", "active")
+    .eq("can_manage_security", true);
+  if (error) throw error;
+  return (data ?? []).map((row: { user_id: string }) => row.user_id);
+}
+
+async function auditMutationFailure(
+  context: AuthorizationContext,
+  action: string,
+  targetTable: string,
+  targetId: string | null,
+  error: unknown,
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  await writeSecurityAudit(context, {
+    action,
+    targetTable,
+    targetId,
+    success: false,
+    errorMessage: error instanceof Error ? error.message : "Unknown error",
+    metadata,
+  });
+}
+
+async function auditedAdminMutation<T>(
+  context: AuthorizationContext,
+  action: string,
+  targetTable: string,
+  targetId: string | null,
+  mutate: () => Promise<T>,
+  metadata: Record<string, unknown> = {}
+): Promise<T> {
+  try {
+    const result = await mutate();
+    await writeSecurityAudit(context, {
+      action,
+      targetTable,
+      targetId,
+      success: true,
+      metadata,
+    });
+    return result;
+  } catch (error) {
+    await auditMutationFailure(context, action, targetTable, targetId, error, metadata);
+    throw error;
+  }
+}
 
 export async function updateProfile(formData: FormData) {
+  const { user } = await requireActiveUser();
   const supabase = createClient();
-  const userId = formData.get("userId") as string;
   const displayName = formData.get("displayName") as string;
-  const walletAddress = formData.get("walletAddress") as string;
 
   const { error } = await supabase
     .from("users")
-    .update({ display_name: displayName, wallet_address: walletAddress })
-    .eq("id", userId);
+    .update({ display_name: displayName })
+    .eq("id", user.id);
 
   if (error) throw error;
   revalidatePath("/dashboard/profile");
@@ -40,45 +136,12 @@ async function resolveImageUrl(
 }
 
 export async function createOffer(formData: FormData) {
-  const supabase = createClient();
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
   const logoUrl = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
 
-  const { error } = await supabase.from("affiliate_offers").insert({
-    name: formData.get("name") as string,
-    category_id: (formData.get("categoryId") as string) || null,
-    referral_url: formData.get("referralUrl") as string,
-    description: formData.get("description") as string,
-    benefit_text: formData.get("benefitText") as string,
-    reward_eligible: formData.get("rewardEligible") === "on",
-    active: formData.get("active") === "on",
-    display_order: parseInt(formData.get("displayOrder") as string) || 0,
-    logo_url: logoUrl,
-  });
-  if (error) throw error;
-  revalidatePath("/admin/offers");
-}
-
-export async function updateOffer(id: string, formData: FormData) {
-  const supabase = createClient();
-
-  // Fetch current logo URL to decide whether to delete old asset.
-  const { data: current } = await supabase
-    .from("affiliate_offers")
-    .select("logo_url")
-    .eq("id", id)
-    .single();
-
-  const logoUrl = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
-
-  // If a new file was uploaded and the old logo was in storage, delete it.
-  const newFile = formData.get("logoFile") as File | null;
-  if (newFile && newFile.size > 0 && current?.logo_url && current.logo_url !== logoUrl) {
-    await deleteAsset(current.logo_url);
-  }
-
-  const { error } = await supabase
-    .from("affiliate_offers")
-    .update({
+  await auditedAdminMutation(context, "offer.create", "public.affiliate_offers", null, async () => {
+    const { error } = await supabase.from("affiliate_offers").insert({
       name: formData.get("name") as string,
       category_id: (formData.get("categoryId") as string) || null,
       referral_url: formData.get("referralUrl") as string,
@@ -88,136 +151,352 @@ export async function updateOffer(id: string, formData: FormData) {
       active: formData.get("active") === "on",
       display_order: parseInt(formData.get("displayOrder") as string) || 0,
       logo_url: logoUrl,
-    })
-    .eq("id", id);
-  if (error) throw error;
+    });
+    if (error) throw error;
+  });
+  revalidatePath("/admin/offers");
+}
+
+export async function updateOffer(id: string, formData: FormData) {
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+
+  await auditedAdminMutation(context, "offer.update", "public.affiliate_offers", id, async () => {
+    // Fetch current logo URL to decide whether to delete old asset.
+    const { data: current } = await supabase
+      .from("affiliate_offers")
+      .select("logo_url")
+      .eq("id", id)
+      .single();
+
+    const logoUrl = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
+
+    // If a new file was uploaded and the old logo was in storage, delete it.
+    const newFile = formData.get("logoFile") as File | null;
+    if (newFile && newFile.size > 0 && current?.logo_url && current.logo_url !== logoUrl) {
+      await deleteAsset(current.logo_url);
+    }
+
+    const { error } = await supabase
+      .from("affiliate_offers")
+      .update({
+        name: formData.get("name") as string,
+        category_id: (formData.get("categoryId") as string) || null,
+        referral_url: formData.get("referralUrl") as string,
+        description: formData.get("description") as string,
+        benefit_text: formData.get("benefitText") as string,
+        reward_eligible: formData.get("rewardEligible") === "on",
+        active: formData.get("active") === "on",
+        display_order: parseInt(formData.get("displayOrder") as string) || 0,
+        logo_url: logoUrl,
+      })
+      .eq("id", id);
+    if (error) throw error;
+  });
   revalidatePath("/admin/offers");
 }
 
 export async function deleteOffer(id: string) {
-  const supabase = createClient();
-  const { error } = await supabase.from("affiliate_offers").delete().eq("id", id);
-  if (error) throw error;
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "offer.delete", "public.affiliate_offers", id, async () => {
+    const { error } = await supabase.from("affiliate_offers").delete().eq("id", id);
+    if (error) throw error;
+  });
   revalidatePath("/admin/offers");
 }
 
 export async function createCategory(formData: FormData) {
-  const supabase = createClient();
-  const { error } = await supabase.from("categories").insert({
-    name: formData.get("name") as string,
-    slug: formData.get("slug") as string,
-    display_order: parseInt(formData.get("displayOrder") as string) || 0,
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "category.create", "public.categories", null, async () => {
+    const { error } = await supabase.from("categories").insert({
+      name: formData.get("name") as string,
+      slug: formData.get("slug") as string,
+      display_order: parseInt(formData.get("displayOrder") as string) || 0,
+    });
+    if (error) throw error;
   });
-  if (error) throw error;
   revalidatePath("/admin/categories");
 }
 
 export async function createIncome(formData: FormData) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase.from("affiliate_income").insert({
-    source: formData.get("source") as string,
-    offer_id: (formData.get("offerId") as string) || null,
-    amount: parseFloat(formData.get("amount") as string),
-    currency: formData.get("currency") as string,
-    date_received: formData.get("dateReceived") as string,
-    notes: formData.get("notes") as string,
-    created_by: user?.id,
-  });
-  if (error) throw error;
-  revalidatePath("/admin/income");
-}
-
-export async function updateIncome(id: string, formData: FormData) {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("affiliate_income")
-    .update({
+  const context = await requireCapability("manage_financials");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "income.create", "public.affiliate_income", null, async () => {
+    const { error } = await supabase.from("affiliate_income").insert({
       source: formData.get("source") as string,
       offer_id: (formData.get("offerId") as string) || null,
       amount: parseFloat(formData.get("amount") as string),
       currency: formData.get("currency") as string,
       date_received: formData.get("dateReceived") as string,
       notes: formData.get("notes") as string,
-    })
-    .eq("id", id);
-  if (error) throw error;
+      created_by: context.user.id,
+    });
+    if (error) throw error;
+  });
+  revalidatePath("/admin/income");
+}
+
+export async function updateIncome(id: string, formData: FormData) {
+  const context = await requireCapability("manage_financials");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "income.update", "public.affiliate_income", id, async () => {
+    const { error } = await supabase
+      .from("affiliate_income")
+      .update({
+        source: formData.get("source") as string,
+        offer_id: (formData.get("offerId") as string) || null,
+        amount: parseFloat(formData.get("amount") as string),
+        currency: formData.get("currency") as string,
+        date_received: formData.get("dateReceived") as string,
+        notes: formData.get("notes") as string,
+      })
+      .eq("id", id);
+    if (error) throw error;
+  });
   revalidatePath("/admin/income");
 }
 
 export async function deleteIncome(id: string) {
-  const supabase = createClient();
-  const { error } = await supabase.from("affiliate_income").delete().eq("id", id);
-  if (error) throw error;
+  const context = await requireCapability("manage_financials");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "income.delete", "public.affiliate_income", id, async () => {
+    const { error } = await supabase.from("affiliate_income").delete().eq("id", id);
+    if (error) throw error;
+  });
   revalidatePath("/admin/income");
 }
 
 export async function updateCategory(id: string, formData: FormData) {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("categories")
-    .update({
-      name: formData.get("name") as string,
-      slug: formData.get("slug") as string,
-      display_order: parseInt(formData.get("displayOrder") as string) || 0,
-      active: formData.get("active") === "on",
-    })
-    .eq("id", id);
-  if (error) throw error;
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "category.update", "public.categories", id, async () => {
+    const { error } = await supabase
+      .from("categories")
+      .update({
+        name: formData.get("name") as string,
+        slug: formData.get("slug") as string,
+        display_order: parseInt(formData.get("displayOrder") as string) || 0,
+        active: formData.get("active") === "on",
+      })
+      .eq("id", id);
+    if (error) throw error;
+  });
   revalidatePath("/admin/categories");
 }
 
 export async function deleteCategory(id: string) {
-  const supabase = createClient();
-  const { error } = await supabase.from("categories").delete().eq("id", id);
-  if (error) throw error;
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "category.delete", "public.categories", id, async () => {
+    const { error } = await supabase.from("categories").delete().eq("id", id);
+    if (error) throw error;
+  });
   revalidatePath("/admin/categories");
 }
 
 export async function updateUser(id: string, formData: FormData) {
+  if (!isUuid(id)) throw new Error("Invalid user ID.");
+
+  let context = await requireCapability("manage_users");
   const supabase = createServiceClient();
-  const { error } = await supabase
-    .from("users")
-    .update({
-      role: formData.get("role") as string,
-      status: formData.get("status") as string,
+  const [current] = await loadManagedUserStates([id]);
+  const nextRole = validateUserRole(String(formData.get("role") ?? current.role));
+  const nextStatus = validateUserStatus(String(formData.get("status") ?? current.status));
+  const roleChanged = requiresSecurityAuthorization(current.role, nextRole);
+
+  if (roleChanged) {
+    try {
+      context = await requireCapability("manage_security", { requiredAal: "aal2" });
+    } catch (error) {
+      await auditMutationFailure(
+        context,
+        "user.role_change_denied",
+        "public.user_authorizations",
+        id,
+        error,
+        { requested_role: nextRole }
+      );
+      throw error;
+    }
+  }
+
+  const walletAddress = String(formData.get("walletAddress") ?? "").trim() || null;
+  if (walletAddress && !isValidSolanaAddress(walletAddress)) {
+    throw new Error("Invalid Solana wallet address.");
+  }
+
+  try {
+    if (roleChanged || nextStatus !== current.status) {
+      assertSecurityAdminRemovalSafe({
+        actorId: context.user.id,
+        targets: [current],
+        allActiveSecurityAdminIds: await loadActiveSecurityAdminIds(),
+        nextRole,
+        nextStatus,
+      });
+    }
+
+    const before = {
+      role: current.role,
+      status: current.status,
+      display_name: null,
+      wallet_address: null,
+    };
+    const { data: profile } = await supabase
+      .from("users")
+      .select("display_name, wallet_address")
+      .eq("id", id)
+      .single();
+    before.display_name = profile?.display_name ?? null;
+    before.wallet_address = profile?.wallet_address ?? null;
+
+    const after = {
+      role: nextRole,
+      status: nextStatus,
       display_name: (formData.get("displayName") as string) || null,
-      wallet_address: (formData.get("walletAddress") as string) || null,
-    })
-    .eq("id", id);
-  if (error) throw error;
+      wallet_address: walletAddress,
+    };
+    const { error } = await supabase.from("users").update(after).eq("id", id);
+    if (error) throw error;
+
+    await writeSecurityAudit(context, {
+      action: roleChanged ? "user.security_update" : "user.update",
+      targetTable: "public.users",
+      targetId: id,
+      before,
+      after,
+      metadata: { role_changed: roleChanged },
+    });
+  } catch (error) {
+    await auditMutationFailure(context, "user.update", "public.users", id, error, {
+      requested_role: nextRole,
+      requested_status: nextStatus,
+    });
+    throw error;
+  }
+
   revalidatePath("/admin/users");
 }
 
 export async function bulkUpdateUsersRole(ids: string[], role: string) {
+  const userIds = validateUserIds(ids);
+  const nextRole = validateUserRole(role);
+  const baseContext = await requireActiveUser();
+  let context: AuthorizationContext;
+  try {
+    context = await requireCapability("manage_security", { requiredAal: "aal2" });
+  } catch (error) {
+    await auditMutationFailure(
+      baseContext,
+      "users.bulk_role_update_denied",
+      "public.user_authorizations",
+      null,
+      error,
+      { target_ids: userIds, role: nextRole }
+    );
+    throw error;
+  }
   const supabase = createServiceClient();
-  const { error } = await supabase.from("users").update({ role }).in("id", ids);
-  if (error) throw error;
+
+  try {
+    const targets = await loadManagedUserStates(userIds);
+    assertSecurityAdminRemovalSafe({
+      actorId: context.user.id,
+      targets,
+      allActiveSecurityAdminIds: await loadActiveSecurityAdminIds(),
+      nextRole,
+    });
+
+    const { error } = await supabase.from("users").update({ role: nextRole }).in("id", userIds);
+    if (error) throw error;
+    await writeSecurityAudit(context, {
+      action: "users.bulk_role_update",
+      targetTable: "public.users",
+      metadata: { target_ids: userIds, role: nextRole, previous: targets },
+    });
+  } catch (error) {
+    await auditMutationFailure(context, "users.bulk_role_update", "public.users", null, error, {
+      target_ids: userIds,
+      role: nextRole,
+    });
+    throw error;
+  }
   revalidatePath("/admin/users");
 }
 
 export async function bulkUpdateUsersStatus(ids: string[], status: string) {
+  const userIds = validateUserIds(ids);
+  const nextStatus = validateUserStatus(status);
+  const context = await requireCapability("manage_users");
   const supabase = createServiceClient();
-  const { error } = await supabase.from("users").update({ status }).in("id", ids);
-  if (error) throw error;
+
+  try {
+    const targets = await loadManagedUserStates(userIds);
+    assertSecurityAdminRemovalSafe({
+      actorId: context.user.id,
+      targets,
+      allActiveSecurityAdminIds: await loadActiveSecurityAdminIds(),
+      nextStatus,
+    });
+    const { error } = await supabase.from("users").update({ status: nextStatus }).in("id", userIds);
+    if (error) throw error;
+    await writeSecurityAudit(context, {
+      action: "users.bulk_status_update",
+      targetTable: "public.users",
+      metadata: { target_ids: userIds, status: nextStatus, previous: targets },
+    });
+  } catch (error) {
+    await auditMutationFailure(context, "users.bulk_status_update", "public.users", null, error, {
+      target_ids: userIds,
+      status: nextStatus,
+    });
+    throw error;
+  }
   revalidatePath("/admin/users");
 }
 
 export async function bulkDeleteUsers(ids: string[]) {
+  const userIds = validateUserIds(ids);
+  const context = await requireCapability("manage_users");
   const supabase = createServiceClient();
-  const { error } = await supabase.from("users").delete().in("id", ids);
-  if (error) throw error;
+
+  try {
+    const targets = await loadManagedUserStates(userIds);
+    assertSecurityAdminRemovalSafe({
+      actorId: context.user.id,
+      targets,
+      allActiveSecurityAdminIds: await loadActiveSecurityAdminIds(),
+      deleting: true,
+    });
+    const { error } = await supabase.from("users").delete().in("id", userIds);
+    if (error) throw error;
+    await writeSecurityAudit(context, {
+      action: "users.bulk_delete",
+      targetTable: "public.users",
+      metadata: { target_ids: userIds, previous: targets },
+    });
+  } catch (error) {
+    await auditMutationFailure(context, "users.bulk_delete", "public.users", null, error, {
+      target_ids: userIds,
+    });
+    throw error;
+  }
   revalidatePath("/admin/users");
 }
 
 export async function createRewardPeriod(formData: FormData) {
-  const supabase = createClient();
-  const { error } = await supabase.from("reward_periods").insert({
-    start_date: formData.get("startDate") as string,
-    end_date: formData.get("endDate") as string,
-    allocation_model_id: (formData.get("allocationModelId") as string) || null,
+  const context = await requireCapability("manage_rewards");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "reward_period.create", "public.reward_periods", null, async () => {
+    const { error } = await supabase.from("reward_periods").insert({
+      start_date: formData.get("startDate") as string,
+      end_date: formData.get("endDate") as string,
+      allocation_model_id: (formData.get("allocationModelId") as string) || null,
+    });
+    if (error) throw error;
   });
-  if (error) throw error;
   revalidatePath("/admin/rewards");
 }
 
@@ -229,206 +508,238 @@ const ACTIVITY_POINTS: Record<string, number> = {
 };
 
 export async function calculateRewards(periodId: string) {
-  const supabase = createClient();
+  if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
+  const context = await requireCapability("manage_rewards");
+  const supabase = createServiceClient();
 
-  const { data: period, error: periodError } = await supabase
-    .from("reward_periods")
-    .select("*, allocation_model:allocation_models(*)")
-    .eq("id", periodId)
-    .single();
-  if (periodError || !period) throw periodError || new Error("Period not found");
+  await auditedAdminMutation(
+    context,
+    "reward_period.calculate",
+    "public.reward_periods",
+    periodId,
+    async () => {
+      const { data: period, error: periodError } = await supabase
+        .from("reward_periods")
+        .select("*, allocation_model:allocation_models(*)")
+        .eq("id", periodId)
+        .single();
+      if (periodError || !period) throw periodError || new Error("Period not found");
 
-  const { data: incomeRows } = await supabase
-    .from("affiliate_income")
-    .select("amount")
-    .gte("date_received", period.start_date)
-    .lte("date_received", period.end_date);
-  const totalIncome = incomeRows?.reduce((sum, row) => sum + (row.amount || 0), 0) ?? 0;
+      const { data: incomeRows } = await supabase
+        .from("affiliate_income")
+        .select("amount")
+        .gte("date_received", period.start_date)
+        .lte("date_received", period.end_date);
+      const totalIncome = incomeRows?.reduce((sum, row) => sum + (row.amount || 0), 0) ?? 0;
 
-  const communityPct = period.allocation_model?.community_rewards_pct ?? 0;
-  const communityPool = totalIncome * (communityPct / 100);
+      const communityPct = period.allocation_model?.community_rewards_pct ?? 0;
+      const communityPool = totalIncome * (communityPct / 100);
 
-  const { data: activities } = await supabase
-    .from("user_activities")
-    .select("user_id, activity_type")
-    .gte("created_at", `${period.start_date}T00:00:00Z`)
-    .lte("created_at", `${period.end_date}T23:59:59Z`);
+      const { data: activities } = await supabase
+        .from("user_activities")
+        .select("user_id, activity_type")
+        .gte("created_at", `${period.start_date}T00:00:00Z`)
+        .lte("created_at", `${period.end_date}T23:59:59Z`);
 
-  const { data: users } = await supabase
-    .from("users")
-    .select("id, referred_by");
+      const { data: users } = await supabase.from("users").select("id, referred_by");
 
-  const directPointsByUser = new Map<string, number>();
-  activities?.forEach((a) => {
-    const points = ACTIVITY_POINTS[a.activity_type] ?? 1;
-    const current = directPointsByUser.get(a.user_id) || 0;
-    directPointsByUser.set(a.user_id, current + points);
-  });
+      const directPointsByUser = new Map<string, number>();
+      activities?.forEach((a) => {
+        const points = ACTIVITY_POINTS[a.activity_type] ?? 1;
+        const current = directPointsByUser.get(a.user_id) || 0;
+        directPointsByUser.set(a.user_id, current + points);
+      });
 
-  const REFERRAL_BONUS_PCT = 5;
-  const pointsByUser = new Map<string, number>();
-  let totalPoints = 0;
+      const REFERRAL_BONUS_PCT = 5;
+      const pointsByUser = new Map<string, number>();
+      let totalPoints = 0;
 
-  users?.forEach((user) => {
-    let points = directPointsByUser.get(user.id) || 0;
+      users?.forEach((user) => {
+        let points = directPointsByUser.get(user.id) || 0;
 
-    // Add 5% of each referred user's direct points
-    users.forEach((potentialReferral) => {
-      if (potentialReferral.referred_by === user.id) {
-        const referralPoints = directPointsByUser.get(potentialReferral.id) || 0;
-        points += referralPoints * (REFERRAL_BONUS_PCT / 100);
+        // Add 5% of each referred user's direct points
+        users.forEach((potentialReferral) => {
+          if (potentialReferral.referred_by === user.id) {
+            const referralPoints = directPointsByUser.get(potentialReferral.id) || 0;
+            points += referralPoints * (REFERRAL_BONUS_PCT / 100);
+          }
+        });
+
+        if (points > 0) {
+          pointsByUser.set(user.id, points);
+          totalPoints += points;
+        }
+      });
+
+      if (totalPoints === 0 || communityPool === 0) {
+        await supabase
+          .from("reward_periods")
+          .update({ total_income: totalIncome, status: "calculating" })
+          .eq("id", periodId);
+        return { totalIncome, recipients: 0 };
       }
-    });
 
-    if (points > 0) {
-      pointsByUser.set(user.id, points);
-      totalPoints += points;
-    }
-  });
+      const rewards = Array.from(pointsByUser.entries()).map(([userId, points]) => {
+        const estimated = (points / totalPoints) * communityPool;
+        return {
+          user_id: userId,
+          reward_period_id: periodId,
+          estimated_aud_value: Number(estimated.toFixed(2)),
+          bitxbit_amount: Number(estimated.toFixed(4)),
+          status: "pending",
+        };
+      });
 
-  if (totalPoints === 0 || communityPool === 0) {
-    await supabase.from("reward_periods").update({ total_income: totalIncome, status: "calculating" }).eq("id", periodId);
-    return;
-  }
+      await supabase.from("user_rewards").delete().eq("reward_period_id", periodId);
+      const { error: insertError } = await supabase.from("user_rewards").insert(rewards);
+      if (insertError) throw insertError;
 
-  const rewards = Array.from(pointsByUser.entries()).map(([userId, points]) => {
-    const estimated = (points / totalPoints) * communityPool;
-    return {
-      user_id: userId,
-      reward_period_id: periodId,
-      estimated_aud_value: Number(estimated.toFixed(2)),
-      bitxbit_amount: Number(estimated.toFixed(4)),
-      status: "pending",
-    };
-  });
+      await supabase
+        .from("reward_periods")
+        .update({ total_income: totalIncome, status: "calculating" })
+        .eq("id", periodId);
 
-  await supabase.from("user_rewards").delete().eq("reward_period_id", periodId);
-  const { error: insertError } = await supabase.from("user_rewards").insert(rewards);
-  if (insertError) throw insertError;
-
-  await supabase
-    .from("reward_periods")
-    .update({ total_income: totalIncome, status: "calculating" })
-    .eq("id", periodId);
+      return { totalIncome, recipients: rewards.length };
+    },
+    { period_id: periodId }
+  );
 
   revalidatePath("/admin/rewards");
 }
 
 export async function approveRewards(periodId: string) {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("user_rewards")
-    .update({ status: "approved" })
-    .eq("reward_period_id", periodId)
-    .eq("status", "pending");
-  if (error) throw error;
+  if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
+  const context = await requireCapability("manage_rewards");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(
+    context,
+    "reward_period.approve",
+    "public.reward_periods",
+    periodId,
+    async () => {
+      const { error } = await supabase
+        .from("user_rewards")
+        .update({ status: "approved" })
+        .eq("reward_period_id", periodId)
+        .eq("status", "pending");
+      if (error) throw error;
 
-  await supabase.from("reward_periods").update({ status: "approved" }).eq("id", periodId);
+      await supabase.from("reward_periods").update({ status: "approved" }).eq("id", periodId);
+    },
+    { period_id: periodId }
+  );
   revalidatePath("/admin/rewards");
-}
-
-export async function distributeRewards(periodId: string, txHash: string) {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("user_rewards")
-    .update({ status: "distributed", distribution_tx_hash: txHash, distributed_at: new Date().toISOString() })
-    .eq("reward_period_id", periodId)
-    .eq("status", "approved");
-  if (error) throw error;
-
-  await supabase.from("reward_periods").update({ status: "distributed" }).eq("id", periodId);
-  revalidatePath("/admin/rewards");
-}
-
-export async function distributeRewardsWithTx(periodId: string, formData: FormData) {
-  const txHash = formData.get("txHash") as string;
-  if (!txHash) throw new Error("Transaction hash is required");
-  return distributeRewards(periodId, txHash);
 }
 
 export async function publishTransparencyReport(id: string) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase
-    .from("transparency_reports")
-    .update({ published_at: new Date().toISOString(), published_by: user?.id })
-    .eq("id", id);
-  if (error) throw error;
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(
+    context,
+    "transparency_report.publish",
+    "public.transparency_reports",
+    id,
+    async () => {
+      const { error } = await supabase
+        .from("transparency_reports")
+        .update({ published_at: new Date().toISOString(), published_by: context.user.id })
+        .eq("id", id);
+      if (error) throw error;
+    }
+  );
   revalidatePath("/admin/transparency-updates");
   revalidatePath("/dashboard/transparency");
 }
 
 export async function unpublishTransparencyReport(id: string) {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("transparency_reports")
-    .update({ published_at: null, published_by: null })
-    .eq("id", id);
-  if (error) throw error;
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(
+    context,
+    "transparency_report.unpublish",
+    "public.transparency_reports",
+    id,
+    async () => {
+      const { error } = await supabase
+        .from("transparency_reports")
+        .update({ published_at: null, published_by: null })
+        .eq("id", id);
+      if (error) throw error;
+    }
+  );
   revalidatePath("/admin/transparency-updates");
   revalidatePath("/dashboard/transparency");
 }
 
 export async function createProject(formData: FormData) {
-  const supabase = createClient();
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
   const imageUrl = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
 
-  const { error } = await supabase.from("projects").insert({
-    name: formData.get("name") as string,
-    description: formData.get("description") as string,
-    funding_goal: parseFloat(formData.get("fundingGoal") as string) || null,
-    status: formData.get("status") as string,
-    impact_statement: formData.get("impactStatement") as string,
-    image_url: imageUrl,
-  });
-  if (error) throw error;
-  revalidatePath("/admin/projects");
-}
-
-export async function updateProject(id: string, formData: FormData) {
-  const supabase = createClient();
-
-  // Fetch current image URL to decide whether to delete old asset.
-  const { data: current } = await supabase
-    .from("projects")
-    .select("image_url")
-    .eq("id", id)
-    .single();
-
-  const imageUrl = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
-
-  // If a new file was uploaded and the old image was in storage, delete it.
-  const newFile = formData.get("imageFile") as File | null;
-  if (newFile && newFile.size > 0 && current?.image_url && current.image_url !== imageUrl) {
-    await deleteAsset(current.image_url);
-  }
-
-  const { error } = await supabase
-    .from("projects")
-    .update({
+  await auditedAdminMutation(context, "project.create", "public.projects", null, async () => {
+    const { error } = await supabase.from("projects").insert({
       name: formData.get("name") as string,
       description: formData.get("description") as string,
       funding_goal: parseFloat(formData.get("fundingGoal") as string) || null,
       status: formData.get("status") as string,
       impact_statement: formData.get("impactStatement") as string,
-      amount_allocated: parseFloat(formData.get("amountAllocated") as string) || 0,
       image_url: imageUrl,
-    })
-    .eq("id", id);
-  if (error) throw error;
+    });
+    if (error) throw error;
+  });
+  revalidatePath("/admin/projects");
+}
+
+export async function updateProject(id: string, formData: FormData) {
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+
+  await auditedAdminMutation(context, "project.update", "public.projects", id, async () => {
+    // Fetch current image URL to decide whether to delete old asset.
+    const { data: current } = await supabase
+      .from("projects")
+      .select("image_url")
+      .eq("id", id)
+      .single();
+
+    const imageUrl = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
+
+    // If a new file was uploaded and the old image was in storage, delete it.
+    const newFile = formData.get("imageFile") as File | null;
+    if (newFile && newFile.size > 0 && current?.image_url && current.image_url !== imageUrl) {
+      await deleteAsset(current.image_url);
+    }
+
+    const { error } = await supabase
+      .from("projects")
+      .update({
+        name: formData.get("name") as string,
+        description: formData.get("description") as string,
+        funding_goal: parseFloat(formData.get("fundingGoal") as string) || null,
+        status: formData.get("status") as string,
+        impact_statement: formData.get("impactStatement") as string,
+        amount_allocated: parseFloat(formData.get("amountAllocated") as string) || 0,
+        image_url: imageUrl,
+      })
+      .eq("id", id);
+    if (error) throw error;
+  });
   revalidatePath("/admin/projects");
 }
 
 export async function deleteProject(id: string) {
-  const supabase = createClient();
-  const { error } = await supabase.from("projects").delete().eq("id", id);
-  if (error) throw error;
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
+  await auditedAdminMutation(context, "project.delete", "public.projects", id, async () => {
+    const { error } = await supabase.from("projects").delete().eq("id", id);
+    if (error) throw error;
+  });
   revalidatePath("/admin/projects");
 }
 
 export async function createTransparencyReport(formData: FormData) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const context = await requireCapability("manage_content");
+  const supabase = createServiceClient();
 
   const totalIncome = parseFloat(formData.get("totalIncome") as string) || 0;
   const communityRewardsPct = parseFloat(formData.get("communityRewardsPct") as string) || 0;
@@ -455,61 +766,129 @@ export async function createTransparencyReport(formData: FormData) {
     .map((url) => url.trim())
     .filter(Boolean) ?? [];
 
-  const { error } = await supabase.from("transparency_reports").insert({
-    report_month: formData.get("reportMonth") as string,
-    report_year: parseInt(formData.get("reportYear") as string),
-    total_income: totalIncome || null,
-    allocation_snapshot: allocationSnapshot,
-    summary_text: formData.get("summaryText") as string,
-    proof_urls: proofUrls,
-    published_by: user?.id,
-    published_at: new Date().toISOString(),
-  });
-  if (error) throw error;
+  await auditedAdminMutation(
+    context,
+    "transparency_report.create",
+    "public.transparency_reports",
+    null,
+    async () => {
+      const { error } = await supabase.from("transparency_reports").insert({
+        report_month: formData.get("reportMonth") as string,
+        report_year: parseInt(formData.get("reportYear") as string),
+        total_income: totalIncome || null,
+        allocation_snapshot: allocationSnapshot,
+        summary_text: formData.get("summaryText") as string,
+        proof_urls: proofUrls,
+        published_by: context.user.id,
+        published_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+    }
+  );
   revalidatePath("/admin/transparency-updates");
 }
 
-export async function trackOfferClick(offerId: string) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    throw new Error("You must be signed in to track offer clicks.");
+export async function trackOfferClick(offerId: string, referralUrl: string) {
+  if (!isUuid(offerId)) throw new Error("Invalid offer ID.");
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(referralUrl);
+  } catch {
+    throw new Error("Invalid offer URL.");
+  }
+  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+    throw new Error("Invalid offer URL protocol.");
   }
 
-  const { error } = await supabase.from("user_activities").insert({
-    user_id: user.id,
-    offer_id: offerId,
-    activity_type: "click",
-  });
+  const context = await requireActiveUser();
+  const supabase = createServiceClient();
+  try {
+    const { data, error } = await supabase.rpc("record_trusted_offer_click", {
+      p_user_id: context.user.id,
+      p_offer_id: offerId,
+      p_expected_url: referralUrl,
+      p_dedupe_seconds: OFFER_CLICK_DEDUPE_SECONDS,
+    });
+    if (error) throw error;
 
-  if (error) throw error;
+    const recorded = data === true;
+    await writeSecurityAudit(context, {
+      action: recorded ? "offer.click_recorded" : "offer.click_deduplicated",
+      targetTable: "public.user_activities",
+      targetId: offerId,
+      metadata: {
+        offer_id: offerId,
+        recorded,
+        trusted_source: "server_action",
+        dedupe_seconds: OFFER_CLICK_DEDUPE_SECONDS,
+      },
+    });
+    return { recorded };
+  } catch (error) {
+    await auditMutationFailure(
+      context,
+      "offer.click_ingestion",
+      "public.user_activities",
+      offerId,
+      error,
+      { trusted_source: "server_action" }
+    );
+    throw error;
+  }
 }
 
 export async function saveWalletAddress(walletAddress: string) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    throw new Error("You must be signed in to save a wallet address.");
-  }
+  const context = await requireActiveUser();
+  const { user } = context;
+  const supabase = createServiceClient();
 
   if (!isValidSolanaAddress(walletAddress)) {
     throw new Error("Invalid Solana wallet address.");
   }
 
-  const { error } = await supabase
-    .from("users")
-    .update({ wallet_address: walletAddress })
-    .eq("id", user.id);
+  try {
+    const { data: current, error: readError } = await supabase
+      .from("users")
+      .select("wallet_address")
+      .eq("id", user.id)
+      .single();
+    if (readError) throw readError;
 
-  if (error) throw error;
+    const { error } = await supabase
+      .from("users")
+      .update({ wallet_address: walletAddress })
+      .eq("id", user.id);
+    if (error) throw error;
+
+    await writeSecurityAudit(context, {
+      action: current?.wallet_address ? "wallet.address_change" : "wallet.address_save",
+      targetTable: "public.users",
+      targetId: user.id,
+      before: { wallet_address: current?.wallet_address ?? null },
+      after: { wallet_address: walletAddress },
+    });
+  } catch (error) {
+    await auditMutationFailure(context, "wallet.address_save", "public.users", user.id, error);
+    throw error;
+  }
   revalidatePath("/dashboard/wallet");
   revalidatePath("/dashboard/profile");
 }
 
 export async function getAirdropWalletBalanceAction() {
-  return getAirdropWalletBalance();
+  const context = await requireCapability("manage_rewards");
+  try {
+    const balance = await getAirdropWalletBalance();
+    await writeSecurityAudit(context, {
+      action: "treasury.balance_read",
+      targetTable: "external.solana",
+      metadata: { token_balance: balance.token, sol_balance: balance.sol },
+    });
+    return balance;
+  } catch (error) {
+    await auditMutationFailure(context, "treasury.balance_read", "external.solana", null, error);
+    throw error;
+  }
 }
 
 export async function getTokenBalanceAction(walletAddress: string) {
@@ -517,6 +896,7 @@ export async function getTokenBalanceAction(walletAddress: string) {
 }
 
 export async function sendTestAirdrop(formData: FormData) {
+  const context = await requireCapability("manage_rewards");
   const walletAddress = formData.get("walletAddress") as string;
   if (!walletAddress) {
     throw new Error("Wallet address is required");
@@ -527,104 +907,139 @@ export async function sendTestAirdrop(formData: FormData) {
   }
 
   const TEST_AMOUNT = 0.001;
-  const balance = await getAirdropWalletBalance();
+  try {
+    const balance = await getAirdropWalletBalance();
+    if (balance.token < TEST_AMOUNT) {
+      throw new Error(`Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, needed: ${TEST_AMOUNT}`);
+    }
+    if (balance.sol < 0.005) {
+      throw new Error(`Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL`);
+    }
 
-  if (balance.token < TEST_AMOUNT) {
-    throw new Error(`Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, needed: ${TEST_AMOUNT}`);
-  }
+    const results = await distributeTokens([
+      { userId: "test", walletAddress, amount: TEST_AMOUNT },
+    ]);
+    const result = results[0];
+    if (!result.txHash) {
+      throw new Error(result.error ?? "Test airdrop failed");
+    }
 
-  if (balance.sol < 0.005) {
-    throw new Error(`Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL`);
-  }
-
-  const results = await distributeTokens([
-    { userId: "test", walletAddress, amount: TEST_AMOUNT },
-  ]);
-
-  const result = results[0];
-  if (!result.txHash) {
-    throw new Error(result.error ?? "Test airdrop failed");
+    await writeSecurityAudit(context, {
+      action: "airdrop.test_send",
+      targetTable: "external.solana",
+      targetId: result.txHash,
+      after: { wallet_address: walletAddress, amount: TEST_AMOUNT, transaction_hash: result.txHash },
+    });
+  } catch (error) {
+    await auditMutationFailure(context, "airdrop.test_send", "external.solana", null, error, {
+      wallet_address: walletAddress,
+      amount: TEST_AMOUNT,
+    });
+    throw error;
   }
 
   revalidatePath("/admin/rewards");
 }
 
 export async function airdropRewards(periodId: string) {
-  const supabase = createClient();
+  if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
+  const context = await requireCapability("manage_rewards");
+  const supabase = createServiceClient();
 
-  const { data: rewards } = await supabase
-    .from("user_rewards")
-    .select("id, user_id, bitxbit_amount, users!inner(wallet_address)")
-    .eq("reward_period_id", periodId)
-    .eq("status", "approved");
+  try {
+    const { data: rewards, error: rewardsError } = await supabase
+      .from("user_rewards")
+      .select("id, user_id, bitxbit_amount, users!inner(wallet_address)")
+      .eq("reward_period_id", periodId)
+      .eq("status", "approved");
+    if (rewardsError) throw rewardsError;
 
-  const distributions = rewards
-    ?.map((r: any) => ({
-      userId: r.user_id,
-      walletAddress: r.users?.wallet_address,
-      amount: r.bitxbit_amount ?? 0,
-      rewardId: r.id,
-    }))
-    .filter((d) => d.walletAddress && d.amount > 0 && isValidSolanaAddress(d.walletAddress)) ?? [];
+    const distributions = rewards
+      ?.map((r: any) => ({
+        userId: r.user_id,
+        walletAddress: r.users?.wallet_address,
+        amount: r.bitxbit_amount ?? 0,
+        rewardId: r.id,
+      }))
+      .filter((d) => d.walletAddress && d.amount > 0 && isValidSolanaAddress(d.walletAddress)) ?? [];
 
-  const invalidWalletCount = rewards?.filter(
-    (r: any) => r.users?.wallet_address && !isValidSolanaAddress(r.users.wallet_address)
-  ).length ?? 0;
-  const missingWalletCount = (rewards?.length ?? 0) - distributions.length - invalidWalletCount;
+    const invalidWalletCount = rewards?.filter(
+      (r: any) => r.users?.wallet_address && !isValidSolanaAddress(r.users.wallet_address)
+    ).length ?? 0;
+    const missingWalletCount = (rewards?.length ?? 0) - distributions.length - invalidWalletCount;
 
-  if (distributions.length === 0) {
-    let message = "No approved rewards found for this period.";
-    if (missingWalletCount > 0 && invalidWalletCount > 0) {
-      message = `${missingWalletCount} member(s) are missing a wallet address and ${invalidWalletCount} have an invalid address.`;
-    } else if (missingWalletCount > 0) {
-      message = `${missingWalletCount} member(s) are missing a wallet address.`;
-    } else if (invalidWalletCount > 0) {
-      message = `${invalidWalletCount} member(s) have an invalid wallet address.`;
+    if (distributions.length === 0) {
+      let message = "No approved rewards found for this period.";
+      if (missingWalletCount > 0 && invalidWalletCount > 0) {
+        message = `${missingWalletCount} member(s) are missing a wallet address and ${invalidWalletCount} have an invalid address.`;
+      } else if (missingWalletCount > 0) {
+        message = `${missingWalletCount} member(s) are missing a wallet address.`;
+      } else if (invalidWalletCount > 0) {
+        message = `${invalidWalletCount} member(s) have an invalid wallet address.`;
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
-  }
 
-  // Pre-flight balance checks
-  const totalNeeded = distributions.reduce((sum, d) => sum + d.amount, 0);
-  const balance = await getAirdropWalletBalance();
-  const estimatedSolFee = distributions.length * 0.005;
-
-  if (balance.token < totalNeeded) {
-    throw new Error(
-      `Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, Needed: ${totalNeeded.toFixed(4)}`
-    );
-  }
-
-  if (balance.sol < estimatedSolFee) {
-    throw new Error(
-      `Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL, Estimated: ${estimatedSolFee.toFixed(4)} SOL`
-    );
-  }
-
-  const results = await distributeTokens(distributions);
-
-  const failed = results.filter((r) => !r.txHash);
-  if (failed.length > 0) {
-    console.error("Some airdrops failed:", failed);
-  }
-
-  for (const result of results) {
-    if (result.txHash) {
-      await supabase
-        .from("user_rewards")
-        .update({
-          status: "distributed",
-          distribution_tx_hash: result.txHash,
-          distributed_at: new Date().toISOString(),
-        })
-        .eq("id", result.rewardId);
+    const totalNeeded = distributions.reduce((sum, d) => sum + d.amount, 0);
+    const balance = await getAirdropWalletBalance();
+    const estimatedSolFee = distributions.length * 0.005;
+    if (balance.token < totalNeeded) {
+      throw new Error(
+        `Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, Needed: ${totalNeeded.toFixed(4)}`
+      );
     }
-  }
+    if (balance.sol < estimatedSolFee) {
+      throw new Error(
+        `Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL, Estimated: ${estimatedSolFee.toFixed(4)} SOL`
+      );
+    }
 
-  await supabase
-    .from("reward_periods")
-    .update({ status: "distributed" })
-    .eq("id", periodId);
+    const results = await distributeTokens(distributions);
+    const failed = results.filter((result) => !result.txHash);
+    for (const result of results) {
+      if (result.txHash) {
+        const { error } = await supabase
+          .from("user_rewards")
+          .update({
+            status: "distributed",
+            distribution_tx_hash: result.txHash,
+            distributed_at: new Date().toISOString(),
+          })
+          .eq("id", result.rewardId);
+        if (error) throw error;
+      }
+    }
+
+    if (failed.length === 0) {
+      const { error } = await supabase
+        .from("reward_periods")
+        .update({ status: "distributed" })
+        .eq("id", periodId);
+      if (error) throw error;
+    }
+
+    await writeSecurityAudit(context, {
+      action: failed.length === 0 ? "airdrop.rewards_complete" : "airdrop.rewards_partial",
+      targetTable: "public.reward_periods",
+      targetId: periodId,
+      success: failed.length === 0,
+      errorMessage: failed.length > 0 ? `${failed.length} transfer(s) failed.` : null,
+      metadata: {
+        attempted_count: distributions.length,
+        successful_count: results.length - failed.length,
+        failed_count: failed.length,
+        total_amount: totalNeeded,
+        transaction_hashes: results.flatMap((result) => result.txHash ? [result.txHash] : []),
+      },
+    });
+
+    if (failed.length > 0) {
+      throw new Error(`${failed.length} airdrop transfer(s) failed; the period remains approved.`);
+    }
+  } catch (error) {
+    await auditMutationFailure(context, "airdrop.rewards", "public.reward_periods", periodId, error);
+    throw error;
+  }
 
   revalidatePath("/admin/rewards");
 }

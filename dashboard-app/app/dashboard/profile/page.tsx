@@ -47,7 +47,7 @@ export default async function ProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle>Update Profile</CardTitle>
-            <CardDescription>Change your display name and wallet address.</CardDescription>
+            <CardDescription>Change your display name. Wallet changes are handled on the Wallet page.</CardDescription>
           </CardHeader>
           <CardContent>
             <FormWithToast
@@ -55,15 +55,9 @@ export default async function ProfilePage() {
               successMessage="Profile updated successfully"
               className="space-y-4"
             >
-              <input type="hidden" name="userId" value={profile?.id} />
               <div className="space-y-2">
                 <Label htmlFor="displayName">Display Name</Label>
                 <Input id="displayName" name="displayName" defaultValue={profile?.display_name ?? ""} placeholder="Your name" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="walletAddress">Wallet Address</Label>
-                <Input id="walletAddress" name="walletAddress" defaultValue={profile?.wallet_address ?? ""} placeholder="Solana wallet address" />
-                <p className="text-xs text-muted-foreground">Used for bitxbit token reward distribution.</p>
               </div>
               <Button type="submit">Save Changes</Button>
             </FormWithToast>

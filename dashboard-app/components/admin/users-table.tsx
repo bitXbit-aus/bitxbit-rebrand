@@ -118,7 +118,7 @@ export function UsersTable({
         toast({ title: "Role updated", description: `${ids.length} user(s) set to ${role}.` });
       } else if (action === "status") {
         const status = prompt("Set status to:", "active");
-        if (!status || !["active", "suspended"].includes(status)) return;
+        if (!status || !["active", "suspended", "deactivated"].includes(status)) return;
         await bulkUpdateUsersStatus(ids, status);
         toast({ title: "Status updated", description: `${ids.length} user(s) set to ${status}.` });
       }
@@ -177,6 +177,7 @@ export function UsersTable({
             <option value="all">All statuses</option>
             <option value="active">Active</option>
             <option value="suspended">Suspended</option>
+            <option value="deactivated">Deactivated</option>
           </select>
           <Button type="submit" variant="secondary">
             Search
@@ -288,6 +289,7 @@ export function UsersTable({
                   <select name="status" defaultValue={user.status} className="input w-full text-sm mt-2">
                     <option value="active">Active</option>
                     <option value="suspended">Suspended</option>
+                    <option value="deactivated">Deactivated</option>
                   </select>
                 </div>
                 <div className="md:col-span-2">
