@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "rm -rf .test-dist && tsc lib/authz-decision.ts lib/authz-decision.test.ts lib/security-mutations.ts lib/security-mutations.test.ts lib/payout.ts lib/payout.test.ts lib/wallet-crypto.ts lib/wallet-crypto.test.ts --outDir .test-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --types node && node --test .test-dist/*.test.js && rm -rf .test-dist",
+    "test": "rm -rf .test-dist && tsc lib/authz-decision.ts lib/authz-decision.test.ts lib/security-mutations.ts lib/security-mutations.test.ts lib/payout.ts lib/payout.test.ts lib/rate-limit.ts lib/rate-limit.test.ts lib/wallet-crypto.ts lib/wallet-crypto.test.ts --outDir .test-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --types node && node --test .test-dist/*.test.js && rm -rf .test-dist",
     "test:migration": "bash scripts/test-phase1-migration-replay.sh",
     "db:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID --schema public > types/supabase.ts"
   },
