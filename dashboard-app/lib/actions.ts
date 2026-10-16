@@ -849,30 +849,31 @@ export async function saveWalletAddress(walletAddress: string) {
   try {
     const { data: current, error: readError } = await supabase
       .from("users")
-      .select("wallet_address")
+      .select("wallet_address, wallet_verified")
       .eq("id", user.id)
       .single();
     if (readError) throw readError;
 
-    const { error } = await supabase
-      .from("users")
-      .update({ wallet_address: walletAddress })
-      .eq("id", user.id);
-    if (error) throw error;
+    const currentAddress = current?.wallet_address ?? null;
+    const isSameAddress = currentAddress?.toLowerCase() === walletAddress.toLowerCase();
 
-    await writeSecurityAudit(context, {
-      action: current?.wallet_address ? "wallet.address_change" : "wallet.address_save",
-      targetTable: "public.users",
-      targetId: user.id,
-      before: { wallet_address: current?.wallet_address ?? null },
-      after: { wallet_address: walletAddress },
-    });
+    // Wallet address changes must go through cryptographic verification
+    // (verifyWalletSignature). This action only permits idempotent re-saving
+    // of the currently verified address.
+    if (!isSameAddress) {
+      throw new Error(
+        "Wallet address changes require ownership verification. Please verify the new wallet before saving it as your payout address."
+      );
+    }
+
+    return { walletAddress, verified: current?.wallet_verified ?? false };
   } catch (error) {
     await auditMutationFailure(context, "wallet.address_save", "public.users", user.id, error);
     throw error;
   }
   revalidatePath("/dashboard/wallet");
   revalidatePath("/dashboard/profile");
+  return { walletAddress, verified: false };
 }
 
 export async function getAirdropWalletBalanceAction() {

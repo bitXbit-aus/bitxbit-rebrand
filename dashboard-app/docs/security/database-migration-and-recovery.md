@@ -10,6 +10,11 @@ This guide covers staged application of `010_phase1_security_foundation.sql`. It
 - Prefer a new forward-fix migration over manual drift or rewriting migration `010`.
 - Preserve users, identifiers, roles, statuses, wallets, referrals, rewards, records, and storage objects.
 
+## Migration files
+
+- `010_phase1_security_foundation.sql` — protected authorization, RLS hardening, audit log, trusted offer clicks, integrity constraints.
+- `011_wallet_verification.sql` — challenge table, wallet verification status, atomic challenge consumption, verification reset trigger.
+
 ## Staged application
 
 ### 1. Preflight in a non-production environment

@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB_NAME="bitxbit_phase1_security_replay_test"
 FIXTURE="$ROOT_DIR/supabase/tests/phase1_security_fixture.sql"
-MIGRATION="$ROOT_DIR/supabase/migrations/010_phase1_security_foundation.sql"
+MIGRATION_010="$ROOT_DIR/supabase/migrations/010_phase1_security_foundation.sql"
+MIGRATION_011="$ROOT_DIR/supabase/migrations/011_wallet_verification.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -32,22 +33,27 @@ SQL
 createdb "$DB_NAME"
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$FIXTURE" >/dev/null
-psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_010" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
   "ALTER TABLE public.affiliate_income VALIDATE CONSTRAINT affiliate_income_amount_nonnegative" >/dev/null
 
-psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_010" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
 DECLARE
   test_user UUID := '11111111-1111-4111-8111-111111111111';
   test_offer UUID := '22222222-2222-4222-8222-222222222222';
+  test_wallet TEXT := 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5';
+  challenge_nonce TEXT := 'nonce-11111111-1111-4111-8111-111111111111';
   first_click BOOLEAN;
   second_click BOOLEAN;
   preserved_actor UUID;
+  consumed BOOLEAN;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
@@ -84,7 +90,53 @@ BEGIN
     RAISE EXCEPTION 'service_role cannot execute trusted click ingestion';
   END IF;
 
+  -- Wallet verification: existing users with a wallet are backfilled as unverified.
   INSERT INTO auth.users (id, email) VALUES (test_user, 'security-test@example.test');
+  UPDATE public.users SET wallet_address = test_wallet WHERE id = test_user;
+  IF (SELECT wallet_verified FROM public.users WHERE id = test_user) IS DISTINCT FROM FALSE THEN
+    RAISE EXCEPTION 'existing wallet was not backfilled as unverified';
+  END IF;
+
+  -- Challenge lifecycle: unused challenge can be consumed exactly once.
+  INSERT INTO public.wallet_verification_challenges (
+    user_id, wallet_address, nonce, message, expires_at
+  ) VALUES (
+    test_user, test_wallet, challenge_nonce, 'test-message', NOW() + INTERVAL '5 minutes'
+  );
+
+  SELECT public.consume_wallet_verification_challenge(test_user, test_wallet, challenge_nonce) INTO consumed;
+  IF consumed IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'valid challenge was not consumed';
+  END IF;
+
+  BEGIN
+    SELECT public.consume_wallet_verification_challenge(test_user, test_wallet, challenge_nonce) INTO consumed;
+    RAISE EXCEPTION 'reused challenge was consumed twice';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'reused challenge was consumed twice' THEN
+      RAISE;
+    END IF;
+  END;
+
+  BEGIN
+    SELECT public.consume_wallet_verification_challenge(test_user, test_wallet, 'invalid-nonce') INTO consumed;
+    RAISE EXCEPTION 'invalid challenge was consumed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'invalid challenge was consumed' THEN
+      RAISE;
+    END IF;
+  END;
+
+  -- Updating wallet_address resets verification via trigger.
+  UPDATE public.users SET wallet_verified = TRUE, wallet_verified_at = NOW() WHERE id = test_user;
+  UPDATE public.users SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH6' WHERE id = test_user;
+  IF (SELECT wallet_verified FROM public.users WHERE id = test_user) IS DISTINCT FROM FALSE THEN
+    RAISE EXCEPTION 'wallet address change did not reset verification status';
+  END IF;
+
+  -- Clean up test wallet state so later auth.users insert is not affected by trigger.
+  UPDATE public.users SET wallet_address = NULL, wallet_verified = FALSE, wallet_verified_at = NULL WHERE id = test_user;
+
   INSERT INTO public.affiliate_offers (id, name, referral_url, active)
   VALUES (test_offer, 'Security Test Offer', 'https://example.test/offer', TRUE);
 

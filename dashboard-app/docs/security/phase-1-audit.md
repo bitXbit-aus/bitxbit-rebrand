@@ -42,6 +42,36 @@ Application foundation:
 - Makes migration `010` replay-safe for replacement policies and new objects; existing constraints are added only when absent, so a later `VALIDATE CONSTRAINT` state is not reset by replay.
 - Limits the ordinary profile form to `display_name`; wallet updates remain in the separately validated wallet flow.
 
+## Task 3 — Wallet ownership verification
+
+### Confirmed source finding
+
+The previous `saveWalletAddress()` action accepted any syntactically valid Solana public key from the connected wallet adapter. Connection was treated as proof of ownership, so a member could register another party's public key as their payout destination.
+
+### Implemented fixes
+
+Migration `011_wallet_verification.sql`:
+
+- Adds `public.wallet_verification_challenges` with a unique nonce, the exact message to sign, expiry, and used/verified timestamps.
+- Adds `users.wallet_verified` and `users.wallet_verified_at`, backfills existing addresses as `FALSE`, and protects these columns via RLS (members cannot write them directly).
+- Provides `public.consume_wallet_verification_challenge(UUID, TEXT, TEXT)` as a SECURITY DEFINER function that atomically locks, validates, and consumes a challenge exactly once.
+- Adds `sync_wallet_verification_status()` trigger that resets `wallet_verified` whenever `wallet_address` changes, preventing an unverified substitution from inheriting a previous verified flag.
+
+Application changes:
+
+- New server-only `lib/wallet-crypto.ts` builds a SIWS-compatible message and verifies Ed25519 detached signatures using `tweetnacl` and `@solana/web3.js`.
+- New server-only `lib/wallet-verification.ts` exposes:
+  - `requestWalletVerificationChallenge(walletAddress)` — creates a 5-minute, single-use challenge after `requireActiveUser()`.
+  - `verifyWalletSignature(walletAddress, signatureBase58, nonce)` — validates the challenge, verifies the signature, consumes the nonce atomically, and persists the verified wallet.
+  - `getWalletVerificationStatus()` — returns the member's current saved/verified state.
+- `saveWalletAddress()` in `lib/actions.ts` now rejects address changes; it only permits idempotent re-saving of the currently verified address. All payout-address changes must go through `verifyWalletSignature`.
+- `/dashboard/wallet/page.tsx` no longer treats connection as verification. It displays verification status, shows a "Verify Ownership" button when the connected wallet differs from the saved address or is unverified, and signs the SIWS message with the wallet adapter before submitting it server-side.
+- Unit tests in `lib/wallet-crypto.test.ts` cover message construction, valid signatures, attacker keypairs, and message-replay attacks.
+
+### Acceptance test
+
+A member cannot register another user's wallet as their payout destination by knowing only the public address. They must produce a valid Ed25519 signature over a domain-bound, single-use, time-bound challenge generated for their authenticated account.
+
 ## Remaining work
 
 - Apply and verify the migration in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification.
