@@ -112,15 +112,77 @@ Application changes:
 
 An administrator cannot mark rewards distributed without an on-chain transfer. A reward cannot be paid twice for the same period because the deterministic `operation_id` and confirmed status prevent duplicate operations. A member whose wallet is unverified cannot receive a payout, and a transfer that fails on-chain reconciliation leaves the reward approved and the operation failed rather than marking it distributed.
 
+## Task 5 — Strengthen database security
+
+### Confirmed source finding
+
+Public API routes exposed some internal fields (`source_url` on activity, user IDs in referrer resolution), several routes accepted unbounded query parameters, and no consistent rate limiting or security headers were applied across the API surface.
+
+### Implemented fixes
+
+- Added `lib/rate-limit.ts` with a per-IP sliding-window rate limiter and `429 Too Many Requests` responses.
+- Applied rate limiting to every public API route (`/api/public/*`), `/api/token-stats`, and the authenticated `/api/wallet/rewards` route.
+- Added referral-code length validation (`≤ 64` characters) to `/api/public/resolve-referral` and UUID validation for the OAuth callback `ref` parameter.
+- Ensured public routes return generic error messages; internal Supabase/RPC errors are logged server-side only.
+- Added security headers via `middleware.ts` (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) and mirrored them in `netlify.toml` for static-file responses.
+
+## Task 6 — Dependency and application security
+
+### Confirmed source finding
+
+`npm audit` reports inherited vulnerabilities, primarily in the Solana wallet-adapter transitive tree and build tooling. No direct application dependency is abandoned, but `npm audit fix --force` would install a breaking downgrade of `@solana/spl-token`.
+
+### Implemented fixes
+
+- Captured the full audit output to `docs/security/dependency-audit.md` with severity summary, risk categories, and explicit recommendation **not** to run `npm audit fix --force`.
+- Documented a controlled upgrade plan for the Solana stack and a pruning strategy for unused React Native transitive dependencies.
+- Hardened callback referrer validation and API input boundaries.
+
+## Task 7 — Automated security testing
+
+### Implemented tests
+
+- `lib/authz-decision.test.ts` — active/suspended/deactivated account access, admin access, capability checks, AAL requirements.
+- `lib/security-mutations.test.ts` — promotion/demotion classification, UUID/enum validation, bulk-id bounds, self-removal prevention, last-security-admin protection, trusted-click dedupe.
+- `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
+- `lib/payout.test.ts` — exact token-unit conversion and round-trips.
+- `lib/rate-limit.test.ts` — allow/block/reset behavior and per-client isolation.
+- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010`, `011`, and `012`.
+
+### Test results
+
+- `npm test` — 20/20 pass.
+- `npm run test:migration` — pass.
+- `npm run build` (dummy env) — pass.
+
+## Task 8 — One Good Turn readiness
+
+A separate architecture report, `docs/security/one-good-turn-readiness.md`, identifies reusable systems, proposed new tables (`membership_plans`, `member_subscriptions`, `merchant_offers`, `offer_redemptions`, and a future `promotional_draws` table), service boundaries, and the legal/regulatory prerequisites for any draw module.
+
+## Deliverables
+
+1. **Security Audit Report** — this document.
+2. **Implemented Fixes** — working code on `security/phase-1-hardening` (commits `b087bad`, `af16085`, `66aab29`, `3cd8a64`, `ea0c301`).
+3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`.
+4. **Wallet Authentication Upgrade** — `lib/wallet-crypto.ts`, `lib/wallet-verification.ts`, `app/dashboard/wallet/page.tsx`.
+5. **Token Distribution Improvements** — `lib/payout.ts`, hardened `airdropRewards()`, `payout_operations`.
+6. **Automated Test Results** — 20 unit tests + migration replay test passing.
+7. **Deployment and Recovery Guide** — `docs/security/database-migration-and-recovery.md`.
+8. **Dependency Audit** — `docs/security/dependency-audit.md`.
+9. **One Good Turn Integration Readiness Report** — `docs/security/one-good-turn-readiness.md`.
+
 ## Remaining work
 
-- Apply and verify the migration in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification.
-- Regenerate Supabase TypeScript database types after the migration is applied to a linked project.
+- Apply and verify migrations `010`, `011`, and `012` in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification.
+- Regenerate Supabase TypeScript database types after the migrations are applied to a linked project.
 - Migrate admin user-management reads and UI filtering from compatibility `users.role/status` to an authorized server-side join/view when convenient.
 - Add an explicit capability-management UI/action if delegated capability editing is required; any such action must use `manage_security` plus AAL2 and must retain the last-security-admin safeguards.
-- Review every remaining server action for a named capability rather than relying only on protected admin RLS.
+- Review every remaining Server Action for a named capability rather than relying only on protected admin RLS.
 - Decide whether deactivated accounts should be retained indefinitely or mapped to an Auth ban/delete lifecycle; no deletion policy is introduced here.
 - Validate legacy rows and mark the remaining `NOT VALID` constraints valid in a later forward migration.
 - Application audit writes for user/profile/storage/wallet operations are currently separate from their underlying service-role mutation or external side effect. A process failure between mutation and audit can leave an unaudited success; use transactional database RPCs/outbox records for full atomicity in a later phase. Trusted click ingestion itself is transactionally deduplicated in the database.
 - Bulk last-security-admin checks are enforced immediately before mutation but are not serialized across concurrent admin requests; move these mutations into a locking database RPC if concurrent security administration becomes common.
-- Review the existing dependency audit separately; package installation reported inherited vulnerabilities that were not automatically changed in this security migration.
+- Execute the controlled dependency upgrade plan in `docs/security/dependency-audit.md`; do not use `npm audit fix --force`.
+- Replace the in-memory rate limiter with a shared store (Redis or Supabase-backed) if the app is deployed across multiple serverless functions.
+- Conduct a staging end-to-end smoke test of wallet verification, airdrop idempotency, and admin capability enforcement before production.
+- Obtain legal/regulatory sign-off before designing or enabling any One Good Turn promotional draw module.
