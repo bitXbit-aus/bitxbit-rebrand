@@ -1,9 +1,24 @@
 import { createServiceClient } from "@/lib/supabase/service";
-import { NextResponse } from "next/server";
+import { checkRateLimit, getClientIdentifier, rateLimitResponse } from "@/lib/rate-limit";
+import { NextResponse, type NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
+const RESOLVE_RATE_LIMIT = {
+  windowMs: 60_000,
+  maxRequests: 30,
+  keyPrefix: "api:resolve-referral",
+};
+
+const MAX_CODE_LENGTH = 64;
+
+export async function GET(request: NextRequest) {
+  const identifier = getClientIdentifier(request);
+  const rateLimit = checkRateLimit(identifier, RESOLVE_RATE_LIMIT);
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetAt);
+  }
+
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
 
@@ -14,8 +29,15 @@ export async function GET(request: Request) {
     );
   }
 
-  const supabase = createServiceClient();
   const normalizedCode = code.trim().toLowerCase();
+  if (normalizedCode.length === 0 || normalizedCode.length > MAX_CODE_LENGTH) {
+    return NextResponse.json(
+      { error: "Invalid referral code" },
+      { status: 400 }
+    );
+  }
+
+  const supabase = createServiceClient();
 
   // Referral codes are stored in lowercase. Only fall back to id lookup for UUID-shaped refs
   // so we don't compare a UUID column to non-UUID text (which causes PostgREST to error).
