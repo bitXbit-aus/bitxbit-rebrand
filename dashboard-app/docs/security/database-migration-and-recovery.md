@@ -1,6 +1,6 @@
 # Database Migration and Recovery Guide
 
-This guide covers staged application of `010_phase1_security_foundation.sql`. It is operational guidance, not a claim that the migration has been applied to any live database.
+This guide covers staged application of the Phase 1 security migrations (`010`, `011`, and `012`). It is operational guidance, not a claim that the migrations have been applied to any live database.
 
 ## Principles
 
@@ -14,6 +14,7 @@ This guide covers staged application of `010_phase1_security_foundation.sql`. It
 
 - `010_phase1_security_foundation.sql` — protected authorization, RLS hardening, audit log, trusted offer clicks, integrity constraints.
 - `011_wallet_verification.sql` — challenge table, wallet verification status, atomic challenge consumption, verification reset trigger.
+- `012_secure_token_distribution.sql` — durable `payout_operations` table, idempotent distribution tracking, on-chain reconciliation support, payout audit trigger, confirmed-operation immutability trigger.
 
 ## Staged application
 
@@ -48,7 +49,7 @@ SELECT * FROM public.transparency_reports WHERE total_income < 0;
 npm run test:migration
 ```
 
-The script creates and drops an isolated local PostgreSQL database, applies migration `010`, validates one new constraint, applies `010` again, and asserts that policy replacement, constraint validation state, trusted click deduplication, audit immutability, actor retention, and grants still hold. It requires local `psql`, `createdb`, and `dropdb`; it does not contact Supabase or production.
+The script creates and drops an isolated local PostgreSQL database, applies migrations `010`, `011`, and `012`, validates one new constraint, applies the migrations again, and asserts that policy replacement, constraint validation state, trusted click deduplication, wallet verification lifecycle, payout operation idempotency and immutability, audit immutability, actor retention, and grants still hold. It requires local `psql`, `createdb`, and `dropdb`; it does not contact Supabase or production.
 
 5. Apply migrations through the normal Supabase migration mechanism. Do not paste selected fragments unless recovering from a diagnosed partial manual application.
 
@@ -68,9 +69,9 @@ Record the backup identifier, creation timestamp, migration commit/branch, and o
 
 1. Schedule a low-write window.
 2. Confirm no older migration is being modified.
-3. Apply migration `010` once through the normal migration runner.
+3. Apply migrations `010`, `011`, and `012` once each through the normal migration runner.
 4. Run the verification SQL below before enabling dependent application changes.
-5. Smoke-test login, active member dashboard, suspended-member denial, active admin access, profile display-name update, wallet update through the server action, public asset reads, and blocked direct client writes.
+5. Smoke-test login, active member dashboard, suspended-member denial, active admin access, profile display-name update, wallet update through the server action, public asset reads, blocked direct client writes, wallet ownership challenge signing, and reward airdrop idempotency.
 
 ## Verification SQL
 
@@ -188,6 +189,33 @@ ORDER BY conrelid::regclass::text, conname;
 
 `convalidated = false` is expected initially. PostgreSQL still enforces these checks for new/changed rows.
 
+### Payout operations
+
+```sql
+-- payout_operations exists with expected constraints and indexes.
+SELECT COUNT(*) AS payout_ops_indexes
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND tablename = 'payout_operations'
+  AND indexname IN (
+    'idx_payout_operations_period_status',
+    'idx_payout_operations_reward',
+    'idx_payout_operations_tx'
+  );
+
+-- Direct authenticated reads/writes are blocked; service_role has access.
+SELECT has_table_privilege('authenticated', 'public.payout_operations', 'SELECT') AS authenticated_select;
+SELECT has_table_privilege('service_role', 'public.payout_operations', 'ALL') AS service_role_all;
+
+-- Confirmed operations are immutable.
+SELECT COUNT(*) AS confirmed_mutable_operations
+FROM public.payout_operations
+WHERE status = 'confirmed'
+  AND updated_at > confirmed_at + INTERVAL '1 second';
+```
+
+Expected: `authenticated_select = false`, `service_role_all = true`, `confirmed_mutable_operations = 0`.
+
 ## Session-level behavior tests
 
 Use disposable test accounts, not production identities:
@@ -205,7 +233,11 @@ Use disposable test accounts, not production identities:
 11. An administrator with `manage_users` but without `manage_security` cannot promote or demote any user. Promotion/demotion succeeds only with `manage_security` and an AAL2 session.
 12. Bulk role/status/delete rejects malformed or oversized ID lists, caller self-removal, and removal of the final active security-capable administrator.
 13. Clicking an active offer records at most one trusted click per user/offer within 30 seconds; a mismatched/inactive offer URL is rejected, direct authenticated INSERT remains blocked, and outbound navigation still opens if analytics fails.
-14. Service-role user, storage, wallet, treasury, and airdrop operations create actor-attributed application audit rows without private keys or signing material.
+14. Wallet connection alone does not mark a wallet verified; signing the SIWS challenge with the matching private key does. Changing the saved wallet address resets `wallet_verified` to false.
+15. `sendTestAirdrop` is disabled unless `ENABLE_TEST_AIRDROP=true`.
+16. `airdropRewards` skips unverified wallets, creates exactly one `payout_operations` row per reward/period, reconciles on-chain before marking a reward distributed, and never marks a reward distributed twice.
+17. Confirmed `payout_operations` cannot be changed back to pending, submitted, or failed.
+18. Service-role user, storage, wallet, treasury, and airdrop operations create actor-attributed application audit rows without private keys or signing material.
 
 ## Recovery and forward fixes
 

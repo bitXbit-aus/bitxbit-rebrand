@@ -3,7 +3,16 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { distributeTokens, getAirdropWalletBalance, getTokenBalance, isValidSolanaAddress, AirdropResult } from "@/lib/solana";
+import {
+  getAirdropWalletBalance,
+  getTokenBalance,
+  isValidSolanaAddress,
+  amountToRaw,
+  rawToAmount,
+  executePayoutTransfers,
+  confirmTokenTransfer,
+  type PayoutTransfer,
+} from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
 import { requireActiveUser, requireCapability, type AuthorizationContext } from "@/lib/authz";
 import { writeSecurityAudit } from "@/lib/audit";
@@ -907,7 +916,14 @@ export async function sendTestAirdrop(formData: FormData) {
     throw new Error("Invalid Solana wallet address.");
   }
 
+  // Disable production test airdrops unless explicitly enabled. This prevents
+  // accidental token outflows during security reviews or production operation.
+  if (process.env.ENABLE_TEST_AIRDROP !== "true") {
+    throw new Error("Test airdrops are disabled. Set ENABLE_TEST_AIRDROP=true to enable in a safe environment.");
+  }
+
   const TEST_AMOUNT = 0.001;
+  const amountRaw = amountToRaw(TEST_AMOUNT);
   try {
     const balance = await getAirdropWalletBalance();
     if (balance.token < TEST_AMOUNT) {
@@ -917,12 +933,17 @@ export async function sendTestAirdrop(formData: FormData) {
       throw new Error(`Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL`);
     }
 
-    const results = await distributeTokens([
-      { userId: "test", walletAddress, amount: TEST_AMOUNT },
+    const results = await executePayoutTransfers([
+      { operationId: `test:${context.user.id}:${Date.now()}`, walletAddress, amountRaw },
     ]);
     const result = results[0];
     if (!result.txHash) {
       throw new Error(result.error ?? "Test airdrop failed");
+    }
+
+    const confirmation = await confirmTokenTransfer(result.txHash, walletAddress, amountRaw);
+    if (!confirmation.confirmed) {
+      throw new Error(`Test airdrop could not be confirmed on-chain: ${confirmation.verificationError}`);
     }
 
     await writeSecurityAudit(context, {
@@ -942,105 +963,241 @@ export async function sendTestAirdrop(formData: FormData) {
   revalidatePath("/admin/rewards");
 }
 
+const TOKEN_DECIMALS = 9;
+
 export async function airdropRewards(periodId: string) {
   if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
   const context = await requireCapability("manage_rewards");
   const supabase = createServiceClient();
 
-  try {
-    const { data: rewards, error: rewardsError } = await supabase
-      .from("user_rewards")
-      .select("id, user_id, bitxbit_amount, users!inner(wallet_address)")
-      .eq("reward_period_id", periodId)
-      .eq("status", "approved");
-    if (rewardsError) throw rewardsError;
-
-    const distributions = rewards
-      ?.map((r: any) => ({
-        userId: r.user_id,
-        walletAddress: r.users?.wallet_address,
-        amount: r.bitxbit_amount ?? 0,
-        rewardId: r.id,
-      }))
-      .filter((d) => d.walletAddress && d.amount > 0 && isValidSolanaAddress(d.walletAddress)) ?? [];
-
-    const invalidWalletCount = rewards?.filter(
-      (r: any) => r.users?.wallet_address && !isValidSolanaAddress(r.users.wallet_address)
-    ).length ?? 0;
-    const missingWalletCount = (rewards?.length ?? 0) - distributions.length - invalidWalletCount;
-
-    if (distributions.length === 0) {
-      let message = "No approved rewards found for this period.";
-      if (missingWalletCount > 0 && invalidWalletCount > 0) {
-        message = `${missingWalletCount} member(s) are missing a wallet address and ${invalidWalletCount} have an invalid address.`;
-      } else if (missingWalletCount > 0) {
-        message = `${missingWalletCount} member(s) are missing a wallet address.`;
-      } else if (invalidWalletCount > 0) {
-        message = `${invalidWalletCount} member(s) have an invalid wallet address.`;
-      }
-      throw new Error(message);
-    }
-
-    const totalNeeded = distributions.reduce((sum, d) => sum + d.amount, 0);
-    const balance = await getAirdropWalletBalance();
-    const estimatedSolFee = distributions.length * 0.005;
-    if (balance.token < totalNeeded) {
-      throw new Error(
-        `Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, Needed: ${totalNeeded.toFixed(4)}`
-      );
-    }
-    if (balance.sol < estimatedSolFee) {
-      throw new Error(
-        `Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL, Estimated: ${estimatedSolFee.toFixed(4)} SOL`
-      );
-    }
-
-    const results = await distributeTokens(distributions);
-    const failed = results.filter((result) => !result.txHash);
-    for (const result of results) {
-      if (result.txHash) {
-        const { error } = await supabase
-          .from("user_rewards")
-          .update({
-            status: "distributed",
-            distribution_tx_hash: result.txHash,
-            distributed_at: new Date().toISOString(),
-          })
-          .eq("id", result.rewardId);
-        if (error) throw error;
-      }
-    }
-
-    if (failed.length === 0) {
-      const { error } = await supabase
+  const result = await auditedAdminMutation(
+    context,
+    "airdrop.rewards",
+    "public.reward_periods",
+    periodId,
+    async () => {
+      const { data: period, error: periodError } = await supabase
         .from("reward_periods")
-        .update({ status: "distributed" })
-        .eq("id", periodId);
-      if (error) throw error;
-    }
+        .select("id, status")
+        .eq("id", periodId)
+        .single();
+      if (periodError || !period) throw periodError || new Error("Period not found");
+      if (period.status !== "approved") {
+        throw new Error(`Cannot distribute rewards for period with status '${period.status}'`);
+      }
 
-    await writeSecurityAudit(context, {
-      action: failed.length === 0 ? "airdrop.rewards_complete" : "airdrop.rewards_partial",
-      targetTable: "public.reward_periods",
-      targetId: periodId,
-      success: failed.length === 0,
-      errorMessage: failed.length > 0 ? `${failed.length} transfer(s) failed.` : null,
-      metadata: {
-        attempted_count: distributions.length,
-        successful_count: results.length - failed.length,
-        failed_count: failed.length,
-        total_amount: totalNeeded,
-        transaction_hashes: results.flatMap((result) => result.txHash ? [result.txHash] : []),
-      },
-    });
+      const { data: rewards, error: rewardsError } = await supabase
+        .from("user_rewards")
+        .select("id, user_id, bitxbit_amount, users!inner(wallet_address, wallet_verified)")
+        .eq("reward_period_id", periodId)
+        .eq("status", "approved");
+      if (rewardsError) throw rewardsError;
 
-    if (failed.length > 0) {
-      throw new Error(`${failed.length} airdrop transfer(s) failed; the period remains approved.`);
-    }
-  } catch (error) {
-    await auditMutationFailure(context, "airdrop.rewards", "public.reward_periods", periodId, error);
-    throw error;
-  }
+      const { data: existingOps, error: opsError } = await supabase
+        .from("payout_operations")
+        .select("id, operation_id, reward_id, status, transaction_hash, token_amount_raw")
+        .eq("reward_period_id", periodId);
+      if (opsError) throw opsError;
+
+      const existingByReward = new Map<string, (typeof existingOps)[number]>();
+      for (const op of existingOps ?? []) {
+        existingByReward.set(op.reward_id, op);
+      }
+
+      const distributions: PayoutTransfer[] = [];
+      const rewardMeta = new Map<
+        string,
+        { rewardId: string; walletAddress: string; amountRaw: bigint }
+      >();
+      const skipped = new Map<string, number>();
+
+      function incrementSkip(reason: string) {
+        skipped.set(reason, (skipped.get(reason) ?? 0) + 1);
+      }
+
+      for (const reward of rewards ?? []) {
+        const userRelation = reward.users as
+          | { wallet_address: string | null; wallet_verified: boolean | null }
+          | { wallet_address: string | null; wallet_verified: boolean | null }[]
+          | null;
+        const user = Array.isArray(userRelation) ? userRelation[0] : userRelation;
+        const walletAddress = user?.wallet_address;
+        const walletVerified = user?.wallet_verified ?? false;
+        const amount = reward.bitxbit_amount ?? 0;
+        const amountRaw = amountToRaw(amount, TOKEN_DECIMALS);
+
+        if (!walletAddress) {
+          incrementSkip("missing_wallet");
+          continue;
+        }
+        if (!isValidSolanaAddress(walletAddress)) {
+          incrementSkip("invalid_wallet");
+          continue;
+        }
+        if (!walletVerified) {
+          incrementSkip("unverified_wallet");
+          continue;
+        }
+        if (amountRaw <= 0n) {
+          incrementSkip("zero_amount");
+          continue;
+        }
+
+        const existing = existingByReward.get(reward.id);
+        if (existing?.status === "confirmed") {
+          continue;
+        }
+
+        const operationId = `payout:${periodId}:${reward.id}`;
+
+        if (!existing) {
+          const { error: insertError } = await supabase.from("payout_operations").insert({
+            operation_id: operationId,
+            reward_period_id: periodId,
+            reward_id: reward.id,
+            user_id: reward.user_id,
+            wallet_address: walletAddress,
+            token_amount_raw: amountRaw,
+            token_decimals: TOKEN_DECIMALS,
+            status: "pending",
+            actor_id: context.user.id,
+          });
+          if (insertError) throw insertError;
+        }
+
+        distributions.push({ operationId, walletAddress, amountRaw });
+        rewardMeta.set(operationId, { rewardId: reward.id, walletAddress, amountRaw });
+      }
+
+      if (distributions.length === 0) {
+        const confirmedCount =
+          rewards?.filter((r) => existingByReward.get(r.id)?.status === "confirmed").length ?? 0;
+        if (confirmedCount === (rewards?.length ?? 0) && (rewards?.length ?? 0) > 0) {
+          await supabase.from("reward_periods").update({ status: "distributed" }).eq("id", periodId);
+          return { status: "already_distributed", confirmedCount };
+        }
+        throw new Error(
+          "No eligible rewards to distribute. Wallets may be missing, invalid, or unverified."
+        );
+      }
+
+      const totalNeededRaw = distributions.reduce((sum, d) => sum + d.amountRaw, 0n);
+      const balance = await getAirdropWalletBalance();
+      const balanceRaw = amountToRaw(balance.token, TOKEN_DECIMALS);
+      const estimatedSolFee = distributions.length * 0.005;
+      if (balanceRaw < totalNeededRaw) {
+        throw new Error(
+          `Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, Needed: ${rawToAmount(
+            totalNeededRaw,
+            TOKEN_DECIMALS
+          )}`
+        );
+      }
+      if (balance.sol < estimatedSolFee) {
+        throw new Error(
+          `Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL, Estimated: ${estimatedSolFee.toFixed(
+            4
+          )} SOL`
+        );
+      }
+
+      const transferResults = await executePayoutTransfers(distributions);
+
+      for (const result of transferResults) {
+        if (result.txHash) {
+          await supabase
+            .from("payout_operations")
+            .update({
+              status: "submitted",
+              transaction_hash: result.txHash,
+              submitted_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", result.operationId);
+        } else {
+          await supabase
+            .from("payout_operations")
+            .update({
+              status: "failed",
+              submission_error: result.error,
+              failed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", result.operationId);
+        }
+      }
+
+      const submittedOps = transferResults.filter((r) => r.txHash);
+      let confirmedCount = 0;
+      let reconciliationFailures = 0;
+
+      for (const result of submittedOps) {
+        const meta = rewardMeta.get(result.operationId);
+        if (!meta || !result.txHash) continue;
+
+        const confirmation = await confirmTokenTransfer(
+          result.txHash,
+          meta.walletAddress,
+          meta.amountRaw
+        );
+
+        if (confirmation.confirmed) {
+          await supabase
+            .from("payout_operations")
+            .update({
+              status: "confirmed",
+              confirmed_at: new Date().toISOString(),
+              blockchain_confirmation: confirmation,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", result.operationId);
+
+          await supabase
+            .from("user_rewards")
+            .update({
+              status: "distributed",
+              distribution_tx_hash: result.txHash,
+              distributed_at: new Date().toISOString(),
+            })
+            .eq("id", meta.rewardId);
+
+          confirmedCount++;
+        } else {
+          await supabase
+            .from("payout_operations")
+            .update({
+              status: "failed",
+              submission_error: `On-chain verification failed: ${confirmation.verificationError}`,
+              failed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", result.operationId);
+          reconciliationFailures++;
+        }
+      }
+
+      const { data: finalOps } = await supabase
+        .from("payout_operations")
+        .select("status")
+        .eq("reward_period_id", periodId);
+      const allConfirmed = finalOps?.every((op) => op.status === "confirmed") ?? false;
+      const totalFinalOps = finalOps?.length ?? 0;
+
+      if (allConfirmed && totalFinalOps === (rewards?.length ?? 0) && totalFinalOps > 0) {
+        await supabase.from("reward_periods").update({ status: "distributed" }).eq("id", periodId);
+      }
+
+      return {
+        attempted: distributions.length,
+        submitted: submittedOps.length,
+        confirmed: confirmedCount,
+        reconciliationFailures,
+        skipped: Object.fromEntries(skipped),
+      };
+    },
+    { period_id: periodId }
+  );
 
   revalidatePath("/admin/rewards");
+  return result;
 }

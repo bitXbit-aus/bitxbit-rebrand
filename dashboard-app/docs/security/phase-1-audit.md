@@ -72,6 +72,46 @@ Application changes:
 
 A member cannot register another user's wallet as their payout destination by knowing only the public address. They must produce a valid Ed25519 signature over a domain-bound, single-use, time-bound challenge generated for their authenticated account.
 
+## Task 4 — Secure token distribution and affiliate payouts
+
+### Confirmed source finding
+
+The previous `airdropRewards()` action updated `user_rewards` rows directly from an on-chain transfer result and offered a separate `distributeRewards()`/`distributeRewardsWithTx()` path that let an administrator mark rewards distributed by supplying a transaction hash. There was no durable record of each attempted payout, no cryptographic wallet-ownership gate before payout, and no on-chain reconciliation, so duplicate distributions, unverified destinations, or failed transfers could leave the database and ledger inconsistent.
+
+### Implemented fixes
+
+Migration `012_secure_token_distribution.sql`:
+
+- Adds `public.payout_operations` as the durable, idempotent record for every token distribution. Columns include a unique `operation_id`, reward period/reward/user references, exact `token_amount_raw` (smallest token units), `token_decimals`, status (`pending` → `submitted` → `confirmed`/`failed`/`cancelled`), `transaction_hash`, on-chain confirmation metadata, submission/error timestamps, and the acting admin `actor_id`.
+- Enforces `UNIQUE(operation_id)`, a status check constraint, and indexes on `(reward_period_id, status)`, `(reward_id, created_at DESC)`, and `(transaction_hash)`.
+- Revokes direct authenticated access; read access is admin-only via `is_active_admin()`. Writes go through service-role Server Actions after capability checks.
+- Adds an audit trigger that writes every INSERT/UPDATE/DELETE on `payout_operations` to `security_audit_log`.
+- Adds `prevent_confirmed_payout_mutation()` trigger that rejects any update moving a confirmed operation to a non-confirmed state.
+
+Application changes:
+
+- New server-only `lib/payout.ts` owns all Solana transfer logic:
+  - `getAirdropWalletBalances`, `amountToRaw`, `rawToAmount` for exact token-unit arithmetic.
+  - `executePayoutTransfers(transfers[])` submits transfers sequentially with a single signer, returning per-operation results.
+  - `confirmTokenTransfer(txHash, walletAddress, amountRaw)` waits for confirmation and reconciles the recipient ATA balance change against the expected raw amount.
+- `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). `distributeTokens()` is retained as a deprecated compatibility wrapper.
+- `airdropRewards()` in `lib/actions.ts` now:
+  - Requires `manage_rewards` capability.
+  - Verifies the reward period is `approved`.
+  - Loads approved rewards joined to `users.wallet_address` and `users.wallet_verified`.
+  - Skips unverified, missing, invalid, or zero-amount destinations.
+  - Creates a deterministic `operation_id` (`payout:<periodId>:<rewardId>`) per reward; existing confirmed operations are skipped, preventing duplicate payouts.
+  - Checks the treasury wallet's token and SOL balances using exact raw amounts.
+  - Submits transfers via `executePayoutTransfers`, updates operations to `submitted` or `failed`.
+  - Reconciles each submitted transfer on-chain via `confirmTokenTransfer`, updating operations to `confirmed` and `user_rewards` to `distributed` only after on-chain verification.
+  - Updates the reward period to `distributed` only when every reward has a confirmed operation.
+- `sendTestAirdrop()` is now disabled unless `ENABLE_TEST_AIRDROP=true`, preventing accidental production outflows. It also confirms the test transfer on-chain before reporting success.
+- The manual "Mark Distributed" form and `distributeRewards()`/`distributeRewardsWithTx()` have been removed from `lib/actions.ts` and `app/admin/rewards/page.tsx`.
+
+### Acceptance test
+
+An administrator cannot mark rewards distributed without an on-chain transfer. A reward cannot be paid twice for the same period because the deterministic `operation_id` and confirmed status prevent duplicate operations. A member whose wallet is unverified cannot receive a payout, and a transfer that fails on-chain reconciliation leaves the reward approved and the operation failed rather than marking it distributed.
+
 ## Remaining work
 
 - Apply and verify the migration in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification.
