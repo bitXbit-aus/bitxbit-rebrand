@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS public.payout_operations (
   signed_transaction_base58 TEXT,
   last_blockhash TEXT,
   submission_error TEXT,
+  cancellation_reason TEXT,
   blockchain_confirmation JSONB,
   actor_id UUID,
   submitted_at TIMESTAMPTZ,

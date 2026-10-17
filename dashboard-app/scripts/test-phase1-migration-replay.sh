@@ -338,8 +338,35 @@ BEGIN
     END IF;
   END;
 
-  -- Clean up payout operation so the subsequent auth.users deletion can cascade.
-  DELETE FROM public.payout_operations WHERE operation_id = test_op;
+  -- Cancelled payouts preserve historical financial records. A pending/failed
+  -- payout can be cancelled with a reason and must not be claimable afterwards.
+  INSERT INTO public.payout_operations (
+    operation_id, reward_period_id, reward_id, user_id, wallet_address, token_amount_raw, token_decimals, status, actor_id
+  ) VALUES ('payout:test-period:cancelled-reward', test_period, test_reward, test_user, test_wallet, 1500000000, 9, 'pending', test_user);
+
+  UPDATE public.payout_operations
+  SET status = 'cancelled', cancellation_reason = 'Reward correction superseded this payout', updated_at = NOW()
+  WHERE operation_id = 'payout:test-period:cancelled-reward';
+
+  IF (SELECT status FROM public.payout_operations WHERE operation_id = 'payout:test-period:cancelled-reward') IS DISTINCT FROM 'cancelled' THEN
+    RAISE EXCEPTION 'cancelled status was not accepted';
+  END IF;
+
+  IF (SELECT cancellation_reason FROM public.payout_operations WHERE operation_id = 'payout:test-period:cancelled-reward') IS DISTINCT FROM 'Reward correction superseded this payout' THEN
+    RAISE EXCEPTION 'cancellation_reason was not preserved';
+  END IF;
+
+  DECLARE
+    cancelled_claim UUID;
+  BEGIN
+    SELECT public.claim_payout_operation('payout:test-period:cancelled-reward', test_user) INTO cancelled_claim;
+    IF cancelled_claim IS NOT NULL THEN
+      RAISE EXCEPTION 'cancelled operation was allowed to be claimed';
+    END IF;
+  END;
+
+  -- Clean up payout operations so the subsequent auth.users deletion can cascade.
+  DELETE FROM public.payout_operations WHERE reward_period_id = test_period;
 
   INSERT INTO public.security_audit_log (
     actor_id, actor_role, actor_status, action, target_table

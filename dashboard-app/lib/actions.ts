@@ -684,27 +684,36 @@ export async function correctRewards(periodId: string, reason: string) {
         throw new Error("Cannot correct a period that has already been distributed.");
       }
 
-      // Confirmed payouts are final; correction would require a reversal flow.
-      const { data: confirmedPayouts, error: confirmedError } = await supabase
+      // Any payout that has already entered the blockchain pipeline must not be
+      // silently discarded. Correction is only safe when every payout is either
+      // still pending/failed/cancelled, or has been explicitly reconciled/cancelled
+      // by an operator.
+      const { data: unsafePayouts, error: unsafeError } = await supabase
         .from("payout_operations")
-        .select("id")
+        .select("id, status")
         .eq("reward_period_id", periodId)
-        .eq("status", "confirmed")
-        .limit(1);
-      if (confirmedError) throw confirmedError;
-      if (confirmedPayouts && confirmedPayouts.length > 0) {
+        .in("status", ["submitting", "submitted", "uncertain", "confirmed"]);
+      if (unsafeError) throw unsafeError;
+      if (unsafePayouts && unsafePayouts.length > 0) {
+        const statuses = Array.from(new Set(unsafePayouts.map((p) => p.status))).join(", ");
         throw new Error(
-          "Cannot correct a period with confirmed payouts. Reversal requires a separate financial process."
+          `Cannot correct a period with ${unsafePayouts.length} payout(s) in non-recalculable state (${statuses}). Reconcile, cancel, or wait for those operations to settle before correcting.`
         );
       }
 
-      // Remove any pending/failed/submitted payout operations so the reward
-      // amounts and recipients can be safely recalculated.
-      const { error: deletePayoutsError } = await supabase
+      // Instead of deleting historical payout records, cancel any pending or
+      // failed operations so the audit trail and any attempted transactions are
+      // preserved.
+      const { error: cancelPayoutsError } = await supabase
         .from("payout_operations")
-        .delete()
-        .eq("reward_period_id", periodId);
-      if (deletePayoutsError) throw deletePayoutsError;
+        .update({
+          status: "cancelled",
+          cancellation_reason: `Cancelled during reward correction: ${reason.trim()}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("reward_period_id", periodId)
+        .in("status", ["pending", "failed"]);
+      if (cancelPayoutsError) throw cancelPayoutsError;
 
       // Reset reward records before recalculation.
       const { error: deleteRewardsError } = await supabase
