@@ -1107,7 +1107,7 @@ export async function sendTestAirdrop(formData: FormData) {
     }
 
     // Persist the signed transaction identity before broadcasting.
-    const { error: persistError } = await (supabase.from("payout_operations") as any)
+    const { data: persistedRows, error: persistError } = await (supabase.from("payout_operations") as any)
       .update({
         status: "submitted",
         transaction_hash: prepared.txHash,
@@ -1116,7 +1116,8 @@ export async function sendTestAirdrop(formData: FormData) {
         updated_at: new Date().toISOString(),
       })
       .eq("operation_id", operationId)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .select("operation_id");
     if (persistError) {
       await (supabase.from("payout_operations") as any)
         .update({
@@ -1126,6 +1127,18 @@ export async function sendTestAirdrop(formData: FormData) {
         })
         .eq("operation_id", operationId);
       throw new Error(`Failed to persist test payout submission: ${persistError.message}`);
+    }
+    if (!persistedRows || persistedRows.length !== 1) {
+      await (supabase.from("payout_operations") as any)
+        .update({
+          status: "failed",
+          submission_error: `Expected exactly one pending operation to transition to submitted, but ${persistedRows?.length ?? 0} rows were updated`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("operation_id", operationId);
+      throw new Error(
+        `Test airdrop persistence mismatch: expected exactly one pending operation, got ${persistedRows?.length ?? 0}`
+      );
     }
 
     // Broadcast only after the signed transaction is durable.

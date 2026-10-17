@@ -116,7 +116,7 @@ Application changes:
   - Broadcasts via `broadcastPayoutSubmission()`. Broadcast errors move the operation to `uncertain` (not retryable) because the transaction may have already landed.
   - Reconciles each broadcast transfer on-chain via `confirmPayoutSubmission`/`confirmTokenTransfer`. Matching transfers update operations to `confirmed` and `user_rewards` to `distributed`. Inconclusive outcomes remain `uncertain`. Verified on-chain failures return to `failed` (retryable only when non-execution is established). **Confirmed on-chain mismatches** — where the transaction landed but the recipient, amount, source, mint, or authority does not match — are moved to a separate non-retryable `incident` status so they cannot trigger an automatic replacement payment.
   - Updates the reward period to `distributed` only when every reward has a confirmed operation.
-- `sendTestAirdrop()` is now disabled unless `ENABLE_TEST_AIRDROP=true`, preventing accidental production outflows. It also confirms the test transfer on-chain before reporting success.
+- `sendTestAirdrop()` is now disabled unless `ENABLE_TEST_AIRDROP=true`, preventing accidental production outflows. Before broadcast it creates a `payout_operations` record with `is_test=true`, persists the signed transaction identity, and verifies that exactly one pending row transitioned to `submitted` so a zero-row update cannot silently proceed. It confirms the test transfer on-chain before reporting success.
 - The manual "Mark Distributed" form and `distributeRewards()`/`distributeRewardsWithTx()` have been removed from `lib/actions.ts` and `app/admin/rewards/page.tsx`.
 
 ### Acceptance test
