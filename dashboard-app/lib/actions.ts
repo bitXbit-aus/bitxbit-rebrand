@@ -1212,7 +1212,7 @@ export async function sendTestAirdrop(formData: FormData) {
   revalidatePath("/admin/rewards");
 }
 
-const TOKEN_DECIMALS = 9;
+const TOKEN_DECIMALS = parseInt(process.env.BITXBIT_TOKEN_DECIMALS || "9", 10);
 
 export async function airdropRewards(periodId: string) {
   if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
@@ -1494,6 +1494,7 @@ export async function airdropRewards(periodId: string) {
             p_user_id: reward.user_id,
             p_wallet_address: walletAddress,
             p_amount_raw: Number(amountRaw),
+            p_token_decimals: TOKEN_DECIMALS,
             p_actor_id: context.user.id,
           }
         );

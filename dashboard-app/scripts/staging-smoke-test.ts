@@ -40,6 +40,9 @@ const testPeriodId = `33333333-3333-4333-8333-${runId.slice(-12)}`;
 const testRewardId = `44444444-4444-4444-8444-${runId.slice(-12)}`;
 const testOpId = `payout:${runId}:reward`;
 const testModelId = `55555555-5555-4555-8555-${runId.slice(-12)}`;
+const tokenDecimals = parseInt(process.env.BITXBIT_TOKEN_DECIMALS || "9", 10);
+const amountDisplay = 1.5;
+const amountRaw = Math.round(amountDisplay * 10 ** tokenDecimals);
 
 let failures = 0;
 
@@ -147,13 +150,13 @@ async function setup() {
     id: testRewardId,
     user_id: testUserId,
     reward_period_id: testPeriodId,
-    bitxbit_amount: 1.5,
+    bitxbit_amount: amountDisplay,
     status: "approved",
   });
 }
 
 async function teardown() {
-  await supabase.from("payout_operations").delete().eq("operation_id", testOpId);
+  await supabase.from("payout_operations").delete().eq("reward_id", testRewardId);
   await supabase.from("user_rewards").delete().eq("id", testRewardId);
   await supabase.from("reward_periods").delete().eq("id", testPeriodId);
   await supabase.from("allocation_models").delete().eq("id", testModelId);
@@ -228,48 +231,72 @@ async function main() {
     if (second !== false) throw new Error("duplicate trusted click was not suppressed");
   });
 
-  await section("payout operation atomic claiming and immutability", async () => {
-    await supabase.from("payout_operations").insert({
-      operation_id: testOpId,
-      reward_period_id: testPeriodId,
-      reward_id: testRewardId,
-      user_id: testUserId,
-      wallet_address: testWallet,
-      token_amount_raw: 1500000000,
-      token_decimals: 9,
-      status: "pending",
-      actor_id: testUserId,
-    });
+  await section("payout operation atomic creation and rejection", async () => {
+    // The preceding wallet-lifecycle test resets verification on address change.
+    // Restore the verified wallet using the same two-step pattern as
+    // verify_wallet_challenge(): address update first, then verification flag.
+    await supabase.from("users").update({ wallet_address: testWallet }).eq("id", testUserId);
+    await supabase.from("users").update({ wallet_verified: true }).eq("id", testUserId);
 
-    const firstClaim = await rpc<string | null>("claim_payout_operation", {
-      p_operation_id: testOpId,
+    // First call creates a new operation and returns it in submitting state.
+    const first = await rpc<string | null>("create_or_claim_payout_operation", {
+      p_period_id: testPeriodId,
+      p_reward_id: testRewardId,
+      p_user_id: testUserId,
+      p_wallet_address: testWallet,
+      p_amount_raw: amountRaw,
+      p_token_decimals: tokenDecimals,
       p_actor_id: testUserId,
     });
-    if (!firstClaim) throw new Error("claim_payout_operation did not claim pending op");
+    if (!first) throw new Error("create_or_claim_payout_operation did not return an operation id");
 
-    const secondClaim = await rpc<string | null>("claim_payout_operation", {
-      p_operation_id: testOpId,
+    const { data: op, error: opError } = await supabase
+      .from("payout_operations")
+      .select("status")
+      .eq("operation_id", first)
+      .single();
+    if (opError) throw opError;
+    if (op?.status !== "submitting") throw new Error("newly created operation is not submitting");
+
+    // Second call on an already-submitting operation must fail.
+    await expectThrows("double submit attempt", () =>
+      rpc("create_or_claim_payout_operation", {
+        p_period_id: testPeriodId,
+        p_reward_id: testRewardId,
+        p_user_id: testUserId,
+        p_wallet_address: testWallet,
+        p_amount_raw: amountRaw,
+        p_token_decimals: tokenDecimals,
+        p_actor_id: testUserId,
+      })
+    );
+
+    // Reset to pending and verify the claim path.
+    await supabase.from("payout_operations").update({ status: "pending" }).eq("operation_id", first);
+    const claimed = await rpc<string | null>("create_or_claim_payout_operation", {
+      p_period_id: testPeriodId,
+      p_reward_id: testRewardId,
+      p_user_id: testUserId,
+      p_wallet_address: testWallet,
+      p_amount_raw: amountRaw,
+      p_token_decimals: tokenDecimals,
       p_actor_id: testUserId,
     });
-    if (secondClaim) throw new Error("claim_payout_operation allowed double claim");
-
-    const op = await querySingle<{ status: string }>("payout_operations", firstClaim);
-    if (op?.status !== "submitting") throw new Error("claimed operation not moved to submitting");
+    if (claimed !== first) throw new Error("claim path returned a different operation id");
 
     // Move to confirmed.
     await supabase
       .from("payout_operations")
       .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
-      .eq("operation_id", testOpId);
+      .eq("operation_id", first);
 
-    // Confirmed row must be immutable. Supabase returns errors as resolved
-    // { data, error } objects, so we inspect error explicitly.
+    // Confirmed row must be immutable.
     await expectSupabaseError(
       "confirmed status mutation",
       supabase
         .from("payout_operations")
         .update({ status: "failed" })
-        .eq("operation_id", testOpId)
+        .eq("operation_id", first)
         .select()
         .single()
     );
@@ -279,10 +306,61 @@ async function main() {
       supabase
         .from("payout_operations")
         .update({ wallet_address: testWallet2 })
-        .eq("operation_id", testOpId)
+        .eq("operation_id", first)
         .select()
         .single()
     );
+  });
+
+  await section("payout operation rejects stale rewards and mismatches", async () => {
+    // Create a second reward/period pair for rejection tests.
+    const rejectPeriodId = `66666666-6666-4666-8666-${runId.slice(-12)}`;
+    const rejectRewardId = `77777777-7777-4777-8777-${runId.slice(-12)}`;
+    await supabase.from("reward_periods").insert({
+      id: rejectPeriodId,
+      start_date: "2026-02-01",
+      end_date: "2026-02-28",
+      allocation_model_id: testModelId,
+      status: "approved",
+    });
+    await supabase.from("user_rewards").insert({
+      id: rejectRewardId,
+      user_id: testUserId,
+      reward_period_id: rejectPeriodId,
+      bitxbit_amount: amountDisplay,
+      status: "approved",
+    });
+
+    // Wallet address mismatch.
+    await expectThrows("wallet address mismatch", () =>
+      rpc("create_or_claim_payout_operation", {
+        p_period_id: rejectPeriodId,
+        p_reward_id: rejectRewardId,
+        p_user_id: testUserId,
+        p_wallet_address: testWallet2,
+        p_amount_raw: amountRaw,
+        p_token_decimals: tokenDecimals,
+        p_actor_id: testUserId,
+      })
+    );
+
+    // Non-approved period.
+    await supabase.from("reward_periods").update({ status: "calculating" }).eq("id", rejectPeriodId);
+    await expectThrows("non-approved period", () =>
+      rpc("create_or_claim_payout_operation", {
+        p_period_id: rejectPeriodId,
+        p_reward_id: rejectRewardId,
+        p_user_id: testUserId,
+        p_wallet_address: testWallet,
+        p_amount_raw: amountRaw,
+        p_token_decimals: tokenDecimals,
+        p_actor_id: testUserId,
+      })
+    );
+
+    // Cleanup.
+    await supabase.from("user_rewards").delete().eq("id", rejectRewardId);
+    await supabase.from("reward_periods").delete().eq("id", rejectPeriodId);
   });
 
   await section("public API health and rate-limit headers", async () => {

@@ -21,6 +21,7 @@ CREATE OR REPLACE FUNCTION public.create_or_claim_payout_operation(
   p_user_id UUID,
   p_wallet_address TEXT,
   p_amount_raw BIGINT,
+  p_token_decimals INT,
   p_actor_id UUID
 )
 RETURNS TEXT
@@ -36,7 +37,7 @@ DECLARE
   v_operation_id TEXT;
   v_expected_raw BIGINT;
 BEGIN
-  IF p_period_id IS NULL OR p_reward_id IS NULL OR p_user_id IS NULL OR p_wallet_address IS NULL OR p_amount_raw IS NULL OR p_actor_id IS NULL THEN
+  IF p_period_id IS NULL OR p_reward_id IS NULL OR p_user_id IS NULL OR p_wallet_address IS NULL OR p_amount_raw IS NULL OR p_token_decimals IS NULL OR p_actor_id IS NULL THEN
     RAISE EXCEPTION 'all parameters are required';
   END IF;
 
@@ -88,7 +89,7 @@ BEGIN
     RAISE EXCEPTION 'reward recipient mismatch';
   END IF;
 
-  v_expected_raw := (v_reward.bitxbit_amount * 1000000000)::BIGINT;
+  v_expected_raw := (v_reward.bitxbit_amount * (10 ^ p_token_decimals))::BIGINT;
   IF v_expected_raw IS DISTINCT FROM p_amount_raw THEN
     RAISE EXCEPTION 'reward amount mismatch: expected %, got %', v_expected_raw, p_amount_raw;
   END IF;
@@ -138,7 +139,7 @@ BEGIN
     p_user_id,
     p_wallet_address,
     p_amount_raw,
-    9,
+    p_token_decimals,
     'submitting',
     p_actor_id
   );
@@ -147,6 +148,6 @@ BEGIN
 END;
 $$;
 
-ALTER FUNCTION public.create_or_claim_payout_operation(UUID, UUID, UUID, TEXT, BIGINT, UUID) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.create_or_claim_payout_operation(UUID, UUID, UUID, TEXT, BIGINT, UUID) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.create_or_claim_payout_operation(UUID, UUID, UUID, TEXT, BIGINT, UUID) TO service_role;
+ALTER FUNCTION public.create_or_claim_payout_operation(UUID, UUID, UUID, TEXT, BIGINT, INT, UUID) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.create_or_claim_payout_operation(UUID, UUID, UUID, TEXT, BIGINT, INT, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_or_claim_payout_operation(UUID, UUID, UUID, TEXT, BIGINT, INT, UUID) TO service_role;

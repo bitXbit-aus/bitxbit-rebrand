@@ -504,7 +504,7 @@ BEGIN
 
     -- Creates and claims a new operation when none exists.
     SELECT public.create_or_claim_payout_operation(
-      v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+      v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
     ) INTO v_cc_op;
 
     IF v_cc_op IS NULL THEN
@@ -525,7 +525,7 @@ BEGIN
     WHERE operation_id = v_cc_op;
 
     SELECT public.create_or_claim_payout_operation(
-      v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+      v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
     ) INTO v_cc_op;
 
     SELECT status INTO v_cc_op_status
@@ -543,7 +543,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'superseded reward was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -559,7 +559,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 999999999, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 999999999, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'amount mismatch was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -575,7 +575,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'non-approved reward was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -608,7 +608,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'unverified wallet was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -628,7 +628,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'non-approved period was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -1080,7 +1080,7 @@ done
 START2_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
 # The RPC is expected to raise; psql exits non-zero. Capture stdout and allow the
 # non-zero exit so we can verify no operation id was returned.
-psql -d "$DB_NAME" -t -A -c "SELECT create_or_claim_payout_operation('$RACE2_PERIOD'::UUID, '$RACE2_REWARD'::UUID, '$RACE2_USER'::UUID, 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 7000000000, '$RACE2_USER'::UUID);" > "$RACE2_RESULT" 2>/dev/null || true
+psql -d "$DB_NAME" -t -A -c "SELECT create_or_claim_payout_operation('$RACE2_PERIOD'::UUID, '$RACE2_REWARD'::UUID, '$RACE2_USER'::UUID, 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 7000000000, 9, '$RACE2_USER'::UUID);" > "$RACE2_RESULT" 2>/dev/null || true
 END2_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
 DURATION2=$((END2_MS - START2_MS))
 

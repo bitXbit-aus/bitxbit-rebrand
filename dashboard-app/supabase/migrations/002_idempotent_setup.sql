@@ -143,6 +143,11 @@ CREATE TABLE IF NOT EXISTS public.transparency_reports (
 -- INDEXES
 -- ============================================
 
+-- Ensure users table has the referral column even on fresh databases that
+-- were initialised by migration 001 before referred_by was added.
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referred_by UUID REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referral_code TEXT UNIQUE;
+
 CREATE INDEX IF NOT EXISTS idx_user_activities_user_id ON public.user_activities(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_activities_created_at ON public.user_activities(created_at);
 CREATE INDEX IF NOT EXISTS idx_affiliate_income_date ON public.affiliate_income(date_received);

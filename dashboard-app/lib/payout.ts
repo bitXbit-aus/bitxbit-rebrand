@@ -60,7 +60,7 @@ export interface ConfirmationResult {
 }
 
 function getConnection(): Connection {
-  return new Connection(SOLANA_RPC, "confirmed");
+  return new Connection(process.env.SOLANA_RPC_URL || SOLANA_RPC, "confirmed");
 }
 
 function getSigner(): Keypair {
