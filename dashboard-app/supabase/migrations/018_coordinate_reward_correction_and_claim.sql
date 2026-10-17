@@ -190,7 +190,7 @@ DECLARE
   v_inserted_count INT := 0;
   v_superseded_count INT := 0;
 BEGIN
-  IF p_period_id IS NULL OR p_new_rewards IS NULL OR jsonb_array_length(p_new_rewards) = 0 THEN
+  IF p_period_id IS NULL OR p_new_rewards IS NULL THEN
     RAISE EXCEPTION 'period and rewards are required';
   END IF;
 

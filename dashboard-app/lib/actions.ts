@@ -613,16 +613,9 @@ async function executeRewardCalculation(
 ) {
   const { rewards, totalIncome } = await computeRewards(supabase, periodId);
 
-  if (rewards.length === 0) {
-    await supabase
-      .from("reward_periods")
-      .update({ total_income: totalIncome, status: "calculating" })
-      .eq("id", periodId);
-    return { totalIncome, recipients: 0 };
-  }
-
-  // Use the atomic RPC so only active records are replaced; superseded
-  // historical records are preserved.
+  // Always run the atomic RPC, even for an empty reward set. The RPC deletes
+  // active records and inserts the new set, so recalculation with zero
+  // recipients correctly retires any previously calculated active rewards.
   const newRewardsJson = rewards.map((r) => ({
     user_id: r.user_id,
     estimated_aud_value: r.estimated_aud_value,

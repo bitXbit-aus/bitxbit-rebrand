@@ -737,6 +737,48 @@ BEGIN
     END IF;
   END;
 
+  -- Recalculating a period with zero rewards must retire all active rewards and
+  -- preserve any superseded historical records.
+  DECLARE
+    v_empty_period UUID := 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+    v_empty_user UUID := '33333333-3333-4333-8333-333333333331';
+    v_empty_result JSONB;
+    v_empty_active_count INT;
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_empty_user, 'empty-recalc-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_empty_period, '2026-08-01', '2026-08-31', '55555555-5555-4555-8555-555555555555', 'calculating');
+
+    INSERT INTO public.user_rewards (
+      id, user_id, reward_period_id, bitxbit_amount, status
+    ) VALUES (
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', v_empty_user, v_empty_period, 2.5, 'pending'
+    );
+
+    -- Recalculate with an empty reward array.
+    SELECT public.apply_reward_calculation(
+      v_empty_period,
+      0.00,
+      '[]'::jsonb
+    ) INTO v_empty_result;
+
+    IF (v_empty_result->>'inserted_rewards')::INT IS DISTINCT FROM 0 THEN
+      RAISE EXCEPTION 'empty recalculation inserted unexpected rewards (got %)', v_empty_result;
+    END IF;
+
+    SELECT COUNT(*) INTO v_empty_active_count
+    FROM public.user_rewards
+    WHERE reward_period_id = v_empty_period AND superseded_at IS NULL;
+
+    IF v_empty_active_count IS DISTINCT FROM 0 THEN
+      RAISE EXCEPTION 'empty recalculation left active rewards behind (count=%)', v_empty_active_count;
+    END IF;
+
+    IF (SELECT total_income FROM public.reward_periods WHERE id = v_empty_period) IS DISTINCT FROM 0.00 THEN
+      RAISE EXCEPTION 'empty recalculation did not update period total_income to zero';
+    END IF;
+  END;
+
   -- The active-reward uniqueness index must prevent two active records for the
   -- same member and period, regardless of version.
   DECLARE
