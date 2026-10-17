@@ -7,6 +7,7 @@ FIXTURE="$ROOT_DIR/supabase/tests/phase1_security_fixture.sql"
 MIGRATION_010="$ROOT_DIR/supabase/migrations/010_phase1_security_foundation.sql"
 MIGRATION_011="$ROOT_DIR/supabase/migrations/011_wallet_verification.sql"
 MIGRATION_012="$ROOT_DIR/supabase/migrations/012_secure_token_distribution.sql"
+MIGRATION_013="$ROOT_DIR/supabase/migrations/013_payout_hardening.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -37,6 +38,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$FIXTURE" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_010" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_012" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -45,6 +47,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_010" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_012" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$

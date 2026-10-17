@@ -19,16 +19,12 @@ CREATE TABLE IF NOT EXISTS public.payout_operations (
   token_decimals INTEGER NOT NULL DEFAULT 9,
   status TEXT NOT NULL DEFAULT 'pending',
   transaction_hash TEXT,
-  signed_transaction_base58 TEXT,
-  last_blockhash TEXT,
   submission_error TEXT,
-  cancellation_reason TEXT,
   blockchain_confirmation JSONB,
   actor_id UUID,
   submitted_at TIMESTAMPTZ,
   confirmed_at TIMESTAMPTZ,
   failed_at TIMESTAMPTZ,
-  uncertain_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -42,7 +38,7 @@ BEGIN
   ) THEN
     ALTER TABLE public.payout_operations
       ADD CONSTRAINT payout_operations_status_check
-      CHECK (status IN ('pending', 'submitting', 'submitted', 'uncertain', 'confirmed', 'failed', 'cancelled')) NOT VALID;
+      CHECK (status IN ('pending', 'submitting', 'submitted', 'confirmed', 'failed', 'cancelled')) NOT VALID;
   END IF;
 END $$;
 
@@ -85,10 +81,9 @@ CREATE POLICY "Payout operations admin read"
 
 -- -----------------------------------------------------------------------------
 -- Atomic claiming of a payout operation before on-chain submission.
--- Only one process can claim a pending/failed operation. Once an operation has
--- entered submitting, submitted, uncertain, or confirmed it is non-retryable
--- through this path; it must be reconciled against on-chain evidence or handled
--- by an explicit controlled replacement flow. Concurrent callers receive NULL.
+-- Only one process can claim a pending/failed operation. Once claimed, the
+-- operation moves to 'submitting' and must be updated to 'submitted' with a
+-- transaction hash, or back to 'failed'. Concurrent callers receive NULL.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.claim_payout_operation(
   p_operation_id TEXT,
@@ -191,10 +186,11 @@ BEGIN
   END IF;
   RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
-  -- Fail closed for financial operations: if we cannot record an audit log of
-  -- a payout state change, the state change itself must not succeed. This
-  -- prevents a payout from silently mutating without a durable record.
-  RAISE EXCEPTION 'payout audit logging failed: %', SQLERRM;
+  RAISE WARNING 'payout audit trigger failed: %', SQLERRM;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
 END;
 $$;
 
