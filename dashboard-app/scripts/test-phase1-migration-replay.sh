@@ -12,6 +12,7 @@ MIGRATION_014="$ROOT_DIR/supabase/migrations/014_reward_correction_history.sql"
 MIGRATION_015="$ROOT_DIR/supabase/migrations/015_payout_incident_state.sql"
 MIGRATION_016="$ROOT_DIR/supabase/migrations/016_reward_calculation_history_safe.sql"
 MIGRATION_017="$ROOT_DIR/supabase/migrations/017_fix_user_rewards_active_uniqueness.sql"
+MIGRATION_018="$ROOT_DIR/supabase/migrations/018_coordinate_reward_correction_and_claim.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -47,6 +48,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -60,6 +62,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -622,3 +625,80 @@ END $$;
 SQL
 
 printf 'migration replay verification passed (first apply + validated constraint + second apply)\n'
+
+# ------------------------------------------------------------------------------
+# Concurrent correction-vs-claim race test
+# Verifies that apply_reward_correction() and claim_payout_operation() serialize
+# on the same period lock. A correction that starts first must cancel all pending
+# payouts before a concurrent claim can proceed; the claim then sees no eligible
+# operation and returns NULL.
+# ------------------------------------------------------------------------------
+RACE_USER='dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+RACE_PERIOD='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+RACE_REWARD='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1'
+RACE_OP='race-op-1'
+RACE_DONE=$(mktemp)
+RACE_RESULT=$(mktemp)
+
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+  INSERT INTO auth.users (id, email) VALUES ('$RACE_USER', 'race@example.test');
+  INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+  VALUES ('$RACE_PERIOD', '2026-05-01', '2026-05-31', '55555555-5555-4555-8555-555555555555', 'calculating');
+  INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+  VALUES ('$RACE_REWARD', '$RACE_USER', '$RACE_PERIOD', 10.0, 'pending', 1);
+  INSERT INTO public.payout_operations (operation_id, reward_period_id, reward_id, user_id, wallet_address, token_amount_raw, status)
+  VALUES ('$RACE_OP', '$RACE_PERIOD', '$RACE_REWARD', '$RACE_USER', 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 1000000000, 'pending');
+" >/dev/null
+
+# Background correction acquires the period lock, signals, sleeps, then cancels.
+(
+  psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+    BEGIN;
+    SELECT pg_advisory_xact_lock(0, hashtext('$RACE_PERIOD'::text));
+    SELECT pg_sleep(1.5);
+    SELECT apply_reward_correction('$RACE_PERIOD'::UUID, 'race correction', '[{\"user_id\":\"$RACE_USER\",\"estimated_aud_value\":5.00,\"bitxbit_amount\":5.0}]'::jsonb);
+    COMMIT;
+  " >/dev/null
+  echo done > "$RACE_DONE"
+) &
+
+# Wait until the background session confirms it holds the period lock.
+for i in {1..50}; do
+  if psql -d "$DB_NAME" -t -A -c "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 0 AND objid = hashtext('$RACE_PERIOD'::text) AND granted" 2>/dev/null | grep -q '^1$'; then
+    break
+  fi
+  sleep 0.1
+done
+
+# Foreground claim should block until the correction commits, then return NULL.
+START_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
+psql -d "$DB_NAME" -t -A -c "SELECT claim_payout_operation('$RACE_OP', '$RACE_USER'::UUID);" > "$RACE_RESULT" 2>/dev/null
+END_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
+DURATION=$((END_MS - START_MS))
+
+# Wait for background correction to finish.
+wait
+
+RESULT=$(cat "$RACE_RESULT" | tr -d '[:space:]')
+rm -f "$RACE_DONE" "$RACE_RESULT"
+
+if [ "$DURATION" -lt 1000 ]; then
+  echo "race test failed: claim did not block on period lock (duration ${DURATION}ms)" >&2
+  exit 1
+fi
+
+if [ -n "$RESULT" ]; then
+  echo "race test failed: claim returned '$RESULT' after correction cancelled the payout" >&2
+  exit 1
+fi
+
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+  DO \$\$
+  BEGIN
+    IF (SELECT status FROM public.payout_operations WHERE operation_id = '$RACE_OP') IS DISTINCT FROM 'cancelled' THEN
+      RAISE EXCEPTION 'race test failed: payout was not cancelled by correction';
+    END IF;
+  END \$\$;
+" >/dev/null
+
+printf 'concurrent correction-vs-claim race test passed (blocked %sms, claim returned NULL, payout cancelled)\n' "$DURATION"
