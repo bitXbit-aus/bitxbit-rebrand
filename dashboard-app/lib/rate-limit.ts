@@ -22,9 +22,28 @@ export interface RateLimitOptions {
 }
 
 export function getClientIdentifier(request: NextRequest): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  const ip = forwarded?.split(",")[0]?.trim() ?? request.ip ?? "anonymous";
-  return ip;
+  // Netlify exposes the original client IP in a trusted, edge-controlled header.
+  // Use it first so we never rely on a spoofable X-Forwarded-For chain.
+  const netlifyClientIp = request.headers.get("x-nf-client-connection-ip");
+  if (netlifyClientIp) {
+    return netlifyClientIp;
+  }
+
+  // Only trust X-Forwarded-For when the deployment explicitly runs behind a
+  // trusted proxy. Without this guard a client can bypass per-IP rate limiting
+  // by sending an arbitrary forwarded header.
+  const trustProxy =
+    process.env.TRUST_PROXY === "true" ||
+    process.env.RATE_LIMIT_TRUST_PROXY === "true";
+  if (trustProxy) {
+    const forwarded = request.headers.get("x-forwarded-for");
+    const ip = forwarded?.split(",")[0]?.trim();
+    if (ip) {
+      return ip;
+    }
+  }
+
+  return request.ip ?? "anonymous";
 }
 
 export function checkRateLimit(

@@ -14,7 +14,7 @@ This guide covers staged application of the Phase 1 security migrations (`010`, 
 
 - `010_phase1_security_foundation.sql` — protected authorization, RLS hardening, audit log, trusted offer clicks, integrity constraints.
 - `011_wallet_verification.sql` — challenge table, wallet verification status, atomic challenge consumption, verification reset trigger.
-- `012_secure_token_distribution.sql` — durable `payout_operations` table, idempotent distribution tracking, on-chain reconciliation support, payout audit trigger, confirmed-operation immutability trigger.
+- `012_secure_token_distribution.sql` — durable `payout_operations` table, idempotent distribution tracking, on-chain reconciliation support, fail-closed payout audit trigger (the operation fails if audit logging fails), confirmed-operation immutability trigger.
 
 ## Staged application
 
@@ -216,6 +216,15 @@ WHERE status = 'confirmed'
 
 Expected: `authenticated_select = false`, `service_role_all = true`, `confirmed_mutable_operations = 0`.
 
+## Rate limiting and proxy trust
+
+The current rate limiter uses an in-memory store and is suitable as a single-instance abuse throttle. Counters are not shared across serverless function instances, so a determined distributed attacker can exceed the per-IP limit by hitting different instances.
+
+Before production load:
+
+1. Set `TRUST_PROXY=true` (or `RATE_LIMIT_TRUST_PROXY=true`) **only** when the deployment is behind a trusted proxy that sanitizes `X-Forwarded-For`. On Netlify the runtime uses `x-nf-client-connection-ip` automatically, so no extra variable is required.
+2. Replace the in-memory store with a shared backend (Redis, Upstash, or a Supabase-backed counter) if the app is served by more than one concurrent function instance. The `RateLimitOptions` interface and `checkRateLimit` signature can wrap either store without changing callers.
+
 ## Session-level behavior tests
 
 Use disposable test accounts, not production identities:
@@ -240,6 +249,8 @@ Use disposable test accounts, not production identities:
 19. `airdropRewards` skips unverified wallets, creates exactly one `payout_operations` row per reward/period, atomically claims each `pending`/`failed` operation via `claim_payout_operation()` before submission, reconciles `submitted` operations on-chain before any retry, and never marks a reward distributed twice.
 20. Confirmed `payout_operations` cannot be changed back to pending, submitted, or failed.
 21. Service-role user, storage, wallet, treasury, and airdrop operations create actor-attributed application audit rows without private keys or signing material.
+22. Rate-limit client identifiers cannot be spoofed via `X-Forwarded-For` unless `TRUST_PROXY=true` is set; Netlify deployments use the trusted `x-nf-client-connection-ip` header.
+23. Payout audit logging is fail-closed: a payout state change fails if its audit record cannot be written.
 
 ## Recovery and forward fixes
 

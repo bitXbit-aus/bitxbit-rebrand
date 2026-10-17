@@ -186,11 +186,10 @@ BEGIN
   END IF;
   RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
-  RAISE WARNING 'payout audit trigger failed: %', SQLERRM;
-  IF TG_OP = 'DELETE' THEN
-    RETURN OLD;
-  END IF;
-  RETURN NEW;
+  -- Fail closed for financial operations: if we cannot record an audit log of
+  -- a payout state change, the state change itself must not succeed. This
+  -- prevents a payout from silently mutating without a durable record.
+  RAISE EXCEPTION 'payout audit logging failed: %', SQLERRM;
 END;
 $$;
 

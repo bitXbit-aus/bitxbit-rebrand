@@ -88,7 +88,7 @@ Migration `012_secure_token_distribution.sql`:
 - Adds a `reward_periods_status_check` constraint limiting `reward_periods.status` to `pending`, `calculating`, `approved`, or `distributed`.
 - Revokes direct authenticated access; read access is admin-only via `is_active_admin()`. Writes go through service-role Server Actions after capability checks.
 - Adds `public.claim_payout_operation(TEXT, UUID)` — a `SECURITY DEFINER` function that atomically locks and moves a `pending`/`failed` operation to `submitting`, returning the operation ID only to the caller that wins the race. Concurrent callers receive `NULL`.
-- Adds an audit trigger that writes every INSERT/UPDATE/DELETE on `payout_operations` to `security_audit_log`.
+- Adds an audit trigger that writes every INSERT/UPDATE/DELETE on `payout_operations` to `security_audit_log`. The trigger is **fail-closed**: if the audit insert fails for any reason, the payout operation itself is aborted with `RAISE EXCEPTION`, so a financial state change can never commit without a durable audit record.
 - Adds `prevent_confirmed_payout_mutation()` trigger that rejects **any** `UPDATE` to a `confirmed` operation. Once confirmed, the entire row is immutable, not just its status.
 
 Application changes:
@@ -129,6 +129,8 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 ### Implemented fixes
 
 - Added `lib/rate-limit.ts` with a per-IP sliding-window rate limiter and `429 Too Many Requests` responses.
+  - `getClientIdentifier()` prefers the Netlify-trusted `x-nf-client-connection-ip` header; falls back to `x-forwarded-for` only when `TRUST_PROXY=true` or `RATE_LIMIT_TRUST_PROXY=true`; otherwise uses the runtime-provided `request.ip`. This prevents clients from spoofing their IP to bypass rate limiting.
+  - The in-memory store is documented as a single-instance throttle; the migration-and-recovery guide recommends upgrading to a shared store (Redis or Supabase-backed) when scaling beyond one serverless function instance.
 - Applied rate limiting to every public API route (`/api/public/*`), `/api/token-stats`, and the authenticated `/api/wallet/rewards` route.
 - Added referral-code length validation (`≤ 64` characters) to `/api/public/resolve-referral` and UUID validation for the OAuth callback `ref` parameter.
 - Ensured public routes return generic error messages; internal Supabase/RPC errors are logged server-side only.
@@ -154,12 +156,12 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 - `lib/security-mutations.test.ts` — promotion/demotion classification, UUID/enum validation, bulk-id bounds, self-removal prevention, last-security-admin protection, trusted-click dedupe.
 - `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
 - `lib/payout.test.ts` — exact token-unit conversion and round-trips.
-- `lib/rate-limit.test.ts` — allow/block/reset behavior and per-client isolation.
+- `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, and trusted-proxy client-identifier selection.
 - `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010`, `011`, and `012`.
 
 ### Test results
 
-- `npm test` — 20/20 pass.
+- `npm test` — 24/24 pass.
 - `npm run test:migration` — pass.
 - `npm run build` (dummy env) — pass.
 
