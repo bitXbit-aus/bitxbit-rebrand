@@ -8,6 +8,7 @@ MIGRATION_010="$ROOT_DIR/supabase/migrations/010_phase1_security_foundation.sql"
 MIGRATION_011="$ROOT_DIR/supabase/migrations/011_wallet_verification.sql"
 MIGRATION_012="$ROOT_DIR/supabase/migrations/012_secure_token_distribution.sql"
 MIGRATION_013="$ROOT_DIR/supabase/migrations/013_payout_hardening.sql"
+MIGRATION_014="$ROOT_DIR/supabase/migrations/014_reward_correction_history.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -39,6 +40,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_010" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_012" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -48,6 +50,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_010" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_012" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -365,6 +368,88 @@ BEGIN
     SELECT public.claim_payout_operation('payout:test-period:cancelled-reward', test_user) INTO cancelled_claim;
     IF cancelled_claim IS NOT NULL THEN
       RAISE EXCEPTION 'cancelled operation was allowed to be claimed';
+    END IF;
+  END;
+
+  -- Reward correction preserves history. Create an active reward and a payout
+  -- operation referencing it, then apply a correction. The old reward must be
+  -- superseded (not deleted) so the payout FK remains valid, and a new versioned
+  -- reward record must be created.
+  DECLARE
+    v_correction_user UUID := '77777777-7777-4111-8111-111111111111';
+    v_correction_period UUID := '88888888-8888-4888-8888-888888888888';
+    v_original_reward UUID;
+    v_new_reward UUID;
+    v_correction_result JSONB;
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_correction_user, 'correction-test@example.test');
+
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_correction_period, '2026-02-01', '2026-02-28', '55555555-5555-4555-8555-555555555555', 'approved');
+
+    INSERT INTO public.user_rewards (
+      id, user_id, reward_period_id, bitxbit_amount, status
+    ) VALUES (
+      '77777777-7777-4777-8777-777777777777', v_correction_user, v_correction_period, 1.5, 'approved'
+    ) RETURNING id INTO v_original_reward;
+
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address, token_amount_raw, token_decimals, status, actor_id
+    ) VALUES (
+      'payout:test-period:corrected-reward', v_correction_period, v_original_reward, v_correction_user, test_wallet, 1500000000, 9, 'pending', v_correction_user
+    );
+
+    SELECT public.apply_reward_correction(
+      v_correction_period,
+      'Test correction preserving history',
+      jsonb_build_array(
+        jsonb_build_object(
+          'user_id', v_correction_user,
+          'estimated_aud_value', 2.00,
+          'bitxbit_amount', 2.0000
+        )
+      )
+    ) INTO v_correction_result;
+
+    IF (v_correction_result->>'superseded_rewards')::INT IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'apply_reward_correction did not supersede exactly one reward (got %)', v_correction_result;
+    END IF;
+
+    IF (v_correction_result->>'inserted_rewards')::INT IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'apply_reward_correction did not insert exactly one new reward (got %)', v_correction_result;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM public.user_rewards
+      WHERE id = v_original_reward AND status = 'superseded' AND superseded_at IS NOT NULL
+    ) THEN
+      RAISE EXCEPTION 'original reward was not superseded and preserved';
+    END IF;
+
+    SELECT id INTO v_new_reward
+    FROM public.user_rewards
+    WHERE reward_period_id = v_correction_period AND user_id = v_correction_user AND superseded_at IS NULL;
+
+    IF v_new_reward IS NULL THEN
+      RAISE EXCEPTION 'new active reward was not created';
+    END IF;
+
+    IF v_new_reward = v_original_reward THEN
+      RAISE EXCEPTION 'new reward id matches original reward id';
+    END IF;
+
+    IF (SELECT version FROM public.user_rewards WHERE id = v_new_reward) IS DISTINCT FROM 2 THEN
+      RAISE EXCEPTION 'new reward did not receive version 2';
+    END IF;
+
+    -- The payout operation must still reference the original (now superseded) reward.
+    IF (SELECT reward_id FROM public.payout_operations WHERE operation_id = 'payout:test-period:corrected-reward') IS DISTINCT FROM v_original_reward THEN
+      RAISE EXCEPTION 'payout operation no longer references the preserved original reward';
+    END IF;
+
+    -- After correction the payout operation should be cancelled, not claimable.
+    IF (SELECT status FROM public.payout_operations WHERE operation_id = 'payout:test-period:corrected-reward') IS DISTINCT FROM 'cancelled' THEN
+      RAISE EXCEPTION 'pending payout was not cancelled during correction';
     END IF;
   END;
 

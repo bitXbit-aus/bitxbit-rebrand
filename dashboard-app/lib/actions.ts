@@ -521,10 +521,23 @@ const ACTIVITY_POINTS: Record<string, number> = {
   other: 1,
 };
 
-async function executeRewardCalculation(
+interface ComputedReward {
+  user_id: string;
+  reward_period_id: string;
+  estimated_aud_value: number;
+  bitxbit_amount: number;
+  status: "pending";
+}
+
+interface RewardCalculation {
+  rewards: ComputedReward[];
+  totalIncome: number;
+}
+
+async function computeRewards(
   supabase: ReturnType<typeof createServiceClient>,
   periodId: string
-) {
+): Promise<RewardCalculation> {
   const { data: period, error: periodError } = await supabase
     .from("reward_periods")
     .select("*, allocation_model:allocation_models(*)")
@@ -579,11 +592,7 @@ async function executeRewardCalculation(
   });
 
   if (totalPoints === 0 || communityPool === 0) {
-    await supabase
-      .from("reward_periods")
-      .update({ total_income: totalIncome, status: "calculating" })
-      .eq("id", periodId);
-    return { totalIncome, recipients: 0 };
+    return { rewards: [], totalIncome };
   }
 
   const rewards = Array.from(pointsByUser.entries()).map(([userId, points]) => {
@@ -593,9 +602,26 @@ async function executeRewardCalculation(
       reward_period_id: periodId,
       estimated_aud_value: Number(estimated.toFixed(2)),
       bitxbit_amount: Number(estimated.toFixed(4)),
-      status: "pending",
+      status: "pending" as const,
     };
   });
+
+  return { rewards, totalIncome };
+}
+
+async function executeRewardCalculation(
+  supabase: ReturnType<typeof createServiceClient>,
+  periodId: string
+) {
+  const { rewards, totalIncome } = await computeRewards(supabase, periodId);
+
+  if (rewards.length === 0) {
+    await supabase
+      .from("reward_periods")
+      .update({ total_income: totalIncome, status: "calculating" })
+      .eq("id", periodId);
+    return { totalIncome, recipients: 0 };
+  }
 
   await supabase.from("user_rewards").delete().eq("reward_period_id", periodId);
   const { error: insertError } = await supabase.from("user_rewards").insert(rewards);
@@ -684,52 +710,49 @@ export async function correctRewards(periodId: string, reason: string) {
         throw new Error("Cannot correct a period that has already been distributed.");
       }
 
-      // Any payout that has already entered the blockchain pipeline must not be
-      // silently discarded. Correction is only safe when every payout is either
-      // still pending/failed/cancelled, or has been explicitly reconciled/cancelled
-      // by an operator.
-      const { data: unsafePayouts, error: unsafeError } = await supabase
-        .from("payout_operations")
-        .select("id, status")
-        .eq("reward_period_id", periodId)
-        .in("status", ["submitting", "submitted", "uncertain", "confirmed"]);
-      if (unsafeError) throw unsafeError;
-      if (unsafePayouts && unsafePayouts.length > 0) {
-        const statuses = Array.from(new Set(unsafePayouts.map((p) => p.status))).join(", ");
-        throw new Error(
-          `Cannot correct a period with ${unsafePayouts.length} payout(s) in non-recalculable state (${statuses}). Reconcile, cancel, or wait for those operations to settle before correcting.`
-        );
+      if (period.status === "distributed") {
+        throw new Error("Cannot correct a period that has already been distributed.");
       }
 
-      // Instead of deleting historical payout records, cancel any pending or
-      // failed operations so the audit trail and any attempted transactions are
-      // preserved.
-      const { error: cancelPayoutsError } = await supabase
-        .from("payout_operations")
-        .update({
-          status: "cancelled",
-          cancellation_reason: `Cancelled during reward correction: ${reason.trim()}`,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("reward_period_id", periodId)
-        .in("status", ["pending", "failed"]);
-      if (cancelPayoutsError) throw cancelPayoutsError;
+      // Compute the corrected reward amounts before entering the atomic database
+      // transaction. The actual correction (cancelling safe payouts, superseding
+      // prior reward records, inserting new versioned records, and resetting the
+      // period) is performed by apply_reward_correction so it stays transactional
+      // and never deletes financial history that is referenced by payout_operations.
+      const { rewards, totalIncome } = await computeRewards(supabase, periodId);
+      const newRewardsJson = rewards.map((r) => ({
+        user_id: r.user_id,
+        estimated_aud_value: r.estimated_aud_value,
+        bitxbit_amount: r.bitxbit_amount,
+      }));
 
-      // Reset reward records before recalculation.
-      const { error: deleteRewardsError } = await supabase
-        .from("user_rewards")
-        .delete()
-        .eq("reward_period_id", periodId);
-      if (deleteRewardsError) throw deleteRewardsError;
+      const { data: correctionResult, error: correctionError } = await supabase.rpc(
+        "apply_reward_correction",
+        {
+          p_period_id: periodId,
+          p_reason: reason.trim(),
+          p_new_rewards: newRewardsJson,
+        }
+      );
+      if (correctionError) {
+        if (correctionError.message?.includes("non-recalculable payouts")) {
+          throw new Error(
+            "Cannot correct a period with payouts in a non-recalculable state. Reconcile, cancel, or wait for those operations to settle before correcting."
+          );
+        }
+        throw correctionError;
+      }
 
-      // Reset period status so recalculation can proceed.
-      const { error: resetError } = await supabase
+      await supabase
         .from("reward_periods")
-        .update({ status: "pending", total_income: 0 })
+        .update({ total_income: totalIncome, status: "calculating" })
         .eq("id", periodId);
-      if (resetError) throw resetError;
 
-      return executeRewardCalculation(supabase, periodId);
+      return {
+        totalIncome,
+        recipients: rewards.length,
+        correction: correctionResult,
+      };
     },
     { period_id: periodId, reason: reason.trim() }
   );
