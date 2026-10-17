@@ -14,6 +14,7 @@ MIGRATION_016="$ROOT_DIR/supabase/migrations/016_reward_calculation_history_safe
 MIGRATION_017="$ROOT_DIR/supabase/migrations/017_fix_user_rewards_active_uniqueness.sql"
 MIGRATION_018="$ROOT_DIR/supabase/migrations/018_coordinate_reward_correction_and_claim.sql"
 MIGRATION_019="$ROOT_DIR/supabase/migrations/019_prevent_finalised_payout_deletion.sql"
+MIGRATION_020="$ROOT_DIR/supabase/migrations/020_create_or_claim_payout_operation.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -51,6 +52,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -66,6 +68,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -473,6 +476,104 @@ BEGIN
     END IF;
   END;
 
+  -- create_or_claim_payout_operation must verify the reward is active and
+  -- approved before creating or claiming an operation.
+  DECLARE
+    v_cc_user UUID := '11111111-1111-4111-8111-111111111112';
+    v_cc_period UUID := '33333333-3333-4333-8333-333333333334';
+    v_cc_reward UUID := '44444444-4444-4444-8444-444444444445';
+    v_cc_op TEXT;
+    v_cc_op_status TEXT;
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_cc_user, 'create-claim-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_cc_period, '2026-07-01', '2026-07-31', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status)
+    VALUES (v_cc_reward, v_cc_user, v_cc_period, 1.5, 'approved');
+
+    -- Creates and claims a new operation when none exists.
+    SELECT public.create_or_claim_payout_operation(
+      v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+    ) INTO v_cc_op;
+
+    IF v_cc_op IS NULL THEN
+      RAISE EXCEPTION 'create_or_claim_payout_operation did not return an operation id';
+    END IF;
+
+    SELECT status INTO v_cc_op_status
+    FROM public.payout_operations
+    WHERE operation_id = v_cc_op;
+
+    IF v_cc_op_status IS DISTINCT FROM 'submitting' THEN
+      RAISE EXCEPTION 'newly created operation is not submitting (got %)', v_cc_op_status;
+    END IF;
+
+    -- Claims an existing pending operation.
+    UPDATE public.payout_operations
+    SET status = 'pending'
+    WHERE operation_id = v_cc_op;
+
+    SELECT public.create_or_claim_payout_operation(
+      v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+    ) INTO v_cc_op;
+
+    SELECT status INTO v_cc_op_status
+    FROM public.payout_operations
+    WHERE operation_id = v_cc_op;
+
+    IF v_cc_op_status IS DISTINCT FROM 'submitting' THEN
+      RAISE EXCEPTION 'existing pending operation was not claimed (got %)', v_cc_op_status;
+    END IF;
+
+    -- Rejects a superseded reward.
+    UPDATE public.user_rewards
+    SET status = 'superseded', superseded_at = NOW()
+    WHERE id = v_cc_reward;
+
+    BEGIN
+      SELECT public.create_or_claim_payout_operation(
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+      ) INTO v_cc_op;
+      RAISE EXCEPTION 'superseded reward was accepted for payout';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'superseded reward was accepted for payout' THEN
+        RAISE;
+      END IF;
+    END;
+
+    -- Rejects an amount mismatch.
+    UPDATE public.user_rewards
+    SET status = 'approved', superseded_at = NULL
+    WHERE id = v_cc_reward;
+
+    BEGIN
+      SELECT public.create_or_claim_payout_operation(
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 999999999, v_cc_user
+      ) INTO v_cc_op;
+      RAISE EXCEPTION 'amount mismatch was accepted for payout';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'amount mismatch was accepted for payout' THEN
+        RAISE;
+      END IF;
+    END;
+
+    -- Rejects a non-approved reward.
+    UPDATE public.user_rewards
+    SET status = 'pending'
+    WHERE id = v_cc_reward;
+
+    BEGIN
+      SELECT public.create_or_claim_payout_operation(
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+      ) INTO v_cc_op;
+      RAISE EXCEPTION 'non-approved reward was accepted for payout';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'non-approved reward was accepted for payout' THEN
+        RAISE;
+      END IF;
+    END;
+  END;
+
   -- Reward correction preserves history. Create an active reward and a payout
   -- operation referencing it, then apply a correction. The old reward must be
   -- superseded (not deleted) so the payout FK remains valid, and a new versioned
@@ -778,3 +879,82 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
 " >/dev/null
 
 printf 'concurrent correction-vs-claim race test passed (blocked %sms, claim returned NULL, payout cancelled)\n' "$DURATION"
+
+# ------------------------------------------------------------------------------
+# Concurrent create_or_claim_payout_operation vs correction race test
+# Verifies that a correction cannot supersede a reward after the application has
+# read it but before create_or_claim_payout_operation() authorises submission.
+# The creation RPC must acquire the period lock and recheck the reward status;
+# when the correction wins the race, creation fails and no payout operation is
+# inserted.
+# ------------------------------------------------------------------------------
+RACE2_USER='11111111-2222-4222-8222-222222222222'
+RACE2_PERIOD='22222222-3333-4333-8333-333333333333'
+RACE2_REWARD='22222222-3333-4333-8333-333333333331'
+RACE2_RESULT=$(mktemp)
+
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+  INSERT INTO auth.users (id, email) VALUES ('$RACE2_USER', 'race2@example.test');
+  INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+  VALUES ('$RACE2_PERIOD', '2026-06-01', '2026-06-30', '55555555-5555-4555-8555-555555555555', 'approved');
+  INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+  VALUES ('$RACE2_REWARD', '$RACE2_USER', '$RACE2_PERIOD', 7.0, 'approved', 1);
+" >/dev/null
+
+# Background correction acquires the period lock, signals, then supersedes the reward.
+(
+  psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+    BEGIN;
+    SELECT pg_advisory_xact_lock(0, hashtext('$RACE2_PERIOD'::text));
+    SELECT pg_sleep(1.5);
+    SELECT apply_reward_correction('$RACE2_PERIOD'::UUID, 'race2 correction', '[{\"user_id\":\"$RACE2_USER\",\"estimated_aud_value\":3.00,\"bitxbit_amount\":3.0}]'::jsonb);
+    COMMIT;
+  " >/dev/null
+) &
+
+# Wait until the background session holds the period lock.
+for i in {1..50}; do
+  if psql -d "$DB_NAME" -t -A -c "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 0 AND objid = hashtext('$RACE2_PERIOD'::text) AND granted" 2>/dev/null | grep -q '^1$'; then
+    break
+  fi
+  sleep 0.1
+done
+
+# Foreground create+claim should block until the correction commits, then fail.
+START2_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
+# The RPC is expected to raise; psql exits non-zero. Capture stdout and allow the
+# non-zero exit so we can verify no operation id was returned.
+psql -d "$DB_NAME" -t -A -c "SELECT create_or_claim_payout_operation('$RACE2_PERIOD'::UUID, '$RACE2_REWARD'::UUID, '$RACE2_USER'::UUID, 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 7000000000, '$RACE2_USER'::UUID);" > "$RACE2_RESULT" 2>/dev/null || true
+END2_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
+DURATION2=$((END2_MS - START2_MS))
+
+# Wait for background correction to finish.
+wait
+
+RESULT2=$(cat "$RACE2_RESULT" | tr -d '[:space:]')
+rm -f "$RACE2_RESULT"
+
+if [ "$DURATION2" -lt 1000 ]; then
+  echo "race2 test failed: create_or_claim_payout_operation did not block on period lock (duration ${DURATION2}ms)" >&2
+  exit 1
+fi
+
+# The RPC should raise an exception, producing no output rather than an id.
+if [ -n "$RESULT2" ]; then
+  echo "race2 test failed: create_or_claim_payout_operation returned '$RESULT2' after reward was superseded" >&2
+  exit 1
+fi
+
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+  DO \$\$
+  BEGIN
+    IF (SELECT superseded_at IS NOT NULL FROM public.user_rewards WHERE id = '$RACE2_REWARD') IS DISTINCT FROM TRUE THEN
+      RAISE EXCEPTION 'race2 test failed: reward was not superseded by correction';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.payout_operations WHERE reward_period_id = '$RACE2_PERIOD') THEN
+      RAISE EXCEPTION 'race2 test failed: a payout operation was created for a superseded reward';
+    END IF;
+  END \$\$;
+" >/dev/null
+
+printf 'concurrent create_or_claim vs correction race test passed (blocked %sms, creation failed, no operation inserted)\n' "$DURATION2"

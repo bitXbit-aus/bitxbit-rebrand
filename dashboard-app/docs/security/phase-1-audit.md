@@ -161,7 +161,7 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 - `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
 - `lib/payout.test.ts` — exact token-unit conversion and round-trips.
 - `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, shared-store delegation, `MemoryRateLimitStore` unit tests, and trusted-proxy client-identifier selection.
-- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `019`, including incident-state non-retryability, immutability, delete prohibition for finalised records, test-operation constraints, recalculation preserving superseded reward history, active-reward uniqueness enforcement, and a concurrent correction-vs-claim race test using two psql sessions.
+- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `020`, including incident-state non-retryability, immutability, delete prohibition for finalised records, test-operation constraints, recalculation preserving superseded reward history, active-reward uniqueness enforcement, `create_or_claim_payout_operation()` validation, and concurrent correction-vs-claim and correction-vs-creation race tests using two psql sessions.
 
 ### Test results
 
@@ -177,7 +177,7 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 
 1. **Security Audit Report** — this document.
 2. **Implemented Fixes** — working code on `security/phase-1-hardening`.
-3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`, `016_reward_calculation_history_safe.sql`, `017_fix_user_rewards_active_uniqueness.sql`, `018_coordinate_reward_correction_and_claim.sql`, `019_prevent_finalised_payout_deletion.sql`.
+3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`, `016_reward_calculation_history_safe.sql`, `017_fix_user_rewards_active_uniqueness.sql`, `018_coordinate_reward_correction_and_claim.sql`, `019_prevent_finalised_payout_deletion.sql`, `020_create_or_claim_payout_operation.sql`.
 4. **Wallet Authentication Upgrade** — `lib/wallet-crypto.ts`, `lib/wallet-verification.ts`, `app/dashboard/wallet/page.tsx`.
 5. **Token Distribution Improvements** — `lib/payout.ts`, hardened `airdropRewards()`, `payout_operations`.
 6. **Automated Test Results** — 24 unit tests + migration replay test passing.

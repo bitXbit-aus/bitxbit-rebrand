@@ -1338,7 +1338,10 @@ export async function airdropRewards(periodId: string) {
       // -----------------------------------------------------------------------
       // Phase 1: eligibility and reconciliation. Determine which rewards are
       // ready for a new payout attempt, reconcile any in-flight operations, and
-      // compute the total token amount that would be required.
+      // compute the total token amount that would be required. Do NOT create or
+      // claim payout operations here; creation and claiming must happen atomically
+      // inside a single database transaction (create_or_claim_payout_operation)
+      // that locks the period and re-verifies the reward is still active.
       // -----------------------------------------------------------------------
       interface PayoutCandidate {
         reward: NonNullable<typeof rewards>[number];
@@ -1379,38 +1382,13 @@ export async function airdropRewards(periodId: string) {
         }
 
         const operationId = `payout:${periodId}:${reward.id}`;
-        let existing = existingByReward.get(reward.id);
+        const existing = existingByReward.get(reward.id);
 
-        if (!existing) {
-          const { error: insertError } = await supabase.from("payout_operations").insert({
-            operation_id: operationId,
-            reward_period_id: periodId,
-            reward_id: reward.id,
-            user_id: reward.user_id,
-            wallet_address: walletAddress,
-            token_amount_raw: amountRaw,
-            token_decimals: TOKEN_DECIMALS,
-            status: "pending",
-            actor_id: context.user.id,
-          });
-          if (insertError) throw insertError;
-          existing = {
-            id: "",
-            operation_id: operationId,
-            reward_id: reward.id,
-            status: "pending",
-            transaction_hash: null,
-            token_amount_raw: amountRaw,
-            wallet_address: walletAddress,
-          } as unknown as NonNullable<typeof existingOps>[number];
-          existingByReward.set(reward.id, existing);
-        }
-
-        if (existing.status === "confirmed") {
+        if (existing?.status === "confirmed") {
           continue;
         }
 
-        if (existing.status === "submitted" || existing.status === "uncertain") {
+        if (existing?.status === "submitted" || existing?.status === "uncertain") {
           const outcome = await reconcileSubmittedOperation(existing);
           if (outcome === "confirmed") continue;
           if (outcome === "uncertain") {
@@ -1423,12 +1401,12 @@ export async function airdropRewards(periodId: string) {
           }
         }
 
-        if (existing.status === "submitting") {
+        if (existing?.status === "submitting") {
           incrementSkip("submitting_in_flight");
           continue;
         }
 
-        if (existing.status !== "pending" && existing.status !== "failed") {
+        if (existing && existing.status !== "pending" && existing.status !== "failed") {
           incrementSkip("unexpected_status");
           continue;
         }
@@ -1486,7 +1464,10 @@ export async function airdropRewards(periodId: string) {
       }
 
       // -----------------------------------------------------------------------
-      // Phase 3: claim, prepare, persist, broadcast, and confirm each candidate.
+      // Phase 3: create or claim, prepare, persist, broadcast, and confirm each
+      // candidate. Creation and claiming are done atomically through
+      // create_or_claim_payout_operation, which locks the period and re-verifies
+      // the reward is still active and approved before authorising submission.
       // Every persistence result is verified before the next external step.
       // -----------------------------------------------------------------------
       const distributions: PayoutSubmission[] = [];
@@ -1500,11 +1481,21 @@ export async function airdropRewards(periodId: string) {
       for (const candidate of candidates) {
         const { reward, operationId, walletAddress, amountRaw } = candidate;
 
-        const { data: claimedId, error: claimError } = await supabase.rpc("claim_payout_operation", {
-          p_operation_id: operationId,
-          p_actor_id: context.user.id,
-        });
-        if (claimError) throw claimError;
+        const { data: claimedId, error: claimError } = await supabase.rpc(
+          "create_or_claim_payout_operation",
+          {
+            p_period_id: periodId,
+            p_reward_id: reward.id,
+            p_user_id: reward.user_id,
+            p_wallet_address: walletAddress,
+            p_amount_raw: Number(amountRaw),
+            p_actor_id: context.user.id,
+          }
+        );
+        if (claimError) {
+          incrementSkip("claim_failed");
+          continue;
+        }
         if (!claimedId) {
           incrementSkip("claim_failed");
           continue;
