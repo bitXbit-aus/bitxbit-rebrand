@@ -1149,11 +1149,6 @@ export async function airdropRewards(periodId: string) {
         existingByReward.set(op.reward_id, op);
       }
 
-      const distributions: PayoutSubmission[] = [];
-      const rewardMeta = new Map<
-        string,
-        { rewardId: string; walletAddress: string; amountRaw: bigint }
-      >();
       const skipped = new Map<string, number>();
 
       function incrementSkip(reason: string) {
@@ -1171,7 +1166,7 @@ export async function airdropRewards(periodId: string) {
           op.token_amount_raw
         );
         if (confirmation.confirmed) {
-          await supabase
+          const { error: confirmError } = await supabase
             .from("payout_operations")
             .update({
               status: "confirmed",
@@ -1180,7 +1175,9 @@ export async function airdropRewards(periodId: string) {
               updated_at: new Date().toISOString(),
             })
             .eq("operation_id", op.operation_id);
-          await supabase
+          if (confirmError) throw confirmError;
+
+          const { error: rewardError } = await supabase
             .from("user_rewards")
             .update({
               status: "distributed",
@@ -1188,13 +1185,13 @@ export async function airdropRewards(periodId: string) {
               distributed_at: new Date().toISOString(),
             })
             .eq("id", op.reward_id);
+          if (rewardError) throw rewardError;
+
+          op.status = "confirmed";
           return "confirmed";
         }
-        // An uncertain outcome (RPC lag, not yet found, etc.) must not be
-        // treated as a retryable failure. Preserve it as uncertain so it can
-        // be reconciled again by a later run or dedicated job.
         if (confirmation.uncertain) {
-          await supabase
+          const { error: uncertainError } = await supabase
             .from("payout_operations")
             .update({
               status: "uncertain",
@@ -1203,10 +1200,12 @@ export async function airdropRewards(periodId: string) {
               updated_at: new Date().toISOString(),
             })
             .eq("operation_id", op.operation_id);
+          if (uncertainError) throw uncertainError;
+
+          op.status = "uncertain";
           return "uncertain";
         }
-        // Only a verified non-execution or verified mismatch becomes failed.
-        await supabase
+        const { error: failError } = await supabase
           .from("payout_operations")
           .update({
             status: "failed",
@@ -1215,8 +1214,26 @@ export async function airdropRewards(periodId: string) {
             updated_at: new Date().toISOString(),
           })
           .eq("operation_id", op.operation_id);
+        if (failError) throw failError;
+
+        op.status = "failed";
         return "failed";
       }
+
+      // -----------------------------------------------------------------------
+      // Phase 1: eligibility and reconciliation. Determine which rewards are
+      // ready for a new payout attempt, reconcile any in-flight operations, and
+      // compute the total token amount that would be required.
+      // -----------------------------------------------------------------------
+      interface PayoutCandidate {
+        reward: NonNullable<typeof rewards>[number];
+        operationId: string;
+        walletAddress: string;
+        amountRaw: bigint;
+        existing: NonNullable<typeof existingOps>[number] | undefined;
+      }
+
+      const candidates: PayoutCandidate[] = [];
 
       for (const reward of rewards ?? []) {
         const userRelation = reward.users as
@@ -1279,21 +1296,15 @@ export async function airdropRewards(periodId: string) {
         }
 
         if (existing.status === "submitted" || existing.status === "uncertain") {
-          // Reconcile before any retry. An uncertain transfer must never
-          // automatically trigger another payment.
           const outcome = await reconcileSubmittedOperation(existing);
           if (outcome === "confirmed") continue;
           if (outcome === "uncertain") {
             incrementSkip("uncertain_requires_reconciliation");
             continue;
           }
-          // outcome === "failed": fall through to claim and retry
         }
 
         if (existing.status === "submitting") {
-          // Another process is currently submitting this operation, or a prior
-          // submission crashed mid-flight. Do not auto-retry; require manual
-          // recovery or a dedicated reconciliation job.
           incrementSkip("submitting_in_flight");
           continue;
         }
@@ -1303,73 +1314,41 @@ export async function airdropRewards(periodId: string) {
           continue;
         }
 
-        // Atomically claim the operation. Only the caller that succeeds may
-        // submit a blockchain transaction for this reward.
-        const { data: claimedId, error: claimError } = await supabase.rpc("claim_payout_operation", {
-          p_operation_id: operationId,
-          p_actor_id: context.user.id,
-        });
-        if (claimError) throw claimError;
-        if (!claimedId) {
-          incrementSkip("claim_failed");
-          continue;
-        }
-
-        // Prepare the signed transaction before broadcasting so the transaction
-        // identity (hash + serialized tx) is durable regardless of RPC outcome.
-        const prepared = await preparePayoutSubmission({ operationId, walletAddress, amountRaw });
-        if (prepared.preparationError || !prepared.txHash) {
-          await supabase
-            .from("payout_operations")
-            .update({
-              status: "failed",
-              submission_error: `Preparation failed: ${prepared.preparationError}`,
-              failed_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("operation_id", operationId);
-          incrementSkip("preparation_failed");
-          continue;
-        }
-
-        // Persist the signed transaction identity BEFORE broadcasting.
-        await supabase
-          .from("payout_operations")
-          .update({
-            status: "submitted",
-            transaction_hash: prepared.txHash,
-            signed_transaction_base58: prepared.signedTransactionBase58,
-            last_blockhash: prepared.lastBlockhash,
-            submitted_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("operation_id", operationId);
-
-        distributions.push(prepared);
-        rewardMeta.set(operationId, { rewardId: reward.id, walletAddress, amountRaw });
+        candidates.push({ reward, operationId, walletAddress, amountRaw, existing });
       }
 
-      if (distributions.length === 0) {
-        const confirmedCount =
-          rewards?.filter((r) => existingByReward.get(r.id)?.status === "confirmed").length ?? 0;
+      const confirmedCount =
+        rewards?.filter((r) => existingByReward.get(r.id)?.status === "confirmed").length ?? 0;
+
+      if (candidates.length === 0) {
         if (confirmedCount === (rewards?.length ?? 0) && (rewards?.length ?? 0) > 0) {
-          await supabase.from("reward_periods").update({ status: "distributed" }).eq("id", periodId);
+          const { error: periodUpdateError } = await supabase
+            .from("reward_periods")
+            .update({ status: "distributed" })
+            .eq("id", periodId);
+          if (periodUpdateError) throw periodUpdateError;
           return { status: "already_distributed", confirmedCount };
         }
         return {
           attempted: 0,
           submitted: 0,
-          confirmed: 0,
+          confirmed: confirmedCount,
           uncertain: 0,
           reconciliationFailures: 0,
           skipped: Object.fromEntries(skipped),
         };
       }
 
-      const totalNeededRaw = distributions.reduce((sum, d) => sum + d.amountRaw, 0n);
+      // -----------------------------------------------------------------------
+      // Phase 2: treasury balance check BEFORE any operation is claimed or any
+      // on-chain work is attempted. This prevents operations from being left in
+      // a submitted state when the treasury cannot fund them.
+      // -----------------------------------------------------------------------
+      const totalNeededRaw = candidates.reduce((sum, c) => sum + c.amountRaw, 0n);
       const balance = await getAirdropWalletBalance();
       const balanceRaw = amountToRaw(balance.token, TOKEN_DECIMALS);
-      const estimatedSolFee = distributions.length * 0.005;
+      const estimatedSolFee = candidates.length * 0.005;
+
       if (balanceRaw < totalNeededRaw) {
         throw new Error(
           `Insufficient bitxbit balance. Wallet: ${balance.token.toFixed(4)}, Needed: ${rawToAmount(
@@ -1386,15 +1365,85 @@ export async function airdropRewards(periodId: string) {
         );
       }
 
-      // Broadcast each prepared transaction. The signed tx identity is already
-      // durable in the database, so broadcast errors become uncertain rather
-      // than retryable failures.
+      // -----------------------------------------------------------------------
+      // Phase 3: claim, prepare, persist, broadcast, and confirm each candidate.
+      // Every persistence result is verified before the next external step.
+      // -----------------------------------------------------------------------
+      const distributions: PayoutSubmission[] = [];
+      const rewardMeta = new Map<
+        string,
+        { rewardId: string; walletAddress: string; amountRaw: bigint }
+      >();
       let submittedCount = 0;
       let uncertainCount = 0;
+
+      for (const candidate of candidates) {
+        const { reward, operationId, walletAddress, amountRaw } = candidate;
+
+        const { data: claimedId, error: claimError } = await supabase.rpc("claim_payout_operation", {
+          p_operation_id: operationId,
+          p_actor_id: context.user.id,
+        });
+        if (claimError) throw claimError;
+        if (!claimedId) {
+          incrementSkip("claim_failed");
+          continue;
+        }
+
+        const prepared = await preparePayoutSubmission({ operationId, walletAddress, amountRaw });
+        if (prepared.preparationError || !prepared.txHash) {
+          const { error: failError } = await supabase
+            .from("payout_operations")
+            .update({
+              status: "failed",
+              submission_error: `Preparation failed: ${prepared.preparationError}`,
+              failed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", operationId);
+          if (failError) throw failError;
+          incrementSkip("preparation_failed");
+          continue;
+        }
+
+        // Persist the signed transaction identity BEFORE broadcasting and
+        // verify the update succeeded. If persistence fails, the signed tx is
+        // never broadcast; the operation returns to a recoverable failed state.
+        const { error: persistError } = await supabase
+          .from("payout_operations")
+          .update({
+            status: "submitted",
+            transaction_hash: prepared.txHash,
+            signed_transaction_base58: prepared.signedTransactionBase58,
+            last_blockhash: prepared.lastBlockhash,
+            submitted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("operation_id", operationId);
+
+        if (persistError) {
+          const { error: recoverError } = await supabase
+            .from("payout_operations")
+          .update({
+              status: "failed",
+              submission_error: `Failed to persist signed transaction: ${persistError.message}`,
+              failed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", operationId);
+          if (recoverError) throw recoverError;
+          incrementSkip("persist_failed");
+          continue;
+        }
+
+        distributions.push(prepared);
+        rewardMeta.set(operationId, { rewardId: reward.id, walletAddress, amountRaw });
+      }
+
       for (const submission of distributions) {
         const broadcasted = await broadcastPayoutSubmission(submission);
         if (broadcasted.broadcastError) {
-          await supabase
+          const { error: uncertainError } = await supabase
             .from("payout_operations")
             .update({
               status: "uncertain",
@@ -1403,13 +1452,14 @@ export async function airdropRewards(periodId: string) {
               updated_at: new Date().toISOString(),
             })
             .eq("operation_id", submission.operationId);
+          if (uncertainError) throw uncertainError;
           uncertainCount++;
           continue;
         }
         submittedCount++;
       }
 
-      let confirmedCount = 0;
+      let confirmedFromBroadcast = 0;
       let reconciliationFailures = 0;
 
       for (const submission of distributions) {
@@ -1419,7 +1469,7 @@ export async function airdropRewards(periodId: string) {
         const confirmation = await confirmPayoutSubmission(submission, sourceWalletAddress);
 
         if (confirmation.confirmed) {
-          await supabase
+          const { error: confirmError } = await supabase
             .from("payout_operations")
             .update({
               status: "confirmed",
@@ -1428,8 +1478,9 @@ export async function airdropRewards(periodId: string) {
               updated_at: new Date().toISOString(),
             })
             .eq("operation_id", submission.operationId);
+          if (confirmError) throw confirmError;
 
-          await supabase
+          const { error: rewardError } = await supabase
             .from("user_rewards")
             .update({
               status: "distributed",
@@ -1437,10 +1488,11 @@ export async function airdropRewards(periodId: string) {
               distributed_at: new Date().toISOString(),
             })
             .eq("id", meta.rewardId);
+          if (rewardError) throw rewardError;
 
-          confirmedCount++;
+          confirmedFromBroadcast++;
         } else if (confirmation.uncertain) {
-          await supabase
+          const { error: uncertainError } = await supabase
             .from("payout_operations")
             .update({
               status: "uncertain",
@@ -1449,9 +1501,10 @@ export async function airdropRewards(periodId: string) {
               updated_at: new Date().toISOString(),
             })
             .eq("operation_id", submission.operationId);
+          if (uncertainError) throw uncertainError;
           uncertainCount++;
         } else {
-          await supabase
+          const { error: failError } = await supabase
             .from("payout_operations")
             .update({
               status: "failed",
@@ -1460,6 +1513,7 @@ export async function airdropRewards(periodId: string) {
               updated_at: new Date().toISOString(),
             })
             .eq("operation_id", submission.operationId);
+          if (failError) throw failError;
           reconciliationFailures++;
         }
       }
@@ -1472,13 +1526,17 @@ export async function airdropRewards(periodId: string) {
       const totalFinalOps = finalOps?.length ?? 0;
 
       if (allConfirmed && totalFinalOps === (rewards?.length ?? 0) && totalFinalOps > 0) {
-        await supabase.from("reward_periods").update({ status: "distributed" }).eq("id", periodId);
+        const { error: periodUpdateError } = await supabase
+          .from("reward_periods")
+          .update({ status: "distributed" })
+          .eq("id", periodId);
+        if (periodUpdateError) throw periodUpdateError;
       }
 
       return {
         attempted: distributions.length,
         submitted: submittedCount,
-        confirmed: confirmedCount,
+        confirmed: confirmedCount + confirmedFromBroadcast,
         uncertain: uncertainCount,
         reconciliationFailures,
         skipped: Object.fromEntries(skipped),
