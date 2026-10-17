@@ -83,6 +83,20 @@ async function expectThrows(
   }
 }
 
+interface SupabaseResult {
+  error?: { message?: string; code?: string } | null;
+}
+
+async function expectSupabaseError(
+  name: string,
+  resultPromise: PromiseLike<SupabaseResult>
+): Promise<void> {
+  const result = await resultPromise;
+  if (!result.error) {
+    throw new Error(`${name} succeeded unexpectedly; expected a Supabase error`);
+  }
+}
+
 async function setup() {
   // Create auth user and public profile.
   const { error: authError } = await supabase.auth.admin.createUser({
@@ -200,7 +214,7 @@ async function main() {
     const first = await rpc<boolean>("record_trusted_offer_click", {
       p_user_id: testUserId,
       p_offer_id: testOfferId,
-      p_source_url: "https://example.test/offer",
+      p_expected_url: "https://example.test/offer",
       p_dedupe_seconds: 30,
     });
     if (first !== true) throw new Error("first trusted click was not recorded");
@@ -208,7 +222,7 @@ async function main() {
     const second = await rpc<boolean>("record_trusted_offer_click", {
       p_user_id: testUserId,
       p_offer_id: testOfferId,
-      p_source_url: "https://example.test/offer",
+      p_expected_url: "https://example.test/offer",
       p_dedupe_seconds: 30,
     });
     if (second !== false) throw new Error("duplicate trusted click was not suppressed");
@@ -248,8 +262,10 @@ async function main() {
       .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
       .eq("operation_id", testOpId);
 
-    // Confirmed row must be immutable.
-    await expectThrows("confirmed status mutation", () =>
+    // Confirmed row must be immutable. Supabase returns errors as resolved
+    // { data, error } objects, so we inspect error explicitly.
+    await expectSupabaseError(
+      "confirmed status mutation",
       supabase
         .from("payout_operations")
         .update({ status: "failed" })
@@ -258,7 +274,8 @@ async function main() {
         .single()
     );
 
-    await expectThrows("confirmed field mutation", () =>
+    await expectSupabaseError(
+      "confirmed field mutation",
       supabase
         .from("payout_operations")
         .update({ wallet_address: testWallet2 })
