@@ -11,6 +11,7 @@ import {
   rawToAmount,
   executePayoutTransfers,
   confirmTokenTransfer,
+  getAirdropWalletAddress,
   type PayoutTransfer,
 } from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
@@ -1030,6 +1031,7 @@ export async function sendTestAirdrop(formData: FormData) {
 
   const TEST_AMOUNT = 0.001;
   const amountRaw = amountToRaw(TEST_AMOUNT);
+  const sourceWalletAddress = getAirdropWalletAddress();
   try {
     const balance = await getAirdropWalletBalance();
     if (balance.token < TEST_AMOUNT) {
@@ -1047,7 +1049,7 @@ export async function sendTestAirdrop(formData: FormData) {
       throw new Error(result.error ?? "Test airdrop failed");
     }
 
-    const confirmation = await confirmTokenTransfer(result.txHash, walletAddress, amountRaw);
+    const confirmation = await confirmTokenTransfer(result.txHash, sourceWalletAddress, walletAddress, amountRaw);
     if (!confirmation.confirmed) {
       throw new Error(`Test airdrop could not be confirmed on-chain: ${confirmation.verificationError}`);
     }
@@ -1075,6 +1077,7 @@ export async function airdropRewards(periodId: string) {
   if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
   const context = await requireCapability("manage_rewards");
   const supabase = createServiceClient();
+  const sourceWalletAddress = getAirdropWalletAddress();
 
   const result = await auditedAdminMutation(
     context,
@@ -1127,6 +1130,7 @@ export async function airdropRewards(periodId: string) {
         if (!op.transaction_hash) return "unresolved";
         const confirmation = await confirmTokenTransfer(
           op.transaction_hash,
+          sourceWalletAddress,
           op.wallet_address,
           op.token_amount_raw
         );
@@ -1338,6 +1342,7 @@ export async function airdropRewards(periodId: string) {
 
         const confirmation = await confirmTokenTransfer(
           result.txHash,
+          sourceWalletAddress,
           meta.walletAddress,
           meta.amountRaw
         );

@@ -9,13 +9,21 @@ import {
   rawToAmount,
   executePayoutTransfers,
   confirmTokenTransfer,
+  getAirdropWalletAddress,
   type PayoutTransfer,
   type PayoutTransferResult,
   type ConfirmationResult,
 } from "@/lib/payout";
 
 export type { PayoutTransfer, PayoutTransferResult, ConfirmationResult };
-export { getAirdropWalletBalances, amountToRaw, rawToAmount, executePayoutTransfers, confirmTokenTransfer };
+export {
+  getAirdropWalletBalances,
+  amountToRaw,
+  rawToAmount,
+  executePayoutTransfers,
+  confirmTokenTransfer,
+  getAirdropWalletAddress,
+};
 
 const MINT = process.env.BITXBIT_TOKEN_MINT;
 const DECIMALS = parseInt(process.env.BITXBIT_TOKEN_DECIMALS || "9", 10);

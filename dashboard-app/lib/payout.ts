@@ -53,6 +53,15 @@ function getSigner(): Keypair {
   return Keypair.fromSecretKey(secretKey);
 }
 
+export function getAirdropWalletAddress(): string {
+  if (!PRIVATE_KEY) {
+    throw new Error("AIRDROP_WALLET_PRIVATE_KEY is not configured");
+  }
+  const secretKey = bs58.decode(PRIVATE_KEY);
+  const signer = Keypair.fromSecretKey(secretKey);
+  return signer.publicKey.toBase58();
+}
+
 export function amountToRaw(amountDisplay: number, decimals = DECIMALS): bigint {
   return BigInt(Math.round(amountDisplay * Math.pow(10, decimals)));
 }
@@ -154,6 +163,7 @@ export async function executePayoutTransfers(
 
 export async function confirmTokenTransfer(
   txHash: string,
+  expectedSourceWalletAddress: string,
   expectedWalletAddress: string,
   expectedAmountRaw: bigint,
   mintAddress: string = MINT!
@@ -182,7 +192,7 @@ export async function confirmTokenTransfer(
       return { confirmed: false, verificationError: "Transaction not yet confirmed" };
     }
 
-    // Parse the transaction to verify recipient and amount.
+    // Parse the transaction to verify source, mint, recipient, and amount.
     const tx = await connection.getParsedTransaction(txHash, {
       commitment: "confirmed",
       maxSupportedTransactionVersion: 0,
@@ -192,29 +202,43 @@ export async function confirmTokenTransfer(
       return { confirmed: false, verificationError: "Could not fetch transaction details" };
     }
 
+    const mintPublicKey = new PublicKey(mintAddress);
+    const expectedSourceAta = await getAssociatedTokenAddress(
+      mintPublicKey,
+      new PublicKey(expectedSourceWalletAddress)
+    );
     const expectedRecipientAta = await getAssociatedTokenAddress(
-      new PublicKey(mintAddress),
+      mintPublicKey,
       new PublicKey(expectedWalletAddress)
     );
 
-    const mint = mintAddress;
     let foundMatchingTransfer = false;
 
     for (const instruction of tx.transaction.message.instructions) {
       const parsed = (instruction as any).parsed;
       const program = (instruction as any).program;
-      if (program !== "spl-token" || parsed?.type !== "transfer") continue;
+      const programId = (instruction as any).programId;
+
+      // Defensive: require the SPL Token program.
+      if (program !== "spl-token") continue;
+      if (programId && programId !== "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") continue;
+      if (parsed?.type !== "transfer") continue;
 
       const info = parsed.info;
       if (!info) continue;
 
+      const source = info.source;
       const destination = info.destination;
       const amount = info.amount;
-      const tokenMint = (instruction as any).accounts?.[0];
+      const authority = info.authority;
 
+      // Verify the complete transfer graph: source ATA, destination ATA,
+      // token authority, and exact raw amount all match the expected payout.
       if (
+        source === expectedSourceAta.toBase58() &&
         destination === expectedRecipientAta.toBase58() &&
-        BigInt(amount) === expectedAmountRaw
+        BigInt(amount) === expectedAmountRaw &&
+        authority === expectedSourceWalletAddress
       ) {
         foundMatchingTransfer = true;
         break;
@@ -224,7 +248,8 @@ export async function confirmTokenTransfer(
     if (!foundMatchingTransfer) {
       return {
         confirmed: false,
-        verificationError: "Transaction does not contain the expected recipient/amount",
+        verificationError:
+          "Transaction does not contain the expected source/mint/recipient/amount/authority",
       };
     }
 

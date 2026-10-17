@@ -213,8 +213,10 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 BEGIN
-  IF OLD.status = 'confirmed' AND NEW.status IS DISTINCT FROM 'confirmed' THEN
-    RAISE EXCEPTION 'confirmed payout operations cannot be mutated';
+  -- Confirmed payout records are entirely immutable. No field may change once
+  -- the operation has reached its final on-chain verified state.
+  IF OLD.status = 'confirmed' THEN
+    RAISE EXCEPTION 'confirmed payout operations are immutable';
   END IF;
   RETURN NEW;
 END;

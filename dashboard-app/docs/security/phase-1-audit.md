@@ -89,14 +89,15 @@ Migration `012_secure_token_distribution.sql`:
 - Revokes direct authenticated access; read access is admin-only via `is_active_admin()`. Writes go through service-role Server Actions after capability checks.
 - Adds `public.claim_payout_operation(TEXT, UUID)` — a `SECURITY DEFINER` function that atomically locks and moves a `pending`/`failed` operation to `submitting`, returning the operation ID only to the caller that wins the race. Concurrent callers receive `NULL`.
 - Adds an audit trigger that writes every INSERT/UPDATE/DELETE on `payout_operations` to `security_audit_log`.
-- Adds `prevent_confirmed_payout_mutation()` trigger that rejects any update moving a confirmed operation to a non-confirmed state.
+- Adds `prevent_confirmed_payout_mutation()` trigger that rejects **any** `UPDATE` to a `confirmed` operation. Once confirmed, the entire row is immutable, not just its status.
 
 Application changes:
 
 - New server-only `lib/payout.ts` owns all Solana transfer logic:
   - `getAirdropWalletBalances`, `amountToRaw`, `rawToAmount` for exact token-unit arithmetic.
+  - `getAirdropWalletAddress()` exposes the expected treasury wallet public key for on-chain reconciliation.
   - `executePayoutTransfers(transfers[])` submits transfers sequentially with a single signer, returning per-operation results.
-  - `confirmTokenTransfer(txHash, walletAddress, amountRaw)` waits for confirmation and reconciles the recipient ATA balance change against the expected raw amount.
+  - `confirmTokenTransfer(txHash, sourceWalletAddress, walletAddress, amountRaw)` waits for a finalized or confirmed signature status, parses the SPL-token `transfer` instruction, and verifies the program ID (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`), the source ATA, the destination ATA, the transfer authority, and the exact raw amount against the expected payout. Only transfers that match the expected treasury source, token mint (via deterministic ATAs), recipient, and amount are accepted as confirmed.
 - `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). The deprecated `distributeTokens()` wrapper was removed so there is no non-idempotent legacy distribution path.
 - `calculateRewards()` in `lib/actions.ts` now refuses to recalculate a period whose status is `approved` or `distributed`, and refuses to recalculate any period that already has `payout_operations` rows. This prevents accidental overwriting of rewards after they have been approved or once payout activity has begun.
 - `correctRewards(periodId, reason)` is a new explicit audited correction process. It requires `manage_rewards`, validates a non-empty reason, rejects distributed periods, rejects periods with confirmed payouts, deletes any pending/failed/submitted payout operations, resets the period to `pending`, deletes existing `user_rewards`, and recalculates. The reason is captured in the audit log.

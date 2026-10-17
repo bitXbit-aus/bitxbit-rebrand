@@ -285,9 +285,18 @@ BEGIN
 
   BEGIN
     UPDATE public.payout_operations SET status = 'failed' WHERE operation_id = test_op;
-    RAISE EXCEPTION 'confirmed payout operation was mutated';
+    RAISE EXCEPTION 'confirmed payout operation status was mutated';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM = 'confirmed payout operation was mutated' THEN
+    IF SQLERRM = 'confirmed payout operation status was mutated' THEN
+      RAISE;
+    END IF;
+  END;
+
+  BEGIN
+    UPDATE public.payout_operations SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH6' WHERE operation_id = test_op;
+    RAISE EXCEPTION 'confirmed payout operation field was mutated';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'confirmed payout operation field was mutated' THEN
       RAISE;
     END IF;
   END;
