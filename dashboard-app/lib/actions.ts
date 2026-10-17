@@ -875,14 +875,13 @@ export async function saveWalletAddress(walletAddress: string) {
       );
     }
 
+    revalidatePath("/dashboard/wallet");
+    revalidatePath("/dashboard/profile");
     return { walletAddress, verified: current?.wallet_verified ?? false };
   } catch (error) {
     await auditMutationFailure(context, "wallet.address_save", "public.users", user.id, error);
     throw error;
   }
-  revalidatePath("/dashboard/wallet");
-  revalidatePath("/dashboard/profile");
-  return { walletAddress, verified: false };
 }
 
 export async function getAirdropWalletBalanceAction() {
