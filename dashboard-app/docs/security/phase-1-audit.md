@@ -94,7 +94,7 @@ Application changes:
   - `getAirdropWalletBalances`, `amountToRaw`, `rawToAmount` for exact token-unit arithmetic.
   - `executePayoutTransfers(transfers[])` submits transfers sequentially with a single signer, returning per-operation results.
   - `confirmTokenTransfer(txHash, walletAddress, amountRaw)` waits for confirmation and reconciles the recipient ATA balance change against the expected raw amount.
-- `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). `distributeTokens()` is retained as a deprecated compatibility wrapper.
+- `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). The deprecated `distributeTokens()` wrapper was removed so there is no non-idempotent legacy distribution path.
 - `airdropRewards()` in `lib/actions.ts` now:
   - Requires `manage_rewards` capability.
   - Verifies the reward period is `approved`.

@@ -20,15 +20,6 @@ export { getAirdropWalletBalances, amountToRaw, rawToAmount, executePayoutTransf
 const MINT = process.env.BITXBIT_TOKEN_MINT;
 const DECIMALS = parseInt(process.env.BITXBIT_TOKEN_DECIMALS || "9", 10);
 
-export interface AirdropResult {
-  userId: string;
-  walletAddress: string;
-  amount: number;
-  txHash: string | null;
-  error: string | null;
-  rewardId?: string;
-}
-
 export async function getAirdropWalletBalance(): Promise<{ sol: number; token: number }> {
   const balances = await getAirdropWalletBalances();
   return { sol: balances.sol, token: balances.token };
@@ -62,29 +53,4 @@ export async function getTokenBalance(walletAddress: string): Promise<number> {
   } catch {
     return 0;
   }
-}
-
-/**
- * @deprecated Use executePayoutTransfers from @/lib/payout for new code.
- * Kept for compatibility; it does not provide idempotent operation tracking.
- */
-export async function distributeTokens(
-  distributions: { userId: string; walletAddress: string; amount: number; rewardId?: string }[]
-): Promise<AirdropResult[]> {
-  const transfers: PayoutTransfer[] = distributions.map((dist) => ({
-    operationId: `legacy:${dist.rewardId ?? dist.userId}:${Date.now()}`,
-    walletAddress: dist.walletAddress,
-    amountRaw: amountToRaw(dist.amount, DECIMALS),
-  }));
-
-  const results = await executePayoutTransfers(transfers);
-
-  return results.map((result, index) => ({
-    userId: distributions[index].userId,
-    walletAddress: result.walletAddress,
-    amount: rawToAmount(result.amountRaw, DECIMALS),
-    txHash: result.txHash,
-    error: result.error,
-    rewardId: distributions[index].rewardId,
-  }));
 }

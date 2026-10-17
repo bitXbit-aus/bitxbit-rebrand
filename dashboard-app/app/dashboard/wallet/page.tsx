@@ -78,10 +78,9 @@ export default function WalletPage() {
       try {
         await saveWalletAddress(connectedAddress);
         await loadSavedWallet();
-      } catch (error) {
+      } catch {
         // Expected when the connected wallet differs from the saved address or
         // when no wallet has been verified yet. The verify button handles this.
-        console.log("Wallet auto-save skipped:", error instanceof Error ? error.message : error);
       }
     }
 
