@@ -15,6 +15,7 @@ MIGRATION_017="$ROOT_DIR/supabase/migrations/017_fix_user_rewards_active_uniquen
 MIGRATION_018="$ROOT_DIR/supabase/migrations/018_coordinate_reward_correction_and_claim.sql"
 MIGRATION_019="$ROOT_DIR/supabase/migrations/019_prevent_finalised_payout_deletion.sql"
 MIGRATION_020="$ROOT_DIR/supabase/migrations/020_create_or_claim_payout_operation.sql"
+MIGRATION_021="$ROOT_DIR/supabase/migrations/021_remove_obsolete_correction_overload.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -53,6 +54,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_021" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -69,6 +71,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_021" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -821,6 +824,34 @@ BEGIN
         RAISE;
       END IF;
     END;
+  END;
+
+  -- Migration 021 must drop the obsolete three-parameter overload of
+  -- apply_reward_correction. Only the four-parameter version should remain.
+  DECLARE
+    v_overload_count INT;
+  BEGIN
+    SELECT COUNT(*) INTO v_overload_count
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'apply_reward_correction'
+      AND pg_get_function_identity_arguments(p.oid) = 'p_period_id uuid, p_reason text, p_new_rewards jsonb';
+
+    IF v_overload_count IS DISTINCT FROM 0 THEN
+      RAISE EXCEPTION 'obsolete three-parameter apply_reward_correction overload still exists';
+    END IF;
+
+    SELECT COUNT(*) INTO v_overload_count
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'apply_reward_correction'
+      AND pg_get_function_identity_arguments(p.oid) = 'p_period_id uuid, p_reason text, p_total_income numeric, p_new_rewards jsonb';
+
+    IF v_overload_count IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'authoritative four-parameter apply_reward_correction not found (count=%)', v_overload_count;
+    END IF;
   END;
 
   -- Clean up deletable payout operations for the main test period. Confirmed and
