@@ -8,19 +8,26 @@ import {
   amountToRaw,
   rawToAmount,
   executePayoutTransfers,
+  preparePayoutSubmission,
+  broadcastPayoutSubmission,
+  confirmPayoutSubmission,
   confirmTokenTransfer,
   getAirdropWalletAddress,
   type PayoutTransfer,
   type PayoutTransferResult,
+  type PayoutSubmission,
   type ConfirmationResult,
 } from "@/lib/payout";
 
-export type { PayoutTransfer, PayoutTransferResult, ConfirmationResult };
+export type { PayoutTransfer, PayoutTransferResult, PayoutSubmission, ConfirmationResult };
 export {
   getAirdropWalletBalances,
   amountToRaw,
   rawToAmount,
   executePayoutTransfers,
+  preparePayoutSubmission,
+  broadcastPayoutSubmission,
+  confirmPayoutSubmission,
   confirmTokenTransfer,
   getAirdropWalletAddress,
 };

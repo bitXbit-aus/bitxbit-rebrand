@@ -33,12 +33,28 @@ export interface PayoutTransferResult {
   error: string | null;
 }
 
+export interface PayoutSubmission {
+  operationId: string;
+  walletAddress: string;
+  amountRaw: bigint;
+  txHash: string | null;
+  signedTransactionBase58: string | null;
+  lastBlockhash: string | null;
+  lastValidBlockHeight: number | null;
+  /** Error during local preparation/signing. Broadcast may still be attempted. */
+  preparationError: string | null;
+  /** Error returned by the RPC when attempting to broadcast. The signed tx identity is still durable. */
+  broadcastError: string | null;
+}
+
 export interface ConfirmationResult {
   confirmed: boolean;
   slot?: number;
   err?: unknown;
   blockTime?: number;
   verificationError?: string;
+  /** true if the outcome is inconclusive and must not be treated as failure/ retryable */
+  uncertain?: boolean;
 }
 
 function getConnection(): Connection {
@@ -97,63 +113,251 @@ export async function getAirdropWalletBalances(): Promise<{
   };
 }
 
+async function buildPayoutTransaction(
+  transfer: PayoutTransfer,
+  connection: Connection,
+  signer: Keypair,
+  mint: PublicKey,
+  sourceAta: PublicKey
+): Promise<Transaction> {
+  const recipient = new PublicKey(transfer.walletAddress);
+  const destAta = await getAssociatedTokenAddress(mint, recipient);
+
+  const transaction = new Transaction();
+
+  try {
+    await getAccount(connection, destAta);
+  } catch {
+    transaction.add(
+      createAssociatedTokenAccountInstruction(signer.publicKey, destAta, recipient, mint)
+    );
+  }
+
+  transaction.add(
+    createTransferInstruction(sourceAta, destAta, signer.publicKey, transfer.amountRaw)
+  );
+
+  return transaction;
+}
+
+function getTransactionSignature(transaction: Transaction): string | null {
+  // A fully-signed single-signer transaction exposes the signature directly.
+  if (transaction.signature) {
+    return bs58.encode(transaction.signature);
+  }
+  // Multi-signer fallback: use the first signature that is present.
+  for (const sig of transaction.signatures) {
+    if (sig.signature) {
+      return bs58.encode(sig.signature);
+    }
+  }
+  return null;
+}
+
+export async function preparePayoutSubmission(
+  transfer: PayoutTransfer
+): Promise<PayoutSubmission> {
+  try {
+    const connection = getConnection();
+    const signer = getSigner();
+    const mint = new PublicKey(MINT!);
+    const sourceAta = await getAssociatedTokenAddress(mint, signer.publicKey);
+
+    const transaction = await buildPayoutTransaction(transfer, connection, signer, mint, sourceAta);
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = signer.publicKey;
+    transaction.sign(signer);
+
+    const txHash = getTransactionSignature(transaction);
+    if (!txHash) {
+      throw new Error("Could not derive transaction signature after signing");
+    }
+
+    const serialized = transaction.serialize({ requireAllSignatures: false });
+    const signedTransactionBase58 = bs58.encode(serialized);
+
+    return {
+      operationId: transfer.operationId,
+      walletAddress: transfer.walletAddress,
+      amountRaw: transfer.amountRaw,
+      txHash,
+      signedTransactionBase58,
+      lastBlockhash: blockhash,
+      lastValidBlockHeight,
+      preparationError: null,
+      broadcastError: null,
+    };
+  } catch (err) {
+    return {
+      operationId: transfer.operationId,
+      walletAddress: transfer.walletAddress,
+      amountRaw: transfer.amountRaw,
+      txHash: null,
+      signedTransactionBase58: null,
+      lastBlockhash: null,
+      lastValidBlockHeight: null,
+      preparationError: err instanceof Error ? err.message : String(err),
+      broadcastError: null,
+    };
+  }
+}
+
+export async function broadcastPayoutSubmission(
+  submission: PayoutSubmission
+): Promise<PayoutSubmission> {
+  if (!submission.signedTransactionBase58 || !submission.txHash) {
+    return {
+      ...submission,
+      broadcastError: submission.preparationError ?? "Missing signed transaction",
+    };
+  }
+
+  const connection = getConnection();
+  const rawTx = bs58.decode(submission.signedTransactionBase58);
+
+  try {
+    await connection.sendRawTransaction(rawTx, {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      maxRetries: 3,
+    });
+  } catch (err) {
+    // A broadcast error does not prove the transaction never reached the chain.
+    // The signed transaction identity is already durable; preserve it as uncertain.
+    return {
+      ...submission,
+      broadcastError: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  return { ...submission, broadcastError: null };
+}
+
+export async function confirmPayoutSubmission(
+  submission: PayoutSubmission,
+  expectedSourceWalletAddress: string,
+  timeoutMs = 60000,
+  pollIntervalMs = 2000
+): Promise<ConfirmationResult & { txHash: string | null }> {
+  if (!submission.txHash) {
+    return {
+      confirmed: false,
+      uncertain: false,
+      verificationError: submission.preparationError ?? "Missing transaction hash",
+      txHash: null,
+    };
+  }
+
+  const connection = getConnection();
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const status = await connection.getSignatureStatus(submission.txHash, {
+      searchTransactionHistory: true,
+    });
+
+    if (status?.value) {
+      if (status.value.err) {
+        return {
+          confirmed: false,
+          uncertain: false,
+          err: status.value.err,
+          verificationError: "Transaction failed on-chain",
+          txHash: submission.txHash,
+        };
+      }
+
+      if (
+        status.value.confirmationStatus === "confirmed" ||
+        status.value.confirmationStatus === "finalized"
+      ) {
+        const confirmation = await confirmTokenTransfer(
+          submission.txHash,
+          expectedSourceWalletAddress,
+          submission.walletAddress,
+          submission.amountRaw
+        );
+        return { ...confirmation, txHash: submission.txHash };
+      }
+
+      // Status exists but not yet confirmed/finalized; keep polling.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  // Polling window expired without a definitive on-chain outcome.
+  // Do not treat this as failure; it is uncertain and requires later reconciliation.
+  return {
+    confirmed: false,
+    uncertain: true,
+    verificationError: "Transaction submission outcome unknown within polling window",
+    txHash: submission.txHash,
+  };
+}
+
 export async function executePayoutTransfers(
   transfers: PayoutTransfer[]
 ): Promise<PayoutTransferResult[]> {
-  const connection = getConnection();
-  const signer = getSigner();
-  const mint = new PublicKey(MINT!);
-  const sourceAta = await getAssociatedTokenAddress(mint, signer.publicKey);
-
+  // Legacy convenience path: prepare, broadcast, and confirm each transfer.
+  // New airdrop code should use preparePayoutSubmission -> persist -> broadcast
+  // so the signed transaction identity is durable before broadcast.
   const results: PayoutTransferResult[] = [];
 
   for (const transfer of transfers) {
-    try {
-      const recipient = new PublicKey(transfer.walletAddress);
-      const destAta = await getAssociatedTokenAddress(mint, recipient);
-
-      const transaction = new Transaction();
-
-      try {
-        await getAccount(connection, destAta);
-      } catch {
-        transaction.add(
-          createAssociatedTokenAccountInstruction(
-            signer.publicKey,
-            destAta,
-            recipient,
-            mint
-          )
-        );
-      }
-
-      transaction.add(
-        createTransferInstruction(
-          sourceAta,
-          destAta,
-          signer.publicKey,
-          transfer.amountRaw
-        )
-      );
-
-      const txHash = await sendAndConfirmTransaction(connection, transaction, [signer], {
-        commitment: "confirmed",
-      });
-
-      results.push({
-        operationId: transfer.operationId,
-        walletAddress: transfer.walletAddress,
-        amountRaw: transfer.amountRaw,
-        txHash,
-        error: null,
-      });
-    } catch (err) {
+    const prepared = await preparePayoutSubmission(transfer);
+    if (prepared.preparationError || !prepared.txHash) {
       results.push({
         operationId: transfer.operationId,
         walletAddress: transfer.walletAddress,
         amountRaw: transfer.amountRaw,
         txHash: null,
-        error: err instanceof Error ? err.message : String(err),
+        error: prepared.preparationError ?? "Preparation failed",
+      });
+      continue;
+    }
+
+    const broadcasted = await broadcastPayoutSubmission(prepared);
+    if (broadcasted.broadcastError) {
+      // Even though broadcast failed, we have a durable tx hash. Surface it as
+      // an error to legacy callers while preserving the hash for investigation.
+      results.push({
+        operationId: transfer.operationId,
+        walletAddress: transfer.walletAddress,
+        amountRaw: transfer.amountRaw,
+        txHash: broadcasted.txHash,
+        error: `Broadcast error (tx identity preserved): ${broadcasted.broadcastError}`,
+      });
+      continue;
+    }
+
+    const sourceWalletAddress = getAirdropWalletAddress();
+    const confirmation = await confirmPayoutSubmission(broadcasted, sourceWalletAddress);
+    if (confirmation.confirmed) {
+      results.push({
+        operationId: transfer.operationId,
+        walletAddress: transfer.walletAddress,
+        amountRaw: transfer.amountRaw,
+        txHash: confirmation.txHash,
+        error: null,
+      });
+    } else if (confirmation.uncertain) {
+      results.push({
+        operationId: transfer.operationId,
+        walletAddress: transfer.walletAddress,
+        amountRaw: transfer.amountRaw,
+        txHash: confirmation.txHash,
+        error: `Uncertain outcome: ${confirmation.verificationError}`,
+      });
+    } else {
+      results.push({
+        operationId: transfer.operationId,
+        walletAddress: transfer.walletAddress,
+        amountRaw: transfer.amountRaw,
+        txHash: confirmation.txHash,
+        error: confirmation.verificationError ?? "On-chain confirmation failed",
       });
     }
   }
@@ -243,12 +447,19 @@ export async function confirmTokenTransfer(
     const status = await connection.getSignatureStatus(txHash, { searchTransactionHistory: true });
 
     if (!status?.value) {
-      return { confirmed: false, verificationError: "Transaction not found on-chain" };
+      // A missing signature status is not proof of non-execution. RPC nodes can
+      // lag, drop lookups, or the transaction may still land. Treat as uncertain.
+      return {
+        confirmed: false,
+        uncertain: true,
+        verificationError: "Transaction not found on-chain",
+      };
     }
 
     if (status.value.err) {
       return {
         confirmed: false,
+        uncertain: false,
         err: status.value.err,
         verificationError: "Transaction failed on-chain",
       };
@@ -258,7 +469,11 @@ export async function confirmTokenTransfer(
       status.value.confirmationStatus !== "confirmed" &&
       status.value.confirmationStatus !== "finalized"
     ) {
-      return { confirmed: false, verificationError: "Transaction not yet confirmed" };
+      return {
+        confirmed: false,
+        uncertain: true,
+        verificationError: "Transaction not yet confirmed",
+      };
     }
 
     // Parse the transaction to verify source, mint, recipient, and amount.
@@ -268,7 +483,13 @@ export async function confirmTokenTransfer(
     });
 
     if (!tx) {
-      return { confirmed: false, verificationError: "Could not fetch transaction details" };
+      // The signature status says confirmed/finalized but the parsed transaction
+      // could not be retrieved. This is usually transient RPC unavailability.
+      return {
+        confirmed: false,
+        uncertain: true,
+        verificationError: "Could not fetch transaction details",
+      };
     }
 
     const match = await findMatchingTokenTransfer(
@@ -280,8 +501,11 @@ export async function confirmTokenTransfer(
     );
 
     if (!match.found) {
+      // The transaction is on-chain and parsed, but it does not contain the
+      // expected transfer. This is a verified mismatch, not an uncertain outcome.
       return {
         confirmed: false,
+        uncertain: false,
         verificationError:
           match.error ||
           "Transaction does not contain the expected source/mint/recipient/amount/authority",
@@ -294,8 +518,10 @@ export async function confirmTokenTransfer(
       blockTime: tx.blockTime ?? undefined,
     };
   } catch (err) {
+    // RPC or parsing exceptions are not proof of non-execution.
     return {
       confirmed: false,
+      uncertain: true,
       verificationError: err instanceof Error ? err.message : String(err),
     };
   }

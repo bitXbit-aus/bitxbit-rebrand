@@ -2,7 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
-import { findMatchingTokenTransfer, amountToRaw } from "./payout";
+import {
+  findMatchingTokenTransfer,
+  amountToRaw,
+  preparePayoutSubmission,
+  broadcastPayoutSubmission,
+  confirmPayoutSubmission,
+} from "./payout";
 
 const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const MINT = new PublicKey("DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5");
@@ -258,5 +264,60 @@ describe("findMatchingTokenTransfer", () => {
     );
 
     assert.equal(result.found, false);
+  });
+});
+
+describe("payout submission lifecycle", () => {
+  it("preparePayoutSubmission reports preparation errors instead of throwing", async () => {
+    const wallet = randomWallet();
+    const result = await preparePayoutSubmission({
+      operationId: "op:1",
+      walletAddress: wallet.toBase58(),
+      amountRaw: 1000000000n,
+    });
+
+    assert.equal(result.txHash, null);
+    assert.ok(result.preparationError, "expected a preparation error when signer is not configured");
+  });
+
+  it("broadcastPayoutSubmission returns a broadcast error when no signed transaction exists", async () => {
+    const wallet = randomWallet();
+    const result = await broadcastPayoutSubmission({
+      operationId: "op:1",
+      walletAddress: wallet.toBase58(),
+      amountRaw: 1000000000n,
+      txHash: null,
+      signedTransactionBase58: null,
+      lastBlockhash: null,
+      lastValidBlockHeight: null,
+      preparationError: "simulated preparation failure",
+      broadcastError: null,
+    });
+
+    assert.ok(result.broadcastError, "expected a broadcast error");
+    assert.equal(result.txHash, null);
+  });
+
+  it("confirmPayoutSubmission reports a non-uncertain failure when the transaction hash is missing", async () => {
+    const wallet = randomWallet();
+    const result = await confirmPayoutSubmission(
+      {
+        operationId: "op:1",
+        walletAddress: wallet.toBase58(),
+        amountRaw: 1000000000n,
+        txHash: null,
+        signedTransactionBase58: null,
+        lastBlockhash: null,
+        lastValidBlockHeight: null,
+        preparationError: "missing hash",
+        broadcastError: null,
+      },
+      wallet.toBase58()
+    );
+
+    assert.equal(result.confirmed, false);
+    assert.equal(result.uncertain, false);
+    assert.ok(result.verificationError);
+    assert.equal(result.txHash, null);
   });
 });

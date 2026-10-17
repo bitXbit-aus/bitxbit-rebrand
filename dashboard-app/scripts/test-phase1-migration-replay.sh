@@ -276,6 +276,23 @@ BEGIN
     END IF;
   END;
 
+  -- An uncertain operation is also non-retryable through claiming. Move the op
+  -- to uncertain and verify a claim returns NULL. Reconciliation may still
+  -- update it to another status (the next statement moves it back to submitted
+  -- to prove mutability, then to confirmed for the immutability test).
+  UPDATE public.payout_operations
+  SET status = 'uncertain', uncertain_at = NOW(), updated_at = NOW()
+  WHERE operation_id = test_op;
+
+  DECLARE
+    uncertain_claim UUID;
+  BEGIN
+    SELECT public.claim_payout_operation(test_op, test_user) INTO uncertain_claim;
+    IF uncertain_claim IS NOT NULL THEN
+      RAISE EXCEPTION 'uncertain operation was allowed to be claimed again';
+    END IF;
+  END;
+
   -- Move to confirmed and verify immutability.
   UPDATE public.payout_operations SET status = 'confirmed', transaction_hash = 'txhash123', confirmed_at = NOW() WHERE operation_id = test_op;
   SELECT COUNT(*) INTO op_count FROM public.security_audit_log WHERE target_table = 'public.payout_operations' AND target_id = (SELECT id::TEXT FROM public.payout_operations WHERE operation_id = test_op);

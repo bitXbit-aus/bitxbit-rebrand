@@ -10,9 +10,13 @@ import {
   amountToRaw,
   rawToAmount,
   executePayoutTransfers,
+  preparePayoutSubmission,
+  broadcastPayoutSubmission,
+  confirmPayoutSubmission,
   confirmTokenTransfer,
   getAirdropWalletAddress,
   type PayoutTransfer,
+  type PayoutSubmission,
 } from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
 import { requireActiveUser, requireCapability, type AuthorizationContext } from "@/lib/authz";
@@ -1113,7 +1117,7 @@ export async function airdropRewards(periodId: string) {
         existingByReward.set(op.reward_id, op);
       }
 
-      const distributions: PayoutTransfer[] = [];
+      const distributions: PayoutSubmission[] = [];
       const rewardMeta = new Map<
         string,
         { rewardId: string; walletAddress: string; amountRaw: bigint }
@@ -1126,8 +1130,8 @@ export async function airdropRewards(periodId: string) {
 
       async function reconcileSubmittedOperation(
         op: NonNullable<typeof existingOps>[number]
-      ): Promise<"confirmed" | "failed" | "unresolved"> {
-        if (!op.transaction_hash) return "unresolved";
+      ): Promise<"confirmed" | "uncertain" | "failed"> {
+        if (!op.transaction_hash) return "uncertain";
         const confirmation = await confirmTokenTransfer(
           op.transaction_hash,
           sourceWalletAddress,
@@ -1154,19 +1158,32 @@ export async function airdropRewards(periodId: string) {
             .eq("id", op.reward_id);
           return "confirmed";
         }
-        if (confirmation.verificationError) {
+        // An uncertain outcome (RPC lag, not yet found, etc.) must not be
+        // treated as a retryable failure. Preserve it as uncertain so it can
+        // be reconciled again by a later run or dedicated job.
+        if (confirmation.uncertain) {
           await supabase
             .from("payout_operations")
             .update({
-              status: "failed",
-              submission_error: `On-chain verification failed: ${confirmation.verificationError}`,
-              failed_at: new Date().toISOString(),
+              status: "uncertain",
+              submission_error: `On-chain verification uncertain: ${confirmation.verificationError}`,
+              uncertain_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             })
             .eq("operation_id", op.operation_id);
-          return "failed";
+          return "uncertain";
         }
-        return "unresolved";
+        // Only a verified non-execution or verified mismatch becomes failed.
+        await supabase
+          .from("payout_operations")
+          .update({
+            status: "failed",
+            submission_error: `On-chain verification failed: ${confirmation.verificationError}`,
+            failed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("operation_id", op.operation_id);
+        return "failed";
       }
 
       for (const reward of rewards ?? []) {
@@ -1229,13 +1246,13 @@ export async function airdropRewards(periodId: string) {
           continue;
         }
 
-        if (existing.status === "submitted") {
-          // Reconcile before any retry. An unresolved transfer must never
+        if (existing.status === "submitted" || existing.status === "uncertain") {
+          // Reconcile before any retry. An uncertain transfer must never
           // automatically trigger another payment.
           const outcome = await reconcileSubmittedOperation(existing);
           if (outcome === "confirmed") continue;
-          if (outcome === "unresolved") {
-            incrementSkip("submitted_unresolved");
+          if (outcome === "uncertain") {
+            incrementSkip("uncertain_requires_reconciliation");
             continue;
           }
           // outcome === "failed": fall through to claim and retry
@@ -1266,7 +1283,37 @@ export async function airdropRewards(periodId: string) {
           continue;
         }
 
-        distributions.push({ operationId, walletAddress, amountRaw });
+        // Prepare the signed transaction before broadcasting so the transaction
+        // identity (hash + serialized tx) is durable regardless of RPC outcome.
+        const prepared = await preparePayoutSubmission({ operationId, walletAddress, amountRaw });
+        if (prepared.preparationError || !prepared.txHash) {
+          await supabase
+            .from("payout_operations")
+            .update({
+              status: "failed",
+              submission_error: `Preparation failed: ${prepared.preparationError}`,
+              failed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", operationId);
+          incrementSkip("preparation_failed");
+          continue;
+        }
+
+        // Persist the signed transaction identity BEFORE broadcasting.
+        await supabase
+          .from("payout_operations")
+          .update({
+            status: "submitted",
+            transaction_hash: prepared.txHash,
+            signed_transaction_base58: prepared.signedTransactionBase58,
+            last_blockhash: prepared.lastBlockhash,
+            submitted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("operation_id", operationId);
+
+        distributions.push(prepared);
         rewardMeta.set(operationId, { rewardId: reward.id, walletAddress, amountRaw });
       }
 
@@ -1281,6 +1328,7 @@ export async function airdropRewards(periodId: string) {
           attempted: 0,
           submitted: 0,
           confirmed: 0,
+          uncertain: 0,
           reconciliationFailures: 0,
           skipped: Object.fromEntries(skipped),
         };
@@ -1306,46 +1354,37 @@ export async function airdropRewards(periodId: string) {
         );
       }
 
-      const transferResults = await executePayoutTransfers(distributions);
-
-      for (const result of transferResults) {
-        if (result.txHash) {
+      // Broadcast each prepared transaction. The signed tx identity is already
+      // durable in the database, so broadcast errors become uncertain rather
+      // than retryable failures.
+      let submittedCount = 0;
+      let uncertainCount = 0;
+      for (const submission of distributions) {
+        const broadcasted = await broadcastPayoutSubmission(submission);
+        if (broadcasted.broadcastError) {
           await supabase
             .from("payout_operations")
             .update({
-              status: "submitted",
-              transaction_hash: result.txHash,
-              submitted_at: new Date().toISOString(),
+              status: "uncertain",
+              submission_error: `Broadcast error: ${broadcasted.broadcastError}`,
+              uncertain_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             })
-            .eq("operation_id", result.operationId);
-        } else {
-          await supabase
-            .from("payout_operations")
-            .update({
-              status: "failed",
-              submission_error: result.error,
-              failed_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("operation_id", result.operationId);
+            .eq("operation_id", submission.operationId);
+          uncertainCount++;
+          continue;
         }
+        submittedCount++;
       }
 
-      const submittedOps = transferResults.filter((r) => r.txHash);
       let confirmedCount = 0;
       let reconciliationFailures = 0;
 
-      for (const result of submittedOps) {
-        const meta = rewardMeta.get(result.operationId);
-        if (!meta || !result.txHash) continue;
+      for (const submission of distributions) {
+        const meta = rewardMeta.get(submission.operationId);
+        if (!meta || !submission.txHash) continue;
 
-        const confirmation = await confirmTokenTransfer(
-          result.txHash,
-          sourceWalletAddress,
-          meta.walletAddress,
-          meta.amountRaw
-        );
+        const confirmation = await confirmPayoutSubmission(submission, sourceWalletAddress);
 
         if (confirmation.confirmed) {
           await supabase
@@ -1356,18 +1395,29 @@ export async function airdropRewards(periodId: string) {
               blockchain_confirmation: confirmation,
               updated_at: new Date().toISOString(),
             })
-            .eq("operation_id", result.operationId);
+            .eq("operation_id", submission.operationId);
 
           await supabase
             .from("user_rewards")
             .update({
               status: "distributed",
-              distribution_tx_hash: result.txHash,
+              distribution_tx_hash: submission.txHash,
               distributed_at: new Date().toISOString(),
             })
             .eq("id", meta.rewardId);
 
           confirmedCount++;
+        } else if (confirmation.uncertain) {
+          await supabase
+            .from("payout_operations")
+            .update({
+              status: "uncertain",
+              submission_error: `On-chain verification uncertain: ${confirmation.verificationError}`,
+              uncertain_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", submission.operationId);
+          uncertainCount++;
         } else {
           await supabase
             .from("payout_operations")
@@ -1377,7 +1427,7 @@ export async function airdropRewards(periodId: string) {
               failed_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             })
-            .eq("operation_id", result.operationId);
+            .eq("operation_id", submission.operationId);
           reconciliationFailures++;
         }
       }
@@ -1395,8 +1445,9 @@ export async function airdropRewards(periodId: string) {
 
       return {
         attempted: distributions.length,
-        submitted: submittedOps.length,
+        submitted: submittedCount,
         confirmed: confirmedCount,
+        uncertain: uncertainCount,
         reconciliationFailures,
         skipped: Object.fromEntries(skipped),
       };
