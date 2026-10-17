@@ -9,13 +9,11 @@ import {
   isValidSolanaAddress,
   amountToRaw,
   rawToAmount,
-  executePayoutTransfers,
   preparePayoutSubmission,
   broadcastPayoutSubmission,
   confirmPayoutSubmission,
   confirmTokenTransfer,
   getAirdropWalletAddress,
-  type PayoutTransfer,
   type PayoutSubmission,
 } from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
@@ -1067,6 +1065,9 @@ export async function sendTestAirdrop(formData: FormData) {
 
   // Disable production test airdrops unless explicitly enabled. This prevents
   // accidental token outflows during security reviews or production operation.
+  // Even when enabled, this path uses the same durable payout-operation workflow
+  // as the main airdrop so the signed transaction identity is persisted before
+  // broadcast and the final record is immutable.
   if (process.env.ENABLE_TEST_AIRDROP !== "true") {
     throw new Error("Test airdrops are disabled. Set ENABLE_TEST_AIRDROP=true to enable in a safe environment.");
   }
@@ -1074,6 +1075,9 @@ export async function sendTestAirdrop(formData: FormData) {
   const TEST_AMOUNT = 0.001;
   const amountRaw = amountToRaw(TEST_AMOUNT);
   const sourceWalletAddress = getAirdropWalletAddress();
+  const operationId = `test:${context.user.id}:${Date.now()}`;
+  const supabase = createServiceClient();
+
   try {
     const balance = await getAirdropWalletBalance();
     if (balance.token < TEST_AMOUNT) {
@@ -1083,24 +1087,114 @@ export async function sendTestAirdrop(formData: FormData) {
       throw new Error(`Insufficient SOL for fees. Wallet: ${balance.sol.toFixed(4)} SOL`);
     }
 
-    const results = await executePayoutTransfers([
-      { operationId: `test:${context.user.id}:${Date.now()}`, walletAddress, amountRaw },
-    ]);
-    const result = results[0];
-    if (!result.txHash) {
-      throw new Error(result.error ?? "Test airdrop failed");
+    // Create a durable payout operation record for the test transfer.
+    const { error: insertError } = await (supabase.from("payout_operations") as any).insert({
+      operation_id: operationId,
+      is_test: true,
+      user_id: context.user.id,
+      wallet_address: walletAddress,
+      token_amount_raw: amountRaw,
+      token_decimals: TOKEN_DECIMALS,
+      status: "pending",
+    });
+    if (insertError) {
+      throw new Error(`Failed to create test payout operation: ${insertError.message}`);
     }
 
-    const confirmation = await confirmTokenTransfer(result.txHash, sourceWalletAddress, walletAddress, amountRaw);
-    if (!confirmation.confirmed) {
-      throw new Error(`Test airdrop could not be confirmed on-chain: ${confirmation.verificationError}`);
+    // Prepare the signed transaction and derive its hash.
+    const prepared = await preparePayoutSubmission({ operationId, walletAddress, amountRaw });
+    if (prepared.preparationError || !prepared.txHash) {
+      await (supabase.from("payout_operations") as any)
+        .update({
+          status: "failed",
+          submission_error: prepared.preparationError ?? "Preparation failed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("operation_id", operationId);
+      throw new Error(prepared.preparationError ?? "Test airdrop preparation failed");
+    }
+
+    // Persist the signed transaction identity before broadcasting.
+    const { error: persistError } = await (supabase.from("payout_operations") as any)
+      .update({
+        status: "submitted",
+        transaction_hash: prepared.txHash,
+        signed_transaction_base58: prepared.signedTransactionBase58,
+        last_blockhash: prepared.lastBlockhash,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("operation_id", operationId)
+      .eq("status", "pending");
+    if (persistError) {
+      await (supabase.from("payout_operations") as any)
+        .update({
+          status: "failed",
+          submission_error: persistError.message,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("operation_id", operationId);
+      throw new Error(`Failed to persist test payout submission: ${persistError.message}`);
+    }
+
+    // Broadcast only after the signed transaction is durable.
+    const broadcasted = await broadcastPayoutSubmission(prepared);
+    if (broadcasted.broadcastError) {
+      await (supabase.from("payout_operations") as any)
+        .update({
+          status: "uncertain",
+          submission_error: broadcasted.broadcastError,
+          uncertain_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("operation_id", operationId);
+      throw new Error(`Test airdrop broadcast failed (tx identity preserved): ${broadcasted.broadcastError}`);
+    }
+
+    // Confirm on-chain and store the final state.
+    const confirmation = await confirmPayoutSubmission(broadcasted, sourceWalletAddress);
+    if (confirmation.confirmed && !confirmation.incident) {
+      await (supabase.from("payout_operations") as any)
+        .update({
+          status: "confirmed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("operation_id", operationId);
+    } else if (confirmation.incident) {
+      await (supabase.from("payout_operations") as any)
+        .update({
+          status: "incident",
+          incident_at: new Date().toISOString(),
+          submission_error: confirmation.verificationError,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("operation_id", operationId);
+      throw new Error(`Test airdrop incident: ${confirmation.verificationError}`);
+    } else if (confirmation.uncertain) {
+      await (supabase.from("payout_operations") as any)
+        .update({
+          status: "uncertain",
+          uncertain_at: new Date().toISOString(),
+          submission_error: confirmation.verificationError,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("operation_id", operationId);
+      throw new Error(`Test airdrop uncertain: ${confirmation.verificationError}`);
+    } else {
+      await (supabase.from("payout_operations") as any)
+        .update({
+          status: "failed",
+          submission_error: confirmation.verificationError ?? "On-chain confirmation failed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("operation_id", operationId);
+      throw new Error(`Test airdrop failed: ${confirmation.verificationError ?? "On-chain confirmation failed"}`);
     }
 
     await writeSecurityAudit(context, {
       action: "airdrop.test_send",
       targetTable: "external.solana",
-      targetId: result.txHash,
-      after: { wallet_address: walletAddress, amount: TEST_AMOUNT, transaction_hash: result.txHash },
+      targetId: confirmation.txHash,
+      after: { wallet_address: walletAddress, amount: TEST_AMOUNT, transaction_hash: confirmation.txHash },
     });
   } catch (error) {
     await auditMutationFailure(context, "airdrop.test_send", "external.solana", null, error, {

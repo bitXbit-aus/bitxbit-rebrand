@@ -13,6 +13,7 @@ MIGRATION_015="$ROOT_DIR/supabase/migrations/015_payout_incident_state.sql"
 MIGRATION_016="$ROOT_DIR/supabase/migrations/016_reward_calculation_history_safe.sql"
 MIGRATION_017="$ROOT_DIR/supabase/migrations/017_fix_user_rewards_active_uniqueness.sql"
 MIGRATION_018="$ROOT_DIR/supabase/migrations/018_coordinate_reward_correction_and_claim.sql"
+MIGRATION_019="$ROOT_DIR/supabase/migrations/019_prevent_finalised_payout_deletion.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -49,6 +50,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -63,6 +65,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -384,25 +387,88 @@ BEGIN
   END;
 
   -- Incident payouts are non-retryable. A confirmed on-chain mismatch must not
-  -- be claimable for retry and must be immutable.
-  INSERT INTO public.payout_operations (
-    operation_id, reward_period_id, reward_id, user_id, wallet_address, token_amount_raw, token_decimals, status, actor_id, incident_at
-  ) VALUES ('payout:test-period:incident-reward', test_period, test_reward, test_user, test_wallet, 1500000000, 9, 'incident', test_user, NOW());
-
+  -- be claimable for retry and must be immutable. Use a separate user/period so
+  -- the immutable record does not block final cleanup.
   DECLARE
+    v_incident_user UUID := 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    v_incident_period UUID := 'cccccccc-cccc-4ccc-8ccc-ccccccccccc1';
+    v_incident_reward UUID := 'cccccccc-cccc-4ccc-8ccc-ccccccccccc2';
     incident_claim UUID;
   BEGIN
-    SELECT public.claim_payout_operation('payout:test-period:incident-reward', test_user) INTO incident_claim;
+    INSERT INTO auth.users (id, email) VALUES (v_incident_user, 'incident-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_incident_period, '2026-03-01', '2026-03-31', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status)
+    VALUES (v_incident_reward, v_incident_user, v_incident_period, 1.0, 'approved');
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address, token_amount_raw, token_decimals, status, actor_id, incident_at
+    ) VALUES ('payout:incident-test:incident-reward', v_incident_period, v_incident_reward, v_incident_user, test_wallet, 1500000000, 9, 'incident', v_incident_user, NOW());
+
+    SELECT public.claim_payout_operation('payout:incident-test:incident-reward', v_incident_user) INTO incident_claim;
     IF incident_claim IS NOT NULL THEN
       RAISE EXCEPTION 'incident operation was allowed to be claimed';
     END IF;
+
+    BEGIN
+      UPDATE public.payout_operations SET status = 'failed' WHERE operation_id = 'payout:incident-test:incident-reward';
+      RAISE EXCEPTION 'incident payout operation status was mutated';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'incident payout operation status was mutated' THEN
+        RAISE;
+      END IF;
+    END;
+
+    BEGIN
+      DELETE FROM public.payout_operations WHERE operation_id = 'payout:incident-test:incident-reward';
+      RAISE EXCEPTION 'incident payout operation was deleted';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'incident payout operation was deleted' THEN
+        RAISE;
+      END IF;
+    END;
   END;
 
+  -- Confirmed payout records also cannot be deleted. Use a separate user/period
+  -- so the immutable record does not block the final test cleanup.
+  DECLARE
+    v_delete_user UUID := 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    v_delete_period UUID := 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2';
+    v_delete_reward UUID := 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee3';
   BEGIN
-    UPDATE public.payout_operations SET status = 'failed' WHERE operation_id = 'payout:test-period:incident-reward';
-    RAISE EXCEPTION 'incident payout operation status was mutated';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM = 'incident payout operation status was mutated' THEN
+    INSERT INTO auth.users (id, email) VALUES (v_delete_user, 'delete-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_delete_period, '2026-06-01', '2026-06-30', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status)
+    VALUES (v_delete_reward, v_delete_user, v_delete_period, 1.0, 'approved');
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address, token_amount_raw, token_decimals, status, actor_id
+    ) VALUES ('payout:delete-test:confirmed', v_delete_period, v_delete_reward, v_delete_user, test_wallet, 1500000000, 9, 'confirmed', v_delete_user);
+
+    BEGIN
+      DELETE FROM public.payout_operations WHERE operation_id = 'payout:delete-test:confirmed';
+      RAISE EXCEPTION 'confirmed payout operation was deleted';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'confirmed payout operation was deleted' THEN
+        RAISE;
+      END IF;
+    END;
+  END;
+
+  -- Test payout operations may omit reward_period_id/reward_id; non-test
+  -- operations must still reference both.
+  INSERT INTO public.payout_operations (
+    operation_id, is_test, user_id, wallet_address, token_amount_raw, token_decimals, status
+  ) VALUES ('payout:test-operation:test-only', true, test_user, test_wallet, 1000000000, 9, 'pending');
+
+  BEGIN
+    INSERT INTO public.payout_operations (
+      operation_id, is_test, user_id, wallet_address, token_amount_raw, token_decimals, status
+    ) VALUES ('payout:test-operation:missing-period', false, test_user, test_wallet, 1000000000, 9, 'pending');
+    RAISE EXCEPTION 'non-test payout without period/reward was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  WHEN OTHERS THEN
+    IF SQLERRM = 'non-test payout without period/reward was accepted' THEN
       RAISE;
     END IF;
   END;
@@ -596,21 +662,31 @@ BEGIN
     END;
   END;
 
-  -- Clean up payout operations so the subsequent auth.users deletion can cascade.
-  DELETE FROM public.payout_operations WHERE reward_period_id = test_period;
+  -- Clean up deletable payout operations for the main test period. Confirmed and
+  -- incident records are intentionally immutable and cannot be removed.
+  DELETE FROM public.payout_operations WHERE reward_period_id = test_period AND status NOT IN ('confirmed', 'incident');
+  DELETE FROM public.payout_operations WHERE operation_id = 'payout:test-operation:test-only';
 
-  INSERT INTO public.security_audit_log (
-    actor_id, actor_role, actor_status, action, target_table
-  ) VALUES (
-    test_user, 'member', 'active', 'test.actor_immutability', 'public.users'
-  );
-  DELETE FROM auth.users WHERE id = test_user;
-  SELECT actor_id INTO preserved_actor
-  FROM public.security_audit_log
-  WHERE action = 'test.actor_immutability';
-  IF preserved_actor IS DISTINCT FROM test_user THEN
-    RAISE EXCEPTION 'deleting user changed historical actor attribution';
-  END IF;
+  -- Verify that deleting a user does not change historical actor attribution in
+  -- the audit log, using a dedicated user so immutable payout records do not
+  -- block the deletion.
+  DECLARE
+    v_actor_test_user UUID := '77777777-7777-4777-8777-777777777778';
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_actor_test_user, 'actor-test@example.test');
+    INSERT INTO public.security_audit_log (
+      actor_id, actor_role, actor_status, action, target_table
+    ) VALUES (
+      v_actor_test_user, 'member', 'active', 'test.actor_immutability', 'public.users'
+    );
+    DELETE FROM auth.users WHERE id = v_actor_test_user;
+    SELECT actor_id INTO preserved_actor
+    FROM public.security_audit_log
+    WHERE action = 'test.actor_immutability';
+    IF preserved_actor IS DISTINCT FROM v_actor_test_user THEN
+      RAISE EXCEPTION 'deleting user changed historical actor attribution';
+    END IF;
+  END;
 
   BEGIN
     UPDATE public.security_audit_log SET action = 'mutated'

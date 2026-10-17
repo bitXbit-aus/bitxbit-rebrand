@@ -96,7 +96,8 @@ Application changes:
 - New server-only `lib/payout.ts` owns all Solana transfer logic:
   - `getAirdropWalletBalances`, `amountToRaw`, `rawToAmount` for exact token-unit arithmetic.
   - `getAirdropWalletAddress()` exposes the expected treasury wallet public key for on-chain reconciliation.
-  - `executePayoutTransfers(transfers[])` submits transfers sequentially with a single signer, returning per-operation results.
+  - `executePayoutTransfers(transfers[])` is retained as a deprecated legacy convenience path; new code should use the durable payout-operation workflow. `sendTestAirdrop()` now uses that durable workflow (create `payout_operations` record, prepare, persist, broadcast, confirm) and remains disabled unless `ENABLE_TEST_AIRDROP=true`.
+  - Finalised `payout_operations` records (`confirmed` or `incident`) are immutable: a `BEFORE UPDATE` trigger prevents status/field changes and a `BEFORE DELETE` trigger prevents deletion. Corrections must use explicit reversal or adjustment records.
   - `confirmTokenTransfer(txHash, sourceWalletAddress, walletAddress, amountRaw)` waits for a finalized or confirmed signature status, parses the SPL-token `transfer` instruction, and verifies the program ID (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`), the source ATA, the destination ATA, the transfer authority, and the exact raw amount against the expected payout. Only transfers that match the expected treasury source, token mint (via deterministic ATAs), recipient, and amount are accepted as confirmed.
 - `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). The deprecated `distributeTokens()` wrapper was removed so there is no non-idempotent legacy distribution path.
 - `calculateRewards()` in `lib/actions.ts` now refuses to recalculate a period whose status is `approved` or `distributed`, and refuses to recalculate any period that already has `payout_operations` rows. This prevents accidental overwriting of rewards after they have been approved or once payout activity has begun.
@@ -160,7 +161,7 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 - `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
 - `lib/payout.test.ts` — exact token-unit conversion and round-trips.
 - `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, shared-store delegation, `MemoryRateLimitStore` unit tests, and trusted-proxy client-identifier selection.
-- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `018`, including incident-state non-retryability, immutability, recalculation preserving superseded reward history, active-reward uniqueness enforcement, and a concurrent correction-vs-claim race test using two psql sessions.
+- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `019`, including incident-state non-retryability, immutability, delete prohibition for finalised records, test-operation constraints, recalculation preserving superseded reward history, active-reward uniqueness enforcement, and a concurrent correction-vs-claim race test using two psql sessions.
 
 ### Test results
 
@@ -176,7 +177,7 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 
 1. **Security Audit Report** — this document.
 2. **Implemented Fixes** — working code on `security/phase-1-hardening`.
-3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`, `016_reward_calculation_history_safe.sql`, `017_fix_user_rewards_active_uniqueness.sql`, `018_coordinate_reward_correction_and_claim.sql`.
+3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`, `016_reward_calculation_history_safe.sql`, `017_fix_user_rewards_active_uniqueness.sql`, `018_coordinate_reward_correction_and_claim.sql`, `019_prevent_finalised_payout_deletion.sql`.
 4. **Wallet Authentication Upgrade** — `lib/wallet-crypto.ts`, `lib/wallet-verification.ts`, `app/dashboard/wallet/page.tsx`.
 5. **Token Distribution Improvements** — `lib/payout.ts`, hardened `airdropRewards()`, `payout_operations`.
 6. **Automated Test Results** — 24 unit tests + migration replay test passing.
@@ -188,7 +189,7 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 
 ## Remaining work
 
-- Apply and verify migrations `010` through `018` in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification. Migration `017` will refuse to run if active duplicate `(reward_period_id, user_id)` pairs exist; resolve any such duplicates before applying it to an existing database.
+- Apply and verify migrations `010` through `019` in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification. Migration `017` will refuse to run if active duplicate `(reward_period_id, user_id)` pairs exist; resolve any such duplicates before applying it to an existing database. Migration `019` makes `reward_period_id` and `reward_id` nullable for `is_test=true` operations only; regenerate Supabase TypeScript types after applying it.
 - Regenerate Supabase TypeScript database types after the migrations are applied to a linked project.
 - Migrate admin user-management reads and UI filtering from compatibility `users.role/status` to an authorized server-side join/view when convenient.
 - Add an explicit capability-management UI/action if delegated capability editing is required; any such action must use `manage_security` plus AAL2 and must retain the last-security-admin safeguards.
