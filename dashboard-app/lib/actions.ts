@@ -994,7 +994,7 @@ export async function airdropRewards(periodId: string) {
 
       const { data: existingOps, error: opsError } = await supabase
         .from("payout_operations")
-        .select("id, operation_id, reward_id, status, transaction_hash, token_amount_raw")
+        .select("id, operation_id, reward_id, status, transaction_hash, token_amount_raw, wallet_address")
         .eq("reward_period_id", periodId);
       if (opsError) throw opsError;
 
@@ -1012,6 +1012,50 @@ export async function airdropRewards(periodId: string) {
 
       function incrementSkip(reason: string) {
         skipped.set(reason, (skipped.get(reason) ?? 0) + 1);
+      }
+
+      async function reconcileSubmittedOperation(
+        op: NonNullable<typeof existingOps>[number]
+      ): Promise<"confirmed" | "failed" | "unresolved"> {
+        if (!op.transaction_hash) return "unresolved";
+        const confirmation = await confirmTokenTransfer(
+          op.transaction_hash,
+          op.wallet_address,
+          op.token_amount_raw
+        );
+        if (confirmation.confirmed) {
+          await supabase
+            .from("payout_operations")
+            .update({
+              status: "confirmed",
+              confirmed_at: new Date().toISOString(),
+              blockchain_confirmation: confirmation,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", op.operation_id);
+          await supabase
+            .from("user_rewards")
+            .update({
+              status: "distributed",
+              distribution_tx_hash: op.transaction_hash,
+              distributed_at: new Date().toISOString(),
+            })
+            .eq("id", op.reward_id);
+          return "confirmed";
+        }
+        if (confirmation.verificationError) {
+          await supabase
+            .from("payout_operations")
+            .update({
+              status: "failed",
+              submission_error: `On-chain verification failed: ${confirmation.verificationError}`,
+              failed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", op.operation_id);
+          return "failed";
+        }
+        return "unresolved";
       }
 
       for (const reward of rewards ?? []) {
@@ -1042,12 +1086,8 @@ export async function airdropRewards(periodId: string) {
           continue;
         }
 
-        const existing = existingByReward.get(reward.id);
-        if (existing?.status === "confirmed") {
-          continue;
-        }
-
         const operationId = `payout:${periodId}:${reward.id}`;
+        let existing = existingByReward.get(reward.id);
 
         if (!existing) {
           const { error: insertError } = await supabase.from("payout_operations").insert({
@@ -1062,6 +1102,57 @@ export async function airdropRewards(periodId: string) {
             actor_id: context.user.id,
           });
           if (insertError) throw insertError;
+          existing = {
+            id: "",
+            operation_id: operationId,
+            reward_id: reward.id,
+            status: "pending",
+            transaction_hash: null,
+            token_amount_raw: amountRaw,
+            wallet_address: walletAddress,
+          } as unknown as NonNullable<typeof existingOps>[number];
+          existingByReward.set(reward.id, existing);
+        }
+
+        if (existing.status === "confirmed") {
+          continue;
+        }
+
+        if (existing.status === "submitted") {
+          // Reconcile before any retry. An unresolved transfer must never
+          // automatically trigger another payment.
+          const outcome = await reconcileSubmittedOperation(existing);
+          if (outcome === "confirmed") continue;
+          if (outcome === "unresolved") {
+            incrementSkip("submitted_unresolved");
+            continue;
+          }
+          // outcome === "failed": fall through to claim and retry
+        }
+
+        if (existing.status === "submitting") {
+          // Another process is currently submitting this operation, or a prior
+          // submission crashed mid-flight. Do not auto-retry; require manual
+          // recovery or a dedicated reconciliation job.
+          incrementSkip("submitting_in_flight");
+          continue;
+        }
+
+        if (existing.status !== "pending" && existing.status !== "failed") {
+          incrementSkip("unexpected_status");
+          continue;
+        }
+
+        // Atomically claim the operation. Only the caller that succeeds may
+        // submit a blockchain transaction for this reward.
+        const { data: claimedId, error: claimError } = await supabase.rpc("claim_payout_operation", {
+          p_operation_id: operationId,
+          p_actor_id: context.user.id,
+        });
+        if (claimError) throw claimError;
+        if (!claimedId) {
+          incrementSkip("claim_failed");
+          continue;
         }
 
         distributions.push({ operationId, walletAddress, amountRaw });
@@ -1075,9 +1166,13 @@ export async function airdropRewards(periodId: string) {
           await supabase.from("reward_periods").update({ status: "distributed" }).eq("id", periodId);
           return { status: "already_distributed", confirmedCount };
         }
-        throw new Error(
-          "No eligible rewards to distribute. Wallets may be missing, invalid, or unverified."
-        );
+        return {
+          attempted: 0,
+          submitted: 0,
+          confirmed: 0,
+          reconciliationFailures: 0,
+          skipped: Object.fromEntries(skipped),
+        };
       }
 
       const totalNeededRaw = distributions.reduce((sum, d) => sum + d.amountRaw, 0n);

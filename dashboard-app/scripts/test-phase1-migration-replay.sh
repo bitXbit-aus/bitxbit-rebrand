@@ -225,9 +225,46 @@ BEGIN
     END IF;
   END;
 
+  -- Atomic claiming: only one caller can claim a pending operation.
+  DECLARE
+    claimed_id UUID;
+    second_claim UUID;
+  BEGIN
+    SELECT public.claim_payout_operation(test_op, test_user) INTO claimed_id;
+    IF claimed_id IS NULL THEN
+      RAISE EXCEPTION 'claim_payout_operation did not claim the pending operation';
+    END IF;
+
+    SELECT public.claim_payout_operation(test_op, test_user) INTO second_claim;
+    IF second_claim IS NOT NULL THEN
+      RAISE EXCEPTION 'claim_payout_operation allowed double-claim of the same operation';
+    END IF;
+
+    IF (SELECT status FROM public.payout_operations WHERE operation_id = test_op) IS DISTINCT FROM 'submitting' THEN
+      RAISE EXCEPTION 'claimed operation was not moved to submitting';
+    END IF;
+  END;
+
+  -- A submitted operation with a fake transaction hash must not be auto-retryable
+  -- without reconciliation. Move the claimed op to submitted and verify a second
+  -- claim returns NULL.
+  UPDATE public.payout_operations
+  SET status = 'submitted', transaction_hash = 'txhash123', submitted_at = NOW(), updated_at = NOW()
+  WHERE operation_id = test_op;
+
+  DECLARE
+    resubmitted_claim UUID;
+  BEGIN
+    SELECT public.claim_payout_operation(test_op, test_user) INTO resubmitted_claim;
+    IF resubmitted_claim IS NOT NULL THEN
+      RAISE EXCEPTION 'submitted operation was allowed to be claimed again';
+    END IF;
+  END;
+
+  -- Move to confirmed and verify immutability.
   UPDATE public.payout_operations SET status = 'confirmed', transaction_hash = 'txhash123', confirmed_at = NOW() WHERE operation_id = test_op;
   SELECT COUNT(*) INTO op_count FROM public.security_audit_log WHERE target_table = 'public.payout_operations' AND target_id = (SELECT id::TEXT FROM public.payout_operations WHERE operation_id = test_op);
-  IF op_count < 2 THEN
+  IF op_count < 3 THEN
     RAISE EXCEPTION 'payout operation state changes were not audited';
   END IF;
 

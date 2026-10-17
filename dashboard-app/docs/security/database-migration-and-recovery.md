@@ -235,7 +235,7 @@ Use disposable test accounts, not production identities:
 13. Clicking an active offer records at most one trusted click per user/offer within 30 seconds; a mismatched/inactive offer URL is rejected, direct authenticated INSERT remains blocked, and outbound navigation still opens if analytics fails.
 14. Wallet connection alone does not mark a wallet verified; signing the SIWS challenge with the matching private key does. Changing the saved wallet address resets `wallet_verified` to false.
 15. `sendTestAirdrop` is disabled unless `ENABLE_TEST_AIRDROP=true`.
-16. `airdropRewards` skips unverified wallets, creates exactly one `payout_operations` row per reward/period, reconciles on-chain before marking a reward distributed, and never marks a reward distributed twice.
+16. `airdropRewards` skips unverified wallets, creates exactly one `payout_operations` row per reward/period, atomically claims each `pending`/`failed` operation via `claim_payout_operation()` before submission, reconciles `submitted` operations on-chain before any retry, and never marks a reward distributed twice.
 17. Confirmed `payout_operations` cannot be changed back to pending, submitted, or failed.
 18. Service-role user, storage, wallet, treasury, and airdrop operations create actor-attributed application audit rows without private keys or signing material.
 

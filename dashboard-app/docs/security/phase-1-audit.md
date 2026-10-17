@@ -84,8 +84,9 @@ The previous `airdropRewards()` action updated `user_rewards` rows directly from
 Migration `012_secure_token_distribution.sql`:
 
 - Adds `public.payout_operations` as the durable, idempotent record for every token distribution. Columns include a unique `operation_id`, reward period/reward/user references, exact `token_amount_raw` (smallest token units), `token_decimals`, status (`pending` → `submitted` → `confirmed`/`failed`/`cancelled`), `transaction_hash`, on-chain confirmation metadata, submission/error timestamps, and the acting admin `actor_id`.
-- Enforces `UNIQUE(operation_id)`, a status check constraint, and indexes on `(reward_period_id, status)`, `(reward_id, created_at DESC)`, and `(transaction_hash)`.
+- Enforces `UNIQUE(operation_id)`, a status check constraint (`pending`, `submitting`, `submitted`, `confirmed`, `failed`, `cancelled`), and indexes on `(reward_period_id, status)`, `(reward_id, created_at DESC)`, and `(transaction_hash)`.
 - Revokes direct authenticated access; read access is admin-only via `is_active_admin()`. Writes go through service-role Server Actions after capability checks.
+- Adds `public.claim_payout_operation(TEXT, UUID)` — a `SECURITY DEFINER` function that atomically locks and moves a `pending`/`failed` operation to `submitting`, returning the operation ID only to the caller that wins the race. Concurrent callers receive `NULL`.
 - Adds an audit trigger that writes every INSERT/UPDATE/DELETE on `payout_operations` to `security_audit_log`.
 - Adds `prevent_confirmed_payout_mutation()` trigger that rejects any update moving a confirmed operation to a non-confirmed state.
 
@@ -101,17 +102,18 @@ Application changes:
   - Verifies the reward period is `approved`.
   - Loads approved rewards joined to `users.wallet_address` and `users.wallet_verified`.
   - Skips unverified, missing, invalid, or zero-amount destinations.
-  - Creates a deterministic `operation_id` (`payout:<periodId>:<rewardId>`) per reward; existing confirmed operations are skipped, preventing duplicate payouts.
-  - Checks the treasury wallet's token and SOL balances using exact raw amounts.
-  - Submits transfers via `executePayoutTransfers`, updates operations to `submitted` or `failed`.
-  - Reconciles each submitted transfer on-chain via `confirmTokenTransfer`, updating operations to `confirmed` and `user_rewards` to `distributed` only after on-chain verification.
+  - Creates a deterministic `operation_id` (`payout:<periodId>:<rewardId>`) per reward. Existing `confirmed` operations are skipped; existing `submitted` operations are reconciled on-chain before any retry; existing `submitting` operations are left alone (no auto-retry); only `pending` or `failed` operations may be claimed.
+  - Claims each eligible operation atomically via `public.claim_payout_operation()`. Only the winning caller may submit a blockchain transaction for that reward; concurrent callers receive `NULL` and skip the operation.
+  - Checks the treasury wallet's token and SOL balances using exact raw amounts for the claimed operations only.
+  - Submits transfers via `executePayoutTransfers` and immediately persists each returned transaction hash as `submitted`.
+  - Reconciles each submitted transfer on-chain via `confirmTokenTransfer`, updating operations to `confirmed` and `user_rewards` to `distributed` only after on-chain verification. Operations that cannot be confirmed (network outage, unknown status) remain `submitted` and are **not** automatically re-submitted; they require explicit reconciliation or manual review.
   - Updates the reward period to `distributed` only when every reward has a confirmed operation.
 - `sendTestAirdrop()` is now disabled unless `ENABLE_TEST_AIRDROP=true`, preventing accidental production outflows. It also confirms the test transfer on-chain before reporting success.
 - The manual "Mark Distributed" form and `distributeRewards()`/`distributeRewardsWithTx()` have been removed from `lib/actions.ts` and `app/admin/rewards/page.tsx`.
 
 ### Acceptance test
 
-An administrator cannot mark rewards distributed without an on-chain transfer. A reward cannot be paid twice for the same period because the deterministic `operation_id` and confirmed status prevent duplicate operations. A member whose wallet is unverified cannot receive a payout, and a transfer that fails on-chain reconciliation leaves the reward approved and the operation failed rather than marking it distributed.
+An administrator cannot mark rewards distributed without an on-chain transfer. A reward cannot be paid twice for the same period because the deterministic `operation_id` is guarded by `claim_payout_operation()`: only one process can move an operation from `pending`/`failed` to `submitting`, and `submitted` operations are reconciled rather than re-submitted. A member whose wallet is unverified cannot receive a payout, and a transfer that reaches the blockchain but cannot be confirmed (network partition, dropped response) remains `submitted` and is never automatically retried as a new payment.
 
 ## Task 5 — Strengthen database security
 

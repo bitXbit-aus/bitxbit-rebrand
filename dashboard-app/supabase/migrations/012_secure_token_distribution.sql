@@ -38,7 +38,7 @@ BEGIN
   ) THEN
     ALTER TABLE public.payout_operations
       ADD CONSTRAINT payout_operations_status_check
-      CHECK (status IN ('pending', 'submitted', 'confirmed', 'failed', 'cancelled')) NOT VALID;
+      CHECK (status IN ('pending', 'submitting', 'submitted', 'confirmed', 'failed', 'cancelled')) NOT VALID;
   END IF;
 END $$;
 
@@ -60,6 +60,53 @@ CREATE POLICY "Payout operations admin read"
 
 -- Members can read their own payout operations via service-role aggregations;
 -- direct authenticated SELECT is admin-only.
+
+-- -----------------------------------------------------------------------------
+-- Atomic claiming of a payout operation before on-chain submission.
+-- Only one process can claim a pending/failed operation. Once claimed, the
+-- operation moves to 'submitting' and must be updated to 'submitted' with a
+-- transaction hash, or back to 'failed'. Concurrent callers receive NULL.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.claim_payout_operation(
+  p_operation_id TEXT,
+  p_actor_id UUID
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  op_id UUID;
+BEGIN
+  IF p_operation_id IS NULL OR p_actor_id IS NULL THEN
+    RAISE EXCEPTION 'invalid claim parameters';
+  END IF;
+
+  SELECT id INTO op_id
+  FROM public.payout_operations
+  WHERE operation_id = p_operation_id
+    AND status IN ('pending', 'failed')
+  FOR UPDATE SKIP LOCKED;
+
+  IF op_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  UPDATE public.payout_operations
+  SET status = 'submitting',
+      actor_id = p_actor_id,
+      submission_error = NULL,
+      updated_at = NOW()
+  WHERE id = op_id;
+
+  RETURN op_id;
+END;
+$$;
+
+ALTER FUNCTION public.claim_payout_operation(TEXT, UUID) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.claim_payout_operation(TEXT, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_payout_operation(TEXT, UUID) TO service_role;
 
 -- -----------------------------------------------------------------------------
 -- Audit trigger for payout operation state changes.
