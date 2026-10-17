@@ -110,7 +110,7 @@ Application changes:
   - Loads approved rewards joined to `users.wallet_address` and `users.wallet_verified`.
   - Skips unverified, missing, invalid, or zero-amount destinations.
   - Creates a deterministic `operation_id` (`payout:<periodId>:<rewardId>`) per reward. Existing `confirmed` operations are skipped; existing `submitted` operations are reconciled on-chain before any retry; `submitting`, `uncertain`, and `incident` operations are left non-retryable; only `pending` or `failed` operations may be claimed.
-  - Claims each eligible operation atomically via `public.claim_payout_operation()`. Only the winning caller may submit a blockchain transaction for that reward; concurrent callers receive `NULL` and skip the operation.
+  - Creates or claims each eligible operation atomically via `public.create_or_claim_payout_operation()`. The RPC acquires the period-wide advisory lock and re-verifies the reward period is `approved`, the recipient still has a verified wallet, the supplied payout address matches that verified wallet, the reward is still active/approved, the recipient matches, and the amount matches before inserting or claiming the operation. Concurrent callers are serialised; stale rewards, mismatched wallets, or non-approved periods abort the transaction.
   - Checks the treasury wallet's token and SOL balances using exact raw amounts for the candidate set **before** any operation is moved to `submitted`.
   - Prepares each transfer with `preparePayoutSubmission()`, signs it, derives the transaction hash, and persists the signed transaction, hash, and last blockhash as `submitted` **before** broadcasting. The persistence result is checked; if it fails, the operation is recovered to `failed` and the signed transaction is never broadcast.
   - Broadcasts via `broadcastPayoutSubmission()`. Broadcast errors move the operation to `uncertain` (not retryable) because the transaction may have already landed.
@@ -161,7 +161,7 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 - `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
 - `lib/payout.test.ts` — exact token-unit conversion and round-trips.
 - `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, shared-store delegation, `MemoryRateLimitStore` unit tests, and trusted-proxy client-identifier selection.
-- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `021`, including incident-state non-retryability, immutability, delete prohibition for finalised records, test-operation constraints, recalculation preserving superseded reward history, empty-recalculation retirement of active rewards, `create_or_claim_payout_operation()` validation, removal of the obsolete `apply_reward_correction(UUID, TEXT, JSONB)` overload, and concurrent correction-vs-claim and correction-vs-creation race tests using two psql sessions.
+- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `022`, including incident-state non-retryability, immutability, delete prohibition for finalised records, test-operation constraints, recalculation preserving superseded reward history, empty-recalculation retirement of active rewards, `create_or_claim_payout_operation()` validation with period-status and verified-wallet re-checks, removal of the obsolete `apply_reward_correction(UUID, TEXT, JSONB)` overload, and concurrent correction-vs-claim and correction-vs-creation race tests using two psql sessions.
 
 ### Test results
 
@@ -177,7 +177,7 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 
 1. **Security Audit Report** — this document.
 2. **Implemented Fixes** — working code on `security/phase-1-hardening`.
-3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`, `016_reward_calculation_history_safe.sql`, `017_fix_user_rewards_active_uniqueness.sql`, `018_coordinate_reward_correction_and_claim.sql`, `019_prevent_finalised_payout_deletion.sql`, `020_create_or_claim_payout_operation.sql`, `021_remove_obsolete_correction_overload.sql`.
+3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`, `016_reward_calculation_history_safe.sql`, `017_fix_user_rewards_active_uniqueness.sql`, `018_coordinate_reward_correction_and_claim.sql`, `019_prevent_finalised_payout_deletion.sql`, `020_create_or_claim_payout_operation.sql`, `021_remove_obsolete_correction_overload.sql`, `022_create_or_claim_recheck_wallet_and_period.sql`.
 4. **Wallet Authentication Upgrade** — `lib/wallet-crypto.ts`, `lib/wallet-verification.ts`, `app/dashboard/wallet/page.tsx`.
 5. **Token Distribution Improvements** — `lib/payout.ts`, hardened `airdropRewards()`, `payout_operations`.
 6. **Automated Test Results** — 24 unit tests + migration replay test passing.

@@ -16,6 +16,7 @@ MIGRATION_018="$ROOT_DIR/supabase/migrations/018_coordinate_reward_correction_an
 MIGRATION_019="$ROOT_DIR/supabase/migrations/019_prevent_finalised_payout_deletion.sql"
 MIGRATION_020="$ROOT_DIR/supabase/migrations/020_create_or_claim_payout_operation.sql"
 MIGRATION_021="$ROOT_DIR/supabase/migrations/021_remove_obsolete_correction_overload.sql"
+MIGRATION_022="$ROOT_DIR/supabase/migrations/022_create_or_claim_recheck_wallet_and_period.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -55,6 +56,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_021" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_022" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -72,6 +74,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_018" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_021" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_022" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -479,16 +482,21 @@ BEGIN
     END IF;
   END;
 
-  -- create_or_claim_payout_operation must verify the reward is active and
-  -- approved before creating or claiming an operation.
+  -- create_or_claim_payout_operation must verify the period, verified wallet,
+  -- reward recipient, amount, and approval status while holding the period lock.
   DECLARE
     v_cc_user UUID := '11111111-1111-4111-8111-111111111112';
     v_cc_period UUID := '33333333-3333-4333-8333-333333333334';
     v_cc_reward UUID := '44444444-4444-4444-8444-444444444445';
+    v_cc_other_wallet TEXT := '11111111111111111111111111111111111111111112';
     v_cc_op TEXT;
     v_cc_op_status TEXT;
   BEGIN
     INSERT INTO auth.users (id, email) VALUES (v_cc_user, 'create-claim-test@example.test');
+    INSERT INTO public.users (id, email, wallet_address)
+    VALUES (v_cc_user, 'create-claim-test@example.test', test_wallet)
+    ON CONFLICT (id) DO UPDATE SET wallet_address = test_wallet;
+    UPDATE public.users SET wallet_verified = TRUE WHERE id = v_cc_user;
     INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
     VALUES (v_cc_period, '2026-07-01', '2026-07-31', '55555555-5555-4555-8555-555555555555', 'approved');
     INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status)
@@ -572,6 +580,59 @@ BEGIN
       RAISE EXCEPTION 'non-approved reward was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
       IF SQLERRM = 'non-approved reward was accepted for payout' THEN
+        RAISE;
+      END IF;
+    END;
+
+    -- Restore approved reward for remaining checks.
+    UPDATE public.user_rewards
+    SET status = 'approved'
+    WHERE id = v_cc_reward;
+
+    -- Rejects a wallet address that does not match the verified wallet.
+    BEGIN
+      SELECT public.create_or_claim_payout_operation(
+        v_cc_period, v_cc_reward, v_cc_user, v_cc_other_wallet, 1500000000, v_cc_user
+      ) INTO v_cc_op;
+      RAISE EXCEPTION 'unverified wallet address was accepted for payout';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'unverified wallet address was accepted for payout' THEN
+        RAISE;
+      END IF;
+    END;
+
+    -- Rejects an unverified wallet.
+    UPDATE public.users
+    SET wallet_verified = FALSE
+    WHERE id = v_cc_user;
+
+    BEGIN
+      SELECT public.create_or_claim_payout_operation(
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+      ) INTO v_cc_op;
+      RAISE EXCEPTION 'unverified wallet was accepted for payout';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'unverified wallet was accepted for payout' THEN
+        RAISE;
+      END IF;
+    END;
+
+    UPDATE public.users
+    SET wallet_verified = TRUE
+    WHERE id = v_cc_user;
+
+    -- Rejects a period that is not approved for payout.
+    UPDATE public.reward_periods
+    SET status = 'calculating'
+    WHERE id = v_cc_period;
+
+    BEGIN
+      SELECT public.create_or_claim_payout_operation(
+        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, v_cc_user
+      ) INTO v_cc_op;
+      RAISE EXCEPTION 'non-approved period was accepted for payout';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'non-approved period was accepted for payout' THEN
         RAISE;
       END IF;
     END;
@@ -986,6 +1047,10 @@ RACE2_RESULT=$(mktemp)
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
   INSERT INTO auth.users (id, email) VALUES ('$RACE2_USER', 'race2@example.test');
+  INSERT INTO public.users (id, email, wallet_address)
+  VALUES ('$RACE2_USER', 'race2@example.test', 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5')
+  ON CONFLICT (id) DO UPDATE SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5';
+  UPDATE public.users SET wallet_verified = TRUE WHERE id = '$RACE2_USER';
   INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
   VALUES ('$RACE2_PERIOD', '2026-06-01', '2026-06-30', '55555555-5555-4555-8555-555555555555', 'approved');
   INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
