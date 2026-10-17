@@ -161,6 +161,75 @@ export async function executePayoutTransfers(
   return results;
 }
 
+export interface TokenTransferMatch {
+  found: boolean;
+  error?: string;
+}
+
+export async function findMatchingTokenTransfer(
+  tx: any,
+  expectedSourceWalletAddress: string,
+  expectedWalletAddress: string,
+  expectedAmountRaw: bigint,
+  mintAddress: string = MINT!
+): Promise<TokenTransferMatch> {
+  const mintPublicKey = new PublicKey(mintAddress);
+  const expectedSourceAta = await getAssociatedTokenAddress(
+    mintPublicKey,
+    new PublicKey(expectedSourceWalletAddress)
+  );
+  const expectedRecipientAta = await getAssociatedTokenAddress(
+    mintPublicKey,
+    new PublicKey(expectedWalletAddress)
+  );
+
+  const instructions = tx?.transaction?.message?.instructions ?? [];
+
+  for (const instruction of instructions) {
+    const parsed = (instruction as any).parsed;
+    const program = (instruction as any).program;
+    const programId = (instruction as any).programId;
+
+    // Defensive: require the SPL Token program.
+    if (program !== "spl-token") continue;
+
+    // programId may be a Solana PublicKey object or a base58 string.
+    const programIdBase58 =
+      programId && typeof programId === "object" && "toBase58" in programId
+        ? (programId as PublicKey).toBase58()
+        : programId;
+    if (
+      programIdBase58 &&
+      programIdBase58 !== "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    ) {
+      continue;
+    }
+
+    if (parsed?.type !== "transfer") continue;
+
+    const info = parsed.info;
+    if (!info) continue;
+
+    const source = info.source;
+    const destination = info.destination;
+    const amount = info.amount;
+    const authority = info.authority;
+
+    // Verify the complete transfer graph: source ATA, destination ATA,
+    // token authority, and exact raw amount all match the expected payout.
+    if (
+      source === expectedSourceAta.toBase58() &&
+      destination === expectedRecipientAta.toBase58() &&
+      BigInt(amount) === expectedAmountRaw &&
+      authority === expectedSourceWalletAddress
+    ) {
+      return { found: true };
+    }
+  }
+
+  return { found: false };
+}
+
 export async function confirmTokenTransfer(
   txHash: string,
   expectedSourceWalletAddress: string,
@@ -202,53 +271,19 @@ export async function confirmTokenTransfer(
       return { confirmed: false, verificationError: "Could not fetch transaction details" };
     }
 
-    const mintPublicKey = new PublicKey(mintAddress);
-    const expectedSourceAta = await getAssociatedTokenAddress(
-      mintPublicKey,
-      new PublicKey(expectedSourceWalletAddress)
-    );
-    const expectedRecipientAta = await getAssociatedTokenAddress(
-      mintPublicKey,
-      new PublicKey(expectedWalletAddress)
+    const match = await findMatchingTokenTransfer(
+      tx,
+      expectedSourceWalletAddress,
+      expectedWalletAddress,
+      expectedAmountRaw,
+      mintAddress
     );
 
-    let foundMatchingTransfer = false;
-
-    for (const instruction of tx.transaction.message.instructions) {
-      const parsed = (instruction as any).parsed;
-      const program = (instruction as any).program;
-      const programId = (instruction as any).programId;
-
-      // Defensive: require the SPL Token program.
-      if (program !== "spl-token") continue;
-      if (programId && programId !== "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") continue;
-      if (parsed?.type !== "transfer") continue;
-
-      const info = parsed.info;
-      if (!info) continue;
-
-      const source = info.source;
-      const destination = info.destination;
-      const amount = info.amount;
-      const authority = info.authority;
-
-      // Verify the complete transfer graph: source ATA, destination ATA,
-      // token authority, and exact raw amount all match the expected payout.
-      if (
-        source === expectedSourceAta.toBase58() &&
-        destination === expectedRecipientAta.toBase58() &&
-        BigInt(amount) === expectedAmountRaw &&
-        authority === expectedSourceWalletAddress
-      ) {
-        foundMatchingTransfer = true;
-        break;
-      }
-    }
-
-    if (!foundMatchingTransfer) {
+    if (!match.found) {
       return {
         confirmed: false,
         verificationError:
+          match.error ||
           "Transaction does not contain the expected source/mint/recipient/amount/authority",
       };
     }
