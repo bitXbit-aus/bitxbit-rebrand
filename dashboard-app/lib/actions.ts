@@ -1498,8 +1498,23 @@ export async function airdropRewards(periodId: string) {
           }
         );
         if (claimError) {
-          incrementSkip("claim_failed");
-          continue;
+          const msg = claimError.message ?? "";
+          const isStaleReward =
+            msg.includes("period is not approved") ||
+            msg.includes("user does not have a verified wallet") ||
+            msg.includes("wallet address does not match verified wallet") ||
+            msg.includes("reward has been superseded") ||
+            msg.includes("reward is not approved") ||
+            msg.includes("reward recipient mismatch") ||
+            msg.includes("reward amount mismatch") ||
+            msg.includes("existing payout operation is not claimable");
+          if (isStaleReward) {
+            incrementSkip("stale_reward");
+            continue;
+          }
+          // Unexpected database error: abort the batch rather than silently
+          // counting it as an ordinary skipped payout.
+          throw claimError;
         }
         if (!claimedId) {
           incrementSkip("claim_failed");
@@ -1523,10 +1538,12 @@ export async function airdropRewards(periodId: string) {
         }
 
         // Persist the signed transaction identity BEFORE broadcasting and
-        // verify the update succeeded. If persistence fails, the signed tx is
-        // never broadcast; the operation returns to a recoverable failed state.
-        const { error: persistError } = await supabase
-          .from("payout_operations")
+        // verify exactly one operation in the expected submitting state
+        // transitioned to submitted with the prepared signature. If persistence
+        // fails, the signed tx is never broadcast; the operation returns to a
+        // recoverable failed state.
+        const { data: persistedRows, error: persistError } = await (supabase
+          .from("payout_operations") as any)
           .update({
             status: "submitted",
             transaction_hash: prepared.txHash,
@@ -1535,12 +1552,14 @@ export async function airdropRewards(periodId: string) {
             submitted_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
-          .eq("operation_id", operationId);
+          .eq("operation_id", operationId)
+          .eq("status", "submitting")
+          .select("operation_id, status, signed_transaction_base58, last_blockhash");
 
         if (persistError) {
-          const { error: recoverError } = await supabase
-            .from("payout_operations")
-          .update({
+          const { error: recoverError } = await (supabase
+            .from("payout_operations") as any)
+            .update({
               status: "failed",
               submission_error: `Failed to persist signed transaction: ${persistError.message}`,
               failed_at: new Date().toISOString(),
@@ -1548,7 +1567,32 @@ export async function airdropRewards(periodId: string) {
             })
             .eq("operation_id", operationId);
           if (recoverError) throw recoverError;
-          incrementSkip("persist_failed");
+          // Unexpected database error: abort the batch rather than silently
+          // counting it as an ordinary skipped payout.
+          throw persistError;
+        }
+
+        const persisted = persistedRows?.[0];
+        const signatureMismatch =
+          persisted?.status !== "submitted" ||
+          persisted?.signed_transaction_base58 !== prepared.signedTransactionBase58 ||
+          persisted?.last_blockhash !== prepared.lastBlockhash;
+
+        if (!persistedRows || persistedRows.length !== 1 || signatureMismatch) {
+          const detail = !persistedRows || persistedRows.length !== 1
+            ? `expected exactly one submitting operation to transition to submitted, got ${persistedRows?.length ?? 0}`
+            : "persisted signature does not match prepared transaction";
+          const { error: recoverError } = await (supabase
+            .from("payout_operations") as any)
+            .update({
+              status: "failed",
+              submission_error: `Persistence verification failed: ${detail}`,
+              failed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", operationId);
+          if (recoverError) throw recoverError;
+          incrementSkip("persist_verification_failed");
           continue;
         }
 
