@@ -172,6 +172,21 @@ BEGIN
     END IF;
   END;
 
+  -- Migration backfill is one-time: a wallet that is already verified must not
+  -- be reset if migration 011 is replayed.
+  UPDATE public.users
+  SET wallet_verified = TRUE, wallet_verified_at = NOW()
+  WHERE id = test_user;
+
+  UPDATE public.users
+  SET wallet_verified = FALSE, wallet_verified_at = NULL
+  WHERE wallet_address IS NOT NULL
+    AND wallet_verified IS NULL;
+
+  IF (SELECT wallet_verified FROM public.users WHERE id = test_user) IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'replay of migration 011 backfill reset an already verified wallet';
+  END IF;
+
   -- Updating wallet_address resets verification via trigger.
   UPDATE public.users SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH6' WHERE id = test_user;
   IF (SELECT wallet_verified FROM public.users WHERE id = test_user) IS DISTINCT FROM FALSE THEN

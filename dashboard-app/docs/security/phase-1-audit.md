@@ -53,7 +53,7 @@ The previous `saveWalletAddress()` action accepted any syntactically valid Solan
 Migration `011_wallet_verification.sql`:
 
 - Adds `public.wallet_verification_challenges` with a unique nonce, the exact message to sign, expiry, and used/verified timestamps.
-- Adds `users.wallet_verified` and `users.wallet_verified_at`, backfills existing addresses as `FALSE`, and protects these columns via RLS (members cannot write them directly).
+- Adds `users.wallet_verified` and `users.wallet_verified_at`, backfills existing addresses as `FALSE` **only once** (only rows where `wallet_verified IS NULL` are touched), and protects these columns via RLS (members cannot write them directly). The one-time backfill ensures a migration replay cannot reset wallets that members have already verified.
 - Provides `public.consume_wallet_verification_challenge(UUID, TEXT, TEXT)` as a SECURITY DEFINER function that atomically locks, validates, and consumes a challenge exactly once.
 - Provides `public.verify_wallet_challenge(UUID, TEXT, TEXT)` as a SECURITY DEFINER function that consumes the signed challenge and updates the payout address + verified flag together inside a single database transaction.
 - Adds `sync_wallet_verification_status()` trigger that resets `wallet_verified` whenever `wallet_address` changes, preventing an unverified substitution from inheriting a previous verified flag. The verification function performs the address update and the verification update as two statements within the same transaction, so the final state is verified even though the trigger resets on the first statement.

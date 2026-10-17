@@ -37,12 +37,14 @@ ALTER TABLE public.users
   ADD COLUMN IF NOT EXISTS wallet_verified_at TIMESTAMPTZ;
 
 -- Backfill existing wallets as unverified (preserved, but require re-verification
--- before any future payout-address change is accepted).
+-- before any future payout-address change is accepted). This is intentionally
+-- one-time: it only touches rows where wallet_verified has never been set, so a
+-- replay of the migration cannot reset wallets that members have already verified.
 UPDATE public.users
 SET wallet_verified = FALSE,
     wallet_verified_at = NULL
 WHERE wallet_address IS NOT NULL
-  AND (wallet_verified IS NULL OR wallet_verified IS DISTINCT FROM FALSE);
+  AND wallet_verified IS NULL;
 
 -- -----------------------------------------------------------------------------
 -- Helper to atomically consume a challenge and mark the wallet verified.
