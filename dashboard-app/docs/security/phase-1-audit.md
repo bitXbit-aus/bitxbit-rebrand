@@ -85,6 +85,7 @@ Migration `012_secure_token_distribution.sql`:
 
 - Adds `public.payout_operations` as the durable, idempotent record for every token distribution. Columns include a unique `operation_id`, reward period/reward/user references, exact `token_amount_raw` (smallest token units), `token_decimals`, status (`pending` → `submitted` → `confirmed`/`failed`/`cancelled`), `transaction_hash`, on-chain confirmation metadata, submission/error timestamps, and the acting admin `actor_id`.
 - Enforces `UNIQUE(operation_id)`, a status check constraint (`pending`, `submitting`, `submitted`, `confirmed`, `failed`, `cancelled`), and indexes on `(reward_period_id, status)`, `(reward_id, created_at DESC)`, and `(transaction_hash)`.
+- Adds a `reward_periods_status_check` constraint limiting `reward_periods.status` to `pending`, `calculating`, `approved`, or `distributed`.
 - Revokes direct authenticated access; read access is admin-only via `is_active_admin()`. Writes go through service-role Server Actions after capability checks.
 - Adds `public.claim_payout_operation(TEXT, UUID)` — a `SECURITY DEFINER` function that atomically locks and moves a `pending`/`failed` operation to `submitting`, returning the operation ID only to the caller that wins the race. Concurrent callers receive `NULL`.
 - Adds an audit trigger that writes every INSERT/UPDATE/DELETE on `payout_operations` to `security_audit_log`.
@@ -97,6 +98,9 @@ Application changes:
   - `executePayoutTransfers(transfers[])` submits transfers sequentially with a single signer, returning per-operation results.
   - `confirmTokenTransfer(txHash, walletAddress, amountRaw)` waits for confirmation and reconciles the recipient ATA balance change against the expected raw amount.
 - `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). The deprecated `distributeTokens()` wrapper was removed so there is no non-idempotent legacy distribution path.
+- `calculateRewards()` in `lib/actions.ts` now refuses to recalculate a period whose status is `approved` or `distributed`, and refuses to recalculate any period that already has `payout_operations` rows. This prevents accidental overwriting of rewards after they have been approved or once payout activity has begun.
+- `correctRewards(periodId, reason)` is a new explicit audited correction process. It requires `manage_rewards`, validates a non-empty reason, rejects distributed periods, rejects periods with confirmed payouts, deletes any pending/failed/submitted payout operations, resets the period to `pending`, deletes existing `user_rewards`, and recalculates. The reason is captured in the audit log.
+- `approveRewards()` remains unchanged but now operates on a period that has been locked into the `calculating` state by `calculateRewards()` or `correctRewards()`.
 - `airdropRewards()` in `lib/actions.ts` now:
   - Requires `manage_rewards` capability.
   - Verifies the reward period is `approved`.

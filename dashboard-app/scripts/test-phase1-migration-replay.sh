@@ -277,6 +277,26 @@ BEGIN
     END IF;
   END;
 
+  -- Reward period status guard prevents invalid statuses.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.reward_periods'::regclass
+      AND conname = 'reward_periods_status_check'
+  ) THEN
+    RAISE EXCEPTION 'reward_periods status check constraint is missing';
+  END IF;
+
+  BEGIN
+    UPDATE public.reward_periods SET status = 'invalid_status' WHERE id = test_period;
+    RAISE EXCEPTION 'invalid reward period status was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  WHEN OTHERS THEN
+    IF SQLERRM = 'invalid reward period status was accepted' THEN
+      RAISE;
+    END IF;
+  END;
+
   -- Clean up payout operation so the subsequent auth.users deletion can cascade.
   DELETE FROM public.payout_operations WHERE operation_id = test_op;
 

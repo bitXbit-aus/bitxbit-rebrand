@@ -516,6 +516,94 @@ const ACTIVITY_POINTS: Record<string, number> = {
   other: 1,
 };
 
+async function executeRewardCalculation(
+  supabase: ReturnType<typeof createServiceClient>,
+  periodId: string
+) {
+  const { data: period, error: periodError } = await supabase
+    .from("reward_periods")
+    .select("*, allocation_model:allocation_models(*)")
+    .eq("id", periodId)
+    .single();
+  if (periodError || !period) throw periodError || new Error("Period not found");
+
+  const { data: incomeRows } = await supabase
+    .from("affiliate_income")
+    .select("amount")
+    .gte("date_received", period.start_date)
+    .lte("date_received", period.end_date);
+  const totalIncome = incomeRows?.reduce((sum, row) => sum + (row.amount || 0), 0) ?? 0;
+
+  const communityPct = period.allocation_model?.community_rewards_pct ?? 0;
+  const communityPool = totalIncome * (communityPct / 100);
+
+  const { data: activities } = await supabase
+    .from("user_activities")
+    .select("user_id, activity_type")
+    .gte("created_at", `${period.start_date}T00:00:00Z`)
+    .lte("created_at", `${period.end_date}T23:59:59Z`);
+
+  const { data: users } = await supabase.from("users").select("id, referred_by");
+
+  const directPointsByUser = new Map<string, number>();
+  activities?.forEach((a) => {
+    const points = ACTIVITY_POINTS[a.activity_type] ?? 1;
+    const current = directPointsByUser.get(a.user_id) || 0;
+    directPointsByUser.set(a.user_id, current + points);
+  });
+
+  const REFERRAL_BONUS_PCT = 5;
+  const pointsByUser = new Map<string, number>();
+  let totalPoints = 0;
+
+  users?.forEach((user) => {
+    let points = directPointsByUser.get(user.id) || 0;
+
+    // Add 5% of each referred user's direct points
+    users.forEach((potentialReferral) => {
+      if (potentialReferral.referred_by === user.id) {
+        const referralPoints = directPointsByUser.get(potentialReferral.id) || 0;
+        points += referralPoints * (REFERRAL_BONUS_PCT / 100);
+      }
+    });
+
+    if (points > 0) {
+      pointsByUser.set(user.id, points);
+      totalPoints += points;
+    }
+  });
+
+  if (totalPoints === 0 || communityPool === 0) {
+    await supabase
+      .from("reward_periods")
+      .update({ total_income: totalIncome, status: "calculating" })
+      .eq("id", periodId);
+    return { totalIncome, recipients: 0 };
+  }
+
+  const rewards = Array.from(pointsByUser.entries()).map(([userId, points]) => {
+    const estimated = (points / totalPoints) * communityPool;
+    return {
+      user_id: userId,
+      reward_period_id: periodId,
+      estimated_aud_value: Number(estimated.toFixed(2)),
+      bitxbit_amount: Number(estimated.toFixed(4)),
+      status: "pending",
+    };
+  });
+
+  await supabase.from("user_rewards").delete().eq("reward_period_id", periodId);
+  const { error: insertError } = await supabase.from("user_rewards").insert(rewards);
+  if (insertError) throw insertError;
+
+  await supabase
+    .from("reward_periods")
+    .update({ total_income: totalIncome, status: "calculating" })
+    .eq("id", periodId);
+
+  return { totalIncome, recipients: rewards.length };
+}
+
 export async function calculateRewards(periodId: string) {
   if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
   const context = await requireCapability("manage_rewards");
@@ -529,88 +617,107 @@ export async function calculateRewards(periodId: string) {
     async () => {
       const { data: period, error: periodError } = await supabase
         .from("reward_periods")
-        .select("*, allocation_model:allocation_models(*)")
+        .select("status")
         .eq("id", periodId)
         .single();
       if (periodError || !period) throw periodError || new Error("Period not found");
 
-      const { data: incomeRows } = await supabase
-        .from("affiliate_income")
-        .select("amount")
-        .gte("date_received", period.start_date)
-        .lte("date_received", period.end_date);
-      const totalIncome = incomeRows?.reduce((sum, row) => sum + (row.amount || 0), 0) ?? 0;
-
-      const communityPct = period.allocation_model?.community_rewards_pct ?? 0;
-      const communityPool = totalIncome * (communityPct / 100);
-
-      const { data: activities } = await supabase
-        .from("user_activities")
-        .select("user_id, activity_type")
-        .gte("created_at", `${period.start_date}T00:00:00Z`)
-        .lte("created_at", `${period.end_date}T23:59:59Z`);
-
-      const { data: users } = await supabase.from("users").select("id, referred_by");
-
-      const directPointsByUser = new Map<string, number>();
-      activities?.forEach((a) => {
-        const points = ACTIVITY_POINTS[a.activity_type] ?? 1;
-        const current = directPointsByUser.get(a.user_id) || 0;
-        directPointsByUser.set(a.user_id, current + points);
-      });
-
-      const REFERRAL_BONUS_PCT = 5;
-      const pointsByUser = new Map<string, number>();
-      let totalPoints = 0;
-
-      users?.forEach((user) => {
-        let points = directPointsByUser.get(user.id) || 0;
-
-        // Add 5% of each referred user's direct points
-        users.forEach((potentialReferral) => {
-          if (potentialReferral.referred_by === user.id) {
-            const referralPoints = directPointsByUser.get(potentialReferral.id) || 0;
-            points += referralPoints * (REFERRAL_BONUS_PCT / 100);
-          }
-        });
-
-        if (points > 0) {
-          pointsByUser.set(user.id, points);
-          totalPoints += points;
-        }
-      });
-
-      if (totalPoints === 0 || communityPool === 0) {
-        await supabase
-          .from("reward_periods")
-          .update({ total_income: totalIncome, status: "calculating" })
-          .eq("id", periodId);
-        return { totalIncome, recipients: 0 };
+      // Lock calculations after approval or distribution.
+      if (period.status === "approved" || period.status === "distributed") {
+        throw new Error(
+          `Cannot recalculate rewards for a period that is already ${period.status}. Use the correction process instead.`
+        );
       }
 
-      const rewards = Array.from(pointsByUser.entries()).map(([userId, points]) => {
-        const estimated = (points / totalPoints) * communityPool;
-        return {
-          user_id: userId,
-          reward_period_id: periodId,
-          estimated_aud_value: Number(estimated.toFixed(2)),
-          bitxbit_amount: Number(estimated.toFixed(4)),
-          status: "pending",
-        };
-      });
+      // Prohibit changes once any payout activity exists.
+      const { data: payouts, error: payoutsError } = await supabase
+        .from("payout_operations")
+        .select("id")
+        .eq("reward_period_id", periodId)
+        .limit(1);
+      if (payoutsError) throw payoutsError;
+      if (payouts && payouts.length > 0) {
+        throw new Error(
+          "Cannot recalculate rewards for a period with existing payout activity. Use the correction process instead."
+        );
+      }
 
-      await supabase.from("user_rewards").delete().eq("reward_period_id", periodId);
-      const { error: insertError } = await supabase.from("user_rewards").insert(rewards);
-      if (insertError) throw insertError;
-
-      await supabase
-        .from("reward_periods")
-        .update({ total_income: totalIncome, status: "calculating" })
-        .eq("id", periodId);
-
-      return { totalIncome, recipients: rewards.length };
+      return executeRewardCalculation(supabase, periodId);
     },
     { period_id: periodId }
+  );
+
+  revalidatePath("/admin/rewards");
+}
+
+export async function correctRewards(periodId: string, reason: string) {
+  if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
+  if (!reason || reason.trim().length === 0) {
+    throw new Error("A correction reason is required.");
+  }
+  if (reason.trim().length > 2000) {
+    throw new Error("Correction reason must be 2000 characters or less.");
+  }
+
+  const context = await requireCapability("manage_rewards");
+  const supabase = createServiceClient();
+
+  await auditedAdminMutation(
+    context,
+    "reward_period.correct",
+    "public.reward_periods",
+    periodId,
+    async () => {
+      const { data: period, error: periodError } = await supabase
+        .from("reward_periods")
+        .select("status")
+        .eq("id", periodId)
+        .single();
+      if (periodError || !period) throw periodError || new Error("Period not found");
+
+      if (period.status === "distributed") {
+        throw new Error("Cannot correct a period that has already been distributed.");
+      }
+
+      // Confirmed payouts are final; correction would require a reversal flow.
+      const { data: confirmedPayouts, error: confirmedError } = await supabase
+        .from("payout_operations")
+        .select("id")
+        .eq("reward_period_id", periodId)
+        .eq("status", "confirmed")
+        .limit(1);
+      if (confirmedError) throw confirmedError;
+      if (confirmedPayouts && confirmedPayouts.length > 0) {
+        throw new Error(
+          "Cannot correct a period with confirmed payouts. Reversal requires a separate financial process."
+        );
+      }
+
+      // Remove any pending/failed/submitted payout operations so the reward
+      // amounts and recipients can be safely recalculated.
+      const { error: deletePayoutsError } = await supabase
+        .from("payout_operations")
+        .delete()
+        .eq("reward_period_id", periodId);
+      if (deletePayoutsError) throw deletePayoutsError;
+
+      // Reset reward records before recalculation.
+      const { error: deleteRewardsError } = await supabase
+        .from("user_rewards")
+        .delete()
+        .eq("reward_period_id", periodId);
+      if (deleteRewardsError) throw deleteRewardsError;
+
+      // Reset period status so recalculation can proceed.
+      const { error: resetError } = await supabase
+        .from("reward_periods")
+        .update({ status: "pending", total_income: 0 })
+        .eq("id", periodId);
+      if (resetError) throw resetError;
+
+      return executeRewardCalculation(supabase, periodId);
+    },
+    { period_id: periodId, reason: reason.trim() }
   );
 
   revalidatePath("/admin/rewards");

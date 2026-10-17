@@ -230,14 +230,16 @@ Use disposable test accounts, not production identities:
 8. Public asset reads work; authenticated direct storage INSERT/UPDATE/DELETE fails.
 9. A newly created auth user receives both `public.users` and `public.user_authorizations` rows.
 10. Protected-table changes create audit rows; clients cannot update or delete audit rows, and deleting the actor does not change historical `actor_id`, `actor_role`, `actor_status`, or capability snapshot values.
-11. An administrator with `manage_users` but without `manage_security` cannot promote or demote any user. Promotion/demotion succeeds only with `manage_security` and an AAL2 session.
-12. Bulk role/status/delete rejects malformed or oversized ID lists, caller self-removal, and removal of the final active security-capable administrator.
-13. Clicking an active offer records at most one trusted click per user/offer within 30 seconds; a mismatched/inactive offer URL is rejected, direct authenticated INSERT remains blocked, and outbound navigation still opens if analytics fails.
-14. Wallet connection alone does not mark a wallet verified; signing the SIWS challenge with the matching private key does. Changing the saved wallet address resets `wallet_verified` to false.
-15. `sendTestAirdrop` is disabled unless `ENABLE_TEST_AIRDROP=true`.
-16. `airdropRewards` skips unverified wallets, creates exactly one `payout_operations` row per reward/period, atomically claims each `pending`/`failed` operation via `claim_payout_operation()` before submission, reconciles `submitted` operations on-chain before any retry, and never marks a reward distributed twice.
-17. Confirmed `payout_operations` cannot be changed back to pending, submitted, or failed.
-18. Service-role user, storage, wallet, treasury, and airdrop operations create actor-attributed application audit rows without private keys or signing material.
+12. An administrator with `manage_users` but without `manage_security` cannot promote or demote any user. Promotion/demotion succeeds only with `manage_security` and an AAL2 session.
+13. Bulk role/status/delete rejects malformed or oversized ID lists, caller self-removal, and removal of the final active security-capable administrator.
+14. Clicking an active offer records at most one trusted click per user/offer within 30 seconds; a mismatched/inactive offer URL is rejected, direct authenticated INSERT remains blocked, and outbound navigation still opens if analytics fails.
+15. Wallet connection alone does not mark a wallet verified; signing the SIWS challenge with the matching private key does. Changing the saved wallet address resets `wallet_verified` to false.
+16. `sendTestAirdrop` is disabled unless `ENABLE_TEST_AIRDROP=true`.
+17. `calculateRewards` refuses to recalculate a period that is already `approved` or `distributed`, or that has any `payout_operations` rows.
+18. `correctRewards` requires a reason, rejects distributed periods and periods with confirmed payouts, deletes non-confirmed payout operations, resets the period, and recalculates with an audit record.
+19. `airdropRewards` skips unverified wallets, creates exactly one `payout_operations` row per reward/period, atomically claims each `pending`/`failed` operation via `claim_payout_operation()` before submission, reconciles `submitted` operations on-chain before any retry, and never marks a reward distributed twice.
+20. Confirmed `payout_operations` cannot be changed back to pending, submitted, or failed.
+21. Service-role user, storage, wallet, treasury, and airdrop operations create actor-attributed application audit rows without private keys or signing material.
 
 ## Recovery and forward fixes
 

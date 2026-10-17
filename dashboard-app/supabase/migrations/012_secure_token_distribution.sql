@@ -49,6 +49,24 @@ CREATE INDEX IF NOT EXISTS idx_payout_operations_reward
 CREATE INDEX IF NOT EXISTS idx_payout_operations_tx
   ON public.payout_operations (transaction_hash);
 
+-- -----------------------------------------------------------------------------
+-- Reward period status guard. Status must follow the lifecycle
+-- pending -> calculating -> approved -> distributed. NOT VALID preserves any
+-- legacy rows that do not match; new/changed rows are enforced.
+-- -----------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.reward_periods'::regclass
+      AND conname = 'reward_periods_status_check'
+  ) THEN
+    ALTER TABLE public.reward_periods
+      ADD CONSTRAINT reward_periods_status_check
+      CHECK (status IN ('pending', 'calculating', 'approved', 'distributed')) NOT VALID;
+  END IF;
+END $$;
+
 ALTER TABLE public.payout_operations ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.payout_operations FROM PUBLIC, anon, authenticated;
 GRANT ALL ON TABLE public.payout_operations TO service_role;
