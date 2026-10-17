@@ -605,6 +605,7 @@ BEGIN
     SELECT public.apply_reward_correction(
       v_correction_period,
       'Test correction preserving history',
+      200.00,
       jsonb_build_array(
         jsonb_build_object(
           'user_id', v_correction_user,
@@ -620,6 +621,22 @@ BEGIN
 
     IF (v_correction_result->>'inserted_rewards')::INT IS DISTINCT FROM 1 THEN
       RAISE EXCEPTION 'apply_reward_correction did not insert exactly one new reward (got %)', v_correction_result;
+    END IF;
+
+    IF (v_correction_result->>'period_status') IS DISTINCT FROM 'calculating' THEN
+      RAISE EXCEPTION 'apply_reward_correction did not return period_status calculating (got %)', v_correction_result;
+    END IF;
+
+    IF (v_correction_result->>'total_income')::DECIMAL(12,2) IS DISTINCT FROM 200.00 THEN
+      RAISE EXCEPTION 'apply_reward_correction did not return total_income 200.00 (got %)', v_correction_result;
+    END IF;
+
+    IF (SELECT status FROM public.reward_periods WHERE id = v_correction_period) IS DISTINCT FROM 'calculating' THEN
+      RAISE EXCEPTION 'apply_reward_correction did not set period status to calculating';
+    END IF;
+
+    IF (SELECT total_income FROM public.reward_periods WHERE id = v_correction_period) IS DISTINCT FROM 200.00 THEN
+      RAISE EXCEPTION 'apply_reward_correction did not set period total_income to 200.00';
     END IF;
 
     IF NOT EXISTS (
@@ -682,6 +699,7 @@ BEGIN
     SELECT public.apply_reward_correction(
       v_recalc_period,
       'Test correction before recalculation',
+      150.00,
       jsonb_build_array(
         jsonb_build_object(
           'user_id', v_recalc_user,
@@ -875,7 +893,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
     BEGIN;
     SELECT pg_advisory_xact_lock(0, hashtext('$RACE_PERIOD'::text));
     SELECT pg_sleep(1.5);
-    SELECT apply_reward_correction('$RACE_PERIOD'::UUID, 'race correction', '[{\"user_id\":\"$RACE_USER\",\"estimated_aud_value\":5.00,\"bitxbit_amount\":5.0}]'::jsonb);
+    SELECT apply_reward_correction('$RACE_PERIOD'::UUID, 'race correction', 500.00, '[{\"user_id\":\"$RACE_USER\",\"estimated_aud_value\":5.00,\"bitxbit_amount\":5.0}]'::jsonb);
     COMMIT;
   " >/dev/null
   echo done > "$RACE_DONE"
@@ -949,7 +967,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
     BEGIN;
     SELECT pg_advisory_xact_lock(0, hashtext('$RACE2_PERIOD'::text));
     SELECT pg_sleep(1.5);
-    SELECT apply_reward_correction('$RACE2_PERIOD'::UUID, 'race2 correction', '[{\"user_id\":\"$RACE2_USER\",\"estimated_aud_value\":3.00,\"bitxbit_amount\":3.0}]'::jsonb);
+    SELECT apply_reward_correction('$RACE2_PERIOD'::UUID, 'race2 correction', 300.00, '[{\"user_id\":\"$RACE2_USER\",\"estimated_aud_value\":3.00,\"bitxbit_amount\":3.0}]'::jsonb);
     COMMIT;
   " >/dev/null
 ) &

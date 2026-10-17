@@ -72,6 +72,7 @@ GRANT EXECUTE ON FUNCTION public.claim_payout_operation(TEXT, UUID) TO service_r
 CREATE OR REPLACE FUNCTION public.apply_reward_correction(
   p_period_id UUID,
   p_reason TEXT,
+  p_total_income DECIMAL(12,2),
   p_new_rewards JSONB
 )
 RETURNS JSONB
@@ -88,6 +89,9 @@ DECLARE
 BEGIN
   IF p_period_id IS NULL OR p_reason IS NULL OR p_reason = '' THEN
     RAISE EXCEPTION 'period and reason are required';
+  END IF;
+  IF p_total_income IS NULL THEN
+    RAISE EXCEPTION 'total income is required';
   END IF;
 
   -- Serialize all period-scoped mutation: corrections, claims, and recalculations
@@ -130,10 +134,6 @@ BEGIN
     AND superseded_at IS NULL;
   GET DIAGNOSTICS v_superseded_count = ROW_COUNT;
 
-  UPDATE public.reward_periods
-  SET status = 'pending', total_income = 0
-  WHERE id = p_period_id;
-
   INSERT INTO public.user_rewards (
     user_id,
     reward_period_id,
@@ -157,18 +157,27 @@ BEGIN
   FROM jsonb_array_elements(p_new_rewards) AS r;
   GET DIAGNOSTICS v_inserted_count = ROW_COUNT;
 
+  -- Update the period's totals and status inside the same transaction so the
+  -- application never sees committed reward changes with stale financial data.
+  UPDATE public.reward_periods
+  SET status = 'calculating',
+      total_income = p_total_income
+  WHERE id = p_period_id;
+
   RETURN jsonb_build_object(
     'correction_id', v_correction_id,
     'cancelled_payouts', v_cancelled_count,
     'superseded_rewards', v_superseded_count,
-    'inserted_rewards', v_inserted_count
+    'inserted_rewards', v_inserted_count,
+    'period_status', 'calculating',
+    'total_income', p_total_income
   );
 END;
 $$;
 
-ALTER FUNCTION public.apply_reward_correction(UUID, TEXT, JSONB) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.apply_reward_correction(UUID, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.apply_reward_correction(UUID, TEXT, JSONB) TO service_role;
+ALTER FUNCTION public.apply_reward_correction(UUID, TEXT, DECIMAL(12,2), JSONB) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.apply_reward_correction(UUID, TEXT, DECIMAL(12,2), JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.apply_reward_correction(UUID, TEXT, DECIMAL(12,2), JSONB) TO service_role;
 
 -- -----------------------------------------------------------------------------
 -- Reward recalculation should also contend for the same period lock, preventing

@@ -723,11 +723,15 @@ export async function correctRewards(periodId: string, reason: string) {
         bitxbit_amount: r.bitxbit_amount,
       }));
 
+      // Apply the correction atomically inside the database. The RPC cancels safe
+      // payouts, supersedes prior reward records, inserts new versioned records,
+      // and updates the period status and total_income in the same transaction.
       const { data: correctionResult, error: correctionError } = await supabase.rpc(
         "apply_reward_correction",
         {
           p_period_id: periodId,
           p_reason: reason.trim(),
+          p_total_income: totalIncome,
           p_new_rewards: newRewardsJson,
         }
       );
@@ -739,11 +743,6 @@ export async function correctRewards(periodId: string, reason: string) {
         }
         throw correctionError;
       }
-
-      await supabase
-        .from("reward_periods")
-        .update({ total_income: totalIncome, status: "calculating" })
-        .eq("id", periodId);
 
       return {
         totalIncome,
