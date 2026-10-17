@@ -9,9 +9,9 @@ export const PUBLIC_RATE_LIMIT = {
   keyPrefix: "api:public",
 };
 
-export function checkPublicRateLimit(request: NextRequest) {
+export async function checkPublicRateLimit(request: NextRequest) {
   const identifier = getClientIdentifier(request);
-  const result = checkRateLimit(identifier, PUBLIC_RATE_LIMIT);
+  const result = await checkRateLimit(identifier, PUBLIC_RATE_LIMIT);
   if (!result.allowed) {
     return rateLimitResponse(result.resetAt);
   }

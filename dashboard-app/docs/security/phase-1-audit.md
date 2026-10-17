@@ -130,7 +130,8 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 
 - Added `lib/rate-limit.ts` with a per-IP sliding-window rate limiter and `429 Too Many Requests` responses.
   - `getClientIdentifier()` prefers the Netlify-trusted `x-nf-client-connection-ip` header; falls back to `x-forwarded-for` only when `TRUST_PROXY=true` or `RATE_LIMIT_TRUST_PROXY=true`; otherwise uses the runtime-provided `request.ip`. This prevents clients from spoofing their IP to bypass rate limiting.
-  - The in-memory store is documented as a single-instance throttle; the migration-and-recovery guide recommends upgrading to a shared store (Redis or Supabase-backed) when scaling beyond one serverless function instance.
+  - `checkRateLimit()` now delegates to a pluggable `RateLimitStore`. The default is an in-memory store suitable for local development and single-instance deployments.
+  - When `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set, the shared `UpstashRedisRateLimitStore` is used automatically, giving consistent limits across all serverless function instances. The Redis store uses an atomic Lua script (`INCR` + `PTTL`) so concurrent functions cannot over-allocate requests.
 - Applied rate limiting to every public API route (`/api/public/*`), `/api/token-stats`, and the authenticated `/api/wallet/rewards` route.
 - Added referral-code length validation (`≤ 64` characters) to `/api/public/resolve-referral` and UUID validation for the OAuth callback `ref` parameter.
 - Ensured public routes return generic error messages; internal Supabase/RPC errors are logged server-side only.
@@ -156,12 +157,12 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 - `lib/security-mutations.test.ts` — promotion/demotion classification, UUID/enum validation, bulk-id bounds, self-removal prevention, last-security-admin protection, trusted-click dedupe.
 - `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
 - `lib/payout.test.ts` — exact token-unit conversion and round-trips.
-- `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, and trusted-proxy client-identifier selection.
+- `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, shared-store delegation, `MemoryRateLimitStore` unit tests, and trusted-proxy client-identifier selection.
 - `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010`, `011`, and `012`.
 
 ### Test results
 
-- `npm test` — 24/24 pass.
+- `npm test` — 39/39 pass.
 - `npm run test:migration` — pass.
 - `npm run build` (dummy env) — pass.
 
@@ -195,6 +196,6 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 - Application audit writes for user/profile/storage/wallet operations are currently separate from their underlying service-role mutation or external side effect. A process failure between mutation and audit can leave an unaudited success; use transactional database RPCs/outbox records for full atomicity in a later phase. Trusted click ingestion itself is transactionally deduplicated in the database.
 - Bulk last-security-admin checks are enforced immediately before mutation but are not serialized across concurrent admin requests; move these mutations into a locking database RPC if concurrent security administration becomes common.
 - Execute the controlled dependency upgrade plan in `docs/security/dependency-audit.md`; do not use `npm audit fix --force`.
-- Replace the in-memory rate limiter with a shared store (Redis or Supabase-backed) if the app is deployed across multiple serverless functions.
+- Configure `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to enable the shared `UpstashRedisRateLimitStore` if the app is deployed across multiple Netlify serverless functions.
 - Conduct a staging end-to-end smoke test of wallet verification, airdrop idempotency, and admin capability enforcement before production.
 - Obtain legal/regulatory sign-off before designing or enabling any One Good Turn promotional draw module.

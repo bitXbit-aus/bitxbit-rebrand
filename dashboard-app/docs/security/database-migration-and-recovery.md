@@ -218,12 +218,12 @@ Expected: `authenticated_select = false`, `service_role_all = true`, `confirmed_
 
 ## Rate limiting and proxy trust
 
-The current rate limiter uses an in-memory store and is suitable as a single-instance abuse throttle. Counters are not shared across serverless function instances, so a determined distributed attacker can exceed the per-IP limit by hitting different instances.
+The rate limiter supports a pluggable store. The default `MemoryRateLimitStore` is suitable for local development or a single-instance deployment. On Netlify serverless functions, multiple instances may run concurrently; an in-memory store lets a determined distributed attacker exceed the per-IP limit by hitting different instances.
 
 Before production load:
 
 1. Set `TRUST_PROXY=true` (or `RATE_LIMIT_TRUST_PROXY=true`) **only** when the deployment is behind a trusted proxy that sanitizes `X-Forwarded-For`. On Netlify the runtime uses `x-nf-client-connection-ip` automatically, so no extra variable is required.
-2. Replace the in-memory store with a shared backend (Redis, Upstash, or a Supabase-backed counter) if the app is served by more than one concurrent function instance. The `RateLimitOptions` interface and `checkRateLimit` signature can wrap either store without changing callers.
+2. Configure a shared store. The codebase includes `UpstashRedisRateLimitStore` (`lib/rate-limit-redis.ts`), which is selected automatically when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set. It uses an atomic Lua script (`INCR` + `PTTL`) so concurrent function instances cannot over-allocate requests. No caller changes are required; `checkRateLimit()` and `RateLimitOptions` are unchanged.
 
 ## Session-level behavior tests
 

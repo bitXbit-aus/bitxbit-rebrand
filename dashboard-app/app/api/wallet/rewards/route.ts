@@ -10,7 +10,7 @@ const WALLET_REWARDS_RATE_LIMIT = {
 
 export async function GET(request: NextRequest) {
   const identifier = getClientIdentifier(request);
-  const rateLimit = checkRateLimit(identifier, WALLET_REWARDS_RATE_LIMIT);
+  const rateLimit = await checkRateLimit(identifier, WALLET_REWARDS_RATE_LIMIT);
   if (!rateLimit.allowed) {
     return rateLimitResponse(rateLimit.resetAt);
   }

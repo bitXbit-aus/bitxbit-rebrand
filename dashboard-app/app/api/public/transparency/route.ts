@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const rateLimited = checkPublicRateLimit(request);
+  const rateLimited = await checkPublicRateLimit(request);
   if (rateLimited) return rateLimited;
 
   const supabase = createServiceClient();

@@ -1,18 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
+import { MemoryRateLimitStore, RateLimitResult, RateLimitStore } from "./rate-limit-store";
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
+let sharedStore: RateLimitStore | undefined;
 
-const inMemoryStore = new Map<string, RateLimitEntry>();
+/**
+ * Returns the shared rate-limit store for this process. When Upstash Redis
+ * credentials are configured, uses Redis so limits are shared across all
+ * serverless function instances. Otherwise falls back to an in-memory store.
+ */
+export function getRateLimitStore(): RateLimitStore {
+  if (!sharedStore) {
+    const url = process.env.UPSTASH_REDIS_REST_URL;
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-function cleanupExpiredEntries(now: number) {
-  for (const [key, entry] of inMemoryStore.entries()) {
-    if (entry.resetAt <= now) {
-      inMemoryStore.delete(key);
+    if (url && token) {
+      // Dynamic import keeps the Redis dependency out of the default bundle
+      // path and avoids eagerly loading it when only the memory store is used.
+      const { UpstashRedisRateLimitStore } = require("./rate-limit-redis");
+      sharedStore = new UpstashRedisRateLimitStore({ url, token });
+    } else {
+      sharedStore = new MemoryRateLimitStore();
     }
   }
+  // sharedStore is always initialized above; TypeScript cannot see through the
+  // dynamic require, so we assert non-null.
+  return sharedStore!;
+}
+
+/**
+ * Test hook to inject a custom store. Calling without arguments restores the
+ * default store selection.
+ */
+export function setRateLimitStore(store?: RateLimitStore): void {
+  sharedStore = store;
 }
 
 export interface RateLimitOptions {
@@ -46,32 +66,13 @@ export function getClientIdentifier(request: NextRequest): string {
   return request.ip ?? "anonymous";
 }
 
-export function checkRateLimit(
+export async function checkRateLimit(
   identifier: string,
   options: RateLimitOptions
-): { allowed: boolean; remaining: number; resetAt: number } {
-  const now = Date.now();
-  cleanupExpiredEntries(now);
-
+): Promise<RateLimitResult> {
   const key = `${options.keyPrefix ?? "rl"}:${identifier}`;
-  const entry = inMemoryStore.get(key);
-
-  if (!entry || entry.resetAt <= now) {
-    const resetAt = now + options.windowMs;
-    inMemoryStore.set(key, { count: 1, resetAt });
-    return { allowed: true, remaining: options.maxRequests - 1, resetAt };
-  }
-
-  if (entry.count >= options.maxRequests) {
-    return { allowed: false, remaining: 0, resetAt: entry.resetAt };
-  }
-
-  entry.count += 1;
-  return {
-    allowed: true,
-    remaining: options.maxRequests - entry.count,
-    resetAt: entry.resetAt,
-  };
+  const store = getRateLimitStore();
+  return store.increment(key, options.windowMs, options.maxRequests);
 }
 
 export function rateLimitResponse(

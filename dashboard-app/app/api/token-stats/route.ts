@@ -53,7 +53,7 @@ async function fetchHolderCountViaRpc(): Promise<number | null> {
 
 export async function GET(request: NextRequest) {
   const identifier = getClientIdentifier(request);
-  const rateLimit = checkRateLimit(identifier, TOKEN_STATS_RATE_LIMIT);
+  const rateLimit = await checkRateLimit(identifier, TOKEN_STATS_RATE_LIMIT);
   if (!rateLimit.allowed) {
     return rateLimitResponse(rateLimit.resetAt);
   }

@@ -14,7 +14,7 @@ const MAX_CODE_LENGTH = 64;
 
 export async function GET(request: NextRequest) {
   const identifier = getClientIdentifier(request);
-  const rateLimit = checkRateLimit(identifier, RESOLVE_RATE_LIMIT);
+  const rateLimit = await checkRateLimit(identifier, RESOLVE_RATE_LIMIT);
   if (!rateLimit.allowed) {
     return rateLimitResponse(rateLimit.resetAt);
   }
