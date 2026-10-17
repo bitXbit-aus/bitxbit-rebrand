@@ -10,6 +10,7 @@ MIGRATION_012="$ROOT_DIR/supabase/migrations/012_secure_token_distribution.sql"
 MIGRATION_013="$ROOT_DIR/supabase/migrations/013_payout_hardening.sql"
 MIGRATION_014="$ROOT_DIR/supabase/migrations/014_reward_correction_history.sql"
 MIGRATION_015="$ROOT_DIR/supabase/migrations/015_payout_incident_state.sql"
+MIGRATION_016="$ROOT_DIR/supabase/migrations/016_reward_calculation_history_safe.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -43,6 +44,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_012" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -54,6 +56,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_012" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -477,6 +480,87 @@ BEGIN
     -- After correction the payout operation should be cancelled, not claimable.
     IF (SELECT status FROM public.payout_operations WHERE operation_id = 'payout:test-period:corrected-reward') IS DISTINCT FROM 'cancelled' THEN
       RAISE EXCEPTION 'pending payout was not cancelled during correction';
+    END IF;
+
+  END;
+
+  -- Recalculating after a correction must preserve the superseded historical
+  -- record. apply_reward_calculation deletes only active records.
+  DECLARE
+    v_recalc_user UUID := '99999999-9999-4999-8999-999999999999';
+    v_recalc_period UUID := 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    v_original_recalc_reward UUID;
+    v_recalc_result JSONB;
+    v_recalc_reward UUID;
+    v_superseded_count INT;
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_recalc_user, 'recalc-test@example.test');
+
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_recalc_period, '2026-03-01', '2026-03-31', '55555555-5555-4555-8555-555555555555', 'approved');
+
+    INSERT INTO public.user_rewards (
+      id, user_id, reward_period_id, bitxbit_amount, status
+    ) VALUES (
+      '99999999-9999-4999-9999-999999999999', v_recalc_user, v_recalc_period, 1.5, 'approved'
+    ) RETURNING id INTO v_original_recalc_reward;
+
+    -- Apply a correction (no payout operations, so correction is allowed).
+    SELECT public.apply_reward_correction(
+      v_recalc_period,
+      'Test correction before recalculation',
+      jsonb_build_array(
+        jsonb_build_object(
+          'user_id', v_recalc_user,
+          'estimated_aud_value', 2.00,
+          'bitxbit_amount', 2.0000
+        )
+      )
+    ) INTO v_recalc_result;
+
+    IF (v_recalc_result->>'superseded_rewards')::INT IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'apply_reward_correction did not supersede exactly one reward (got %)', v_recalc_result;
+    END IF;
+
+    -- Recalculate. The superseded record must remain; a new active record is created.
+    SELECT public.apply_reward_calculation(
+      v_recalc_period,
+      100.00,
+      jsonb_build_array(
+        jsonb_build_object(
+          'user_id', v_recalc_user,
+          'estimated_aud_value', 3.00,
+          'bitxbit_amount', 3.0000
+        )
+      )
+    ) INTO v_recalc_result;
+
+    IF (v_recalc_result->>'inserted_rewards')::INT IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'apply_reward_calculation did not insert exactly one reward (got %)', v_recalc_result;
+    END IF;
+
+    SELECT COUNT(*) INTO v_superseded_count
+    FROM public.user_rewards
+    WHERE reward_period_id = v_recalc_period AND user_id = v_recalc_user AND status = 'superseded';
+
+    IF v_superseded_count <> 1 THEN
+      RAISE EXCEPTION 'recalculation deleted the superseded historical reward (count=%)', v_superseded_count;
+    END IF;
+
+    SELECT id INTO v_recalc_reward
+    FROM public.user_rewards
+    WHERE reward_period_id = v_recalc_period AND user_id = v_recalc_user AND superseded_at IS NULL;
+
+    IF v_recalc_reward IS NULL THEN
+      RAISE EXCEPTION 'recalculation did not create a new active reward';
+    END IF;
+
+    -- The new active record should be version 2: v1 was superseded by the
+    -- correction, v2 was the active record deleted by recalculation, and the
+    -- new record continues the sequence.
+    IF (SELECT version FROM public.user_rewards WHERE id = v_recalc_reward) IS DISTINCT FROM 2 THEN
+      RAISE EXCEPTION 'new recalculated reward did not receive version 2 (got %)',
+        (SELECT version FROM public.user_rewards WHERE id = v_recalc_reward);
     END IF;
   END;
 

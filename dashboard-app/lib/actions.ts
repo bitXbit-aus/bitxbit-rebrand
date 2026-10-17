@@ -623,14 +623,20 @@ async function executeRewardCalculation(
     return { totalIncome, recipients: 0 };
   }
 
-  await supabase.from("user_rewards").delete().eq("reward_period_id", periodId);
-  const { error: insertError } = await supabase.from("user_rewards").insert(rewards);
-  if (insertError) throw insertError;
+  // Use the atomic RPC so only active records are replaced; superseded
+  // historical records are preserved.
+  const newRewardsJson = rewards.map((r) => ({
+    user_id: r.user_id,
+    estimated_aud_value: r.estimated_aud_value,
+    bitxbit_amount: r.bitxbit_amount,
+  }));
 
-  await supabase
-    .from("reward_periods")
-    .update({ total_income: totalIncome, status: "calculating" })
-    .eq("id", periodId);
+  const { error: calcError } = await supabase.rpc("apply_reward_calculation", {
+    p_period_id: periodId,
+    p_total_income: totalIncome,
+    p_new_rewards: newRewardsJson,
+  });
+  if (calcError) throw calcError;
 
   return { totalIncome, recipients: rewards.length };
 }
