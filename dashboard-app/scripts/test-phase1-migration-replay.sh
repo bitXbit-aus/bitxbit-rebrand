@@ -134,8 +134,45 @@ BEGIN
     END IF;
   END;
 
+  -- Atomic wallet verification via verify_wallet_challenge consumes the signed
+  -- challenge and updates the address + verified flag together. The trigger
+  -- must preserve wallet_verified = TRUE, not reset it.
+  UPDATE public.users SET wallet_address = NULL, wallet_verified = FALSE, wallet_verified_at = NULL WHERE id = test_user;
+
+  INSERT INTO public.wallet_verification_challenges (
+    user_id, wallet_address, nonce, message, expires_at
+  ) VALUES (
+    test_user, test_wallet, 'verify-wallet-challenge-nonce', 'test-message', NOW() + INTERVAL '5 minutes'
+  );
+
+  SELECT public.verify_wallet_challenge(test_user, test_wallet, 'verify-wallet-challenge-nonce') INTO consumed;
+  IF consumed IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'verify_wallet_challenge did not return TRUE';
+  END IF;
+
+  IF (SELECT wallet_address FROM public.users WHERE id = test_user) IS DISTINCT FROM test_wallet THEN
+    RAISE EXCEPTION 'verify_wallet_challenge did not update wallet_address';
+  END IF;
+
+  IF (SELECT wallet_verified FROM public.users WHERE id = test_user) IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'verify_wallet_challenge did not preserve wallet_verified=true (trigger bug)';
+  END IF;
+
+  IF (SELECT wallet_verified_at FROM public.users WHERE id = test_user) IS NULL THEN
+    RAISE EXCEPTION 'verify_wallet_challenge did not set wallet_verified_at';
+  END IF;
+
+  -- A reused nonce must fail after verify_wallet_challenge consumed it.
+  BEGIN
+    SELECT public.verify_wallet_challenge(test_user, test_wallet, 'verify-wallet-challenge-nonce') INTO consumed;
+    RAISE EXCEPTION 'verify_wallet_challenge accepted a reused nonce';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'verify_wallet_challenge accepted a reused nonce' THEN
+      RAISE;
+    END IF;
+  END;
+
   -- Updating wallet_address resets verification via trigger.
-  UPDATE public.users SET wallet_verified = TRUE, wallet_verified_at = NOW() WHERE id = test_user;
   UPDATE public.users SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH6' WHERE id = test_user;
   IF (SELECT wallet_verified FROM public.users WHERE id = test_user) IS DISTINCT FROM FALSE THEN
     RAISE EXCEPTION 'wallet address change did not reset verification status';

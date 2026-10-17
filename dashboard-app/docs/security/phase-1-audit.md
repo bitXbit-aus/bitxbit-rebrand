@@ -55,14 +55,15 @@ Migration `011_wallet_verification.sql`:
 - Adds `public.wallet_verification_challenges` with a unique nonce, the exact message to sign, expiry, and used/verified timestamps.
 - Adds `users.wallet_verified` and `users.wallet_verified_at`, backfills existing addresses as `FALSE`, and protects these columns via RLS (members cannot write them directly).
 - Provides `public.consume_wallet_verification_challenge(UUID, TEXT, TEXT)` as a SECURITY DEFINER function that atomically locks, validates, and consumes a challenge exactly once.
-- Adds `sync_wallet_verification_status()` trigger that resets `wallet_verified` whenever `wallet_address` changes, preventing an unverified substitution from inheriting a previous verified flag.
+- Provides `public.verify_wallet_challenge(UUID, TEXT, TEXT)` as a SECURITY DEFINER function that consumes the signed challenge and updates the payout address + verified flag together inside a single database transaction.
+- Adds `sync_wallet_verification_status()` trigger that resets `wallet_verified` whenever `wallet_address` changes, preventing an unverified substitution from inheriting a previous verified flag. The verification function performs the address update and the verification update as two statements within the same transaction, so the final state is verified even though the trigger resets on the first statement.
 
 Application changes:
 
 - New server-only `lib/wallet-crypto.ts` builds a SIWS-compatible message and verifies Ed25519 detached signatures using `tweetnacl` and `@solana/web3.js`.
 - New server-only `lib/wallet-verification.ts` exposes:
   - `requestWalletVerificationChallenge(walletAddress)` — creates a 5-minute, single-use challenge after `requireActiveUser()`.
-  - `verifyWalletSignature(walletAddress, signatureBase58, nonce)` — validates the challenge, verifies the signature, consumes the nonce atomically, and persists the verified wallet.
+  - `verifyWalletSignature()` in `lib/wallet-verification.ts` validates the challenge, verifies the signature, and calls `public.verify_wallet_challenge()` so the nonce consumption, address update, and verified-flag update happen atomically inside the database.
   - `getWalletVerificationStatus()` — returns the member's current saved/verified state.
 - `saveWalletAddress()` in `lib/actions.ts` now rejects address changes; it only permits idempotent re-saving of the currently verified address. All payout-address changes must go through `verifyWalletSignature`.
 - `/dashboard/wallet/page.tsx` no longer treats connection as verification. It displays verification status, shows a "Verify Ownership" button when the connected wallet differs from the saved address or is unverified, and signs the SIWS message with the wallet adapter before submitting it server-side.

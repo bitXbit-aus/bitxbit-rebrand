@@ -138,30 +138,22 @@ export async function verifyWalletSignature(
     throw new Error("Signature verification failed.");
   }
 
-  // Atomically consume the challenge and persist the verified wallet.
-  const { error: consumeError } = await supabase.rpc("consume_wallet_verification_challenge", {
+  // Atomic database-controlled verification: consume the signed challenge and
+  // update the verified payout address together inside a single database
+  // function. The function performs the address change (which resets
+  // wallet_verified via trigger) and then sets wallet_verified = TRUE as a
+  // second statement within the same transaction.
+  const { data: verified, error: verifyError } = await supabase.rpc("verify_wallet_challenge", {
     p_user_id: context.user.id,
     p_wallet_address: walletAddress,
     p_nonce: nonce,
   });
 
-  if (consumeError) {
-    throw new Error(`Failed to record wallet verification: ${consumeError.message}`);
+  if (verifyError || verified !== true) {
+    throw new Error(`Failed to record wallet verification: ${verifyError?.message ?? "unknown error"}`);
   }
 
   const verifiedAt = new Date().toISOString();
-  const { error: updateError } = await supabase
-    .from("users")
-    .update({
-      wallet_address: walletAddress,
-      wallet_verified: true,
-      wallet_verified_at: verifiedAt,
-    })
-    .eq("id", context.user.id);
-
-  if (updateError) {
-    throw new Error(`Failed to save verified wallet: ${updateError.message}`);
-  }
 
   await writeSecurityAudit(context, {
     action: "wallet.verified",

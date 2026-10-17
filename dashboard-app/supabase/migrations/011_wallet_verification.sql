@@ -101,10 +101,62 @@ GRANT EXECUTE ON FUNCTION public.consume_wallet_verification_challenge(UUID, TEX
   TO service_role;
 
 -- -----------------------------------------------------------------------------
+-- Atomic wallet verification: consume a signed challenge and update the
+-- verified payout address in a single database operation.
+-- This is the only code path that is allowed to set wallet_verified = TRUE.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.verify_wallet_challenge(
+  p_user_id UUID,
+  p_wallet_address TEXT,
+  p_nonce TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  consumed BOOLEAN;
+BEGIN
+  IF p_user_id IS NULL OR p_wallet_address IS NULL OR p_nonce IS NULL THEN
+    RAISE EXCEPTION 'invalid wallet verification parameters';
+  END IF;
+
+  -- Consume the challenge first; raises on invalid/expired/reused challenge.
+  consumed := public.consume_wallet_verification_challenge(p_user_id, p_wallet_address, p_nonce);
+
+  IF consumed IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'wallet challenge could not be consumed';
+  END IF;
+
+  -- Atomic verification: the address change resets wallet_verified via trigger,
+  -- then the second UPDATE sets it TRUE inside the same transaction. This is the
+  -- only database path that can end with wallet_verified = TRUE for a new address.
+  UPDATE public.users
+  SET wallet_address = p_wallet_address
+  WHERE id = p_user_id;
+
+  UPDATE public.users
+  SET wallet_verified = TRUE,
+      wallet_verified_at = NOW()
+  WHERE id = p_user_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+ALTER FUNCTION public.verify_wallet_challenge(UUID, TEXT, TEXT) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.verify_wallet_challenge(UUID, TEXT, TEXT)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.verify_wallet_challenge(UUID, TEXT, TEXT)
+  TO service_role;
+
+-- -----------------------------------------------------------------------------
 -- Trigger to keep wallet_verified in sync when wallet_address changes.
 -- If the wallet address is cleared or changed without a verified challenge,
--- verification is reset. Verified challenges are the only authoritative source
--- of wallet_verified = TRUE.
+-- verification is reset. The only authoritative source of wallet_verified = TRUE
+-- is verify_wallet_challenge(), which performs the address update and the
+-- verification update as two statements inside a single atomic transaction.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.sync_wallet_verification_status()
 RETURNS TRIGGER
