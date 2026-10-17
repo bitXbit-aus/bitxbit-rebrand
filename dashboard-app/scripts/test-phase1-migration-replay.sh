@@ -9,6 +9,7 @@ MIGRATION_011="$ROOT_DIR/supabase/migrations/011_wallet_verification.sql"
 MIGRATION_012="$ROOT_DIR/supabase/migrations/012_secure_token_distribution.sql"
 MIGRATION_013="$ROOT_DIR/supabase/migrations/013_payout_hardening.sql"
 MIGRATION_014="$ROOT_DIR/supabase/migrations/014_reward_correction_history.sql"
+MIGRATION_015="$ROOT_DIR/supabase/migrations/015_payout_incident_state.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -41,6 +42,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_012" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -51,6 +53,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_012" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -368,6 +371,30 @@ BEGIN
     SELECT public.claim_payout_operation('payout:test-period:cancelled-reward', test_user) INTO cancelled_claim;
     IF cancelled_claim IS NOT NULL THEN
       RAISE EXCEPTION 'cancelled operation was allowed to be claimed';
+    END IF;
+  END;
+
+  -- Incident payouts are non-retryable. A confirmed on-chain mismatch must not
+  -- be claimable for retry and must be immutable.
+  INSERT INTO public.payout_operations (
+    operation_id, reward_period_id, reward_id, user_id, wallet_address, token_amount_raw, token_decimals, status, actor_id, incident_at
+  ) VALUES ('payout:test-period:incident-reward', test_period, test_reward, test_user, test_wallet, 1500000000, 9, 'incident', test_user, NOW());
+
+  DECLARE
+    incident_claim UUID;
+  BEGIN
+    SELECT public.claim_payout_operation('payout:test-period:incident-reward', test_user) INTO incident_claim;
+    IF incident_claim IS NOT NULL THEN
+      RAISE EXCEPTION 'incident operation was allowed to be claimed';
+    END IF;
+  END;
+
+  BEGIN
+    UPDATE public.payout_operations SET status = 'failed' WHERE operation_id = 'payout:test-period:incident-reward';
+    RAISE EXCEPTION 'incident payout operation status was mutated';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'incident payout operation status was mutated' THEN
+      RAISE;
     END IF;
   END;
 

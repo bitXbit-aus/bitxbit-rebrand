@@ -1157,7 +1157,7 @@ export async function airdropRewards(periodId: string) {
 
       async function reconcileSubmittedOperation(
         op: NonNullable<typeof existingOps>[number]
-      ): Promise<"confirmed" | "uncertain" | "failed"> {
+      ): Promise<"confirmed" | "uncertain" | "failed" | "incident"> {
         if (!op.transaction_hash) return "uncertain";
         const confirmation = await confirmTokenTransfer(
           op.transaction_hash,
@@ -1165,6 +1165,21 @@ export async function airdropRewards(periodId: string) {
           op.wallet_address,
           op.token_amount_raw
         );
+        if (confirmation.incident) {
+          const { error: incidentError } = await supabase
+            .from("payout_operations")
+            .update({
+              status: "incident",
+              submission_error: `On-chain incident: ${confirmation.verificationError}`,
+              incident_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", op.operation_id);
+          if (incidentError) throw incidentError;
+
+          op.status = "incident";
+          return "incident";
+        }
         if (confirmation.confirmed) {
           const { error: confirmError } = await supabase
             .from("payout_operations")
@@ -1302,6 +1317,10 @@ export async function airdropRewards(periodId: string) {
             incrementSkip("uncertain_requires_reconciliation");
             continue;
           }
+          if (outcome === "incident") {
+            incrementSkip("incident_requires_investigation");
+            continue;
+          }
         }
 
         if (existing.status === "submitting") {
@@ -1334,6 +1353,7 @@ export async function airdropRewards(periodId: string) {
           submitted: 0,
           confirmed: confirmedCount,
           uncertain: 0,
+          incidents: 0,
           reconciliationFailures: 0,
           skipped: Object.fromEntries(skipped),
         };
@@ -1461,12 +1481,28 @@ export async function airdropRewards(periodId: string) {
 
       let confirmedFromBroadcast = 0;
       let reconciliationFailures = 0;
+      let incidentCount = 0;
 
       for (const submission of distributions) {
         const meta = rewardMeta.get(submission.operationId);
         if (!meta || !submission.txHash) continue;
 
         const confirmation = await confirmPayoutSubmission(submission, sourceWalletAddress);
+
+        if (confirmation.incident) {
+          const { error: incidentError } = await supabase
+            .from("payout_operations")
+            .update({
+              status: "incident",
+              submission_error: `On-chain incident: ${confirmation.verificationError}`,
+              incident_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("operation_id", submission.operationId);
+          if (incidentError) throw incidentError;
+          incidentCount++;
+          continue;
+        }
 
         if (confirmation.confirmed) {
           const { error: confirmError } = await supabase
@@ -1538,6 +1574,7 @@ export async function airdropRewards(periodId: string) {
         submitted: submittedCount,
         confirmed: confirmedCount + confirmedFromBroadcast,
         uncertain: uncertainCount,
+        incidents: incidentCount,
         reconciliationFailures,
         skipped: Object.fromEntries(skipped),
       };

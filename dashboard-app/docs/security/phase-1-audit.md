@@ -83,13 +83,13 @@ The previous `airdropRewards()` action updated `user_rewards` rows directly from
 
 Migration `012_secure_token_distribution.sql`:
 
-- Adds `public.payout_operations` as the durable, idempotent record for every token distribution. Columns include a unique `operation_id`, reward period/reward/user references, exact `token_amount_raw` (smallest token units), `token_decimals`, status (`pending` → `submitted` → `confirmed`/`failed`/`cancelled`), `transaction_hash`, on-chain confirmation metadata, submission/error timestamps, and the acting admin `actor_id`.
-- Enforces `UNIQUE(operation_id)`, a status check constraint (`pending`, `submitting`, `submitted`, `confirmed`, `failed`, `cancelled`), and indexes on `(reward_period_id, status)`, `(reward_id, created_at DESC)`, and `(transaction_hash)`.
+- Adds `public.payout_operations` as the durable, idempotent record for every token distribution. Columns include a unique `operation_id`, reward period/reward/user references, exact `token_amount_raw` (smallest token units), `token_decimals`, status (`pending` → `submitting`/`submitted` → `confirmed`/`failed`/`cancelled`/`uncertain`/`incident`), `transaction_hash`, on-chain confirmation metadata, submission/error/incident timestamps, and the acting admin `actor_id`.
+- Enforces `UNIQUE(operation_id)`, a status check constraint (`pending`, `submitting`, `submitted`, `confirmed`, `failed`, `cancelled`, `uncertain`, `incident`), and indexes on `(reward_period_id, status)`, `(reward_id, created_at DESC)`, and `(transaction_hash)`.
 - Adds a `reward_periods_status_check` constraint limiting `reward_periods.status` to `pending`, `calculating`, `approved`, or `distributed`.
 - Revokes direct authenticated access; read access is admin-only via `is_active_admin()`. Writes go through service-role Server Actions after capability checks.
-- Adds `public.claim_payout_operation(TEXT, UUID)` — a `SECURITY DEFINER` function that atomically locks and moves a `pending`/`failed` operation to `submitting`, returning the operation ID only to the caller that wins the race. Concurrent callers receive `NULL`.
+- Adds `public.claim_payout_operation(TEXT, UUID)` — a `SECURITY DEFINER` function that atomically locks and moves a `pending`/`failed` operation to `submitting`, returning the operation ID only to the caller that wins the race. Concurrent callers receive `NULL`. Operations that are `submitting`, `submitted`, `uncertain`, `confirmed`, `cancelled`, or `incident` are non-retryable through this path.
 - Adds an audit trigger that writes every INSERT/UPDATE/DELETE on `payout_operations` to `security_audit_log`. The trigger is **fail-closed**: if the audit insert fails for any reason, the payout operation itself is aborted with `RAISE EXCEPTION`, so a financial state change can never commit without a durable audit record.
-- Adds `prevent_confirmed_payout_mutation()` trigger that rejects **any** `UPDATE` to a `confirmed` operation. Once confirmed, the entire row is immutable, not just its status.
+- Adds `prevent_confirmed_payout_mutation()` trigger that rejects **any** `UPDATE` to a `confirmed` or `incident` operation. Once confirmed or incident, the entire row is immutable, not just its status.
 
 Application changes:
 
@@ -100,25 +100,26 @@ Application changes:
   - `confirmTokenTransfer(txHash, sourceWalletAddress, walletAddress, amountRaw)` waits for a finalized or confirmed signature status, parses the SPL-token `transfer` instruction, and verifies the program ID (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`), the source ATA, the destination ATA, the transfer authority, and the exact raw amount against the expected payout. Only transfers that match the expected treasury source, token mint (via deterministic ATAs), recipient, and amount are accepted as confirmed.
 - `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). The deprecated `distributeTokens()` wrapper was removed so there is no non-idempotent legacy distribution path.
 - `calculateRewards()` in `lib/actions.ts` now refuses to recalculate a period whose status is `approved` or `distributed`, and refuses to recalculate any period that already has `payout_operations` rows. This prevents accidental overwriting of rewards after they have been approved or once payout activity has begun.
-- `correctRewards(periodId, reason)` is a new explicit audited correction process. It requires `manage_rewards`, validates a non-empty reason, rejects distributed periods, rejects periods with confirmed payouts, deletes any pending/failed/submitted payout operations, resets the period to `pending`, deletes existing `user_rewards`, and recalculates. The reason is captured in the audit log.
+- `correctRewards(periodId, reason)` is an explicit audited correction process. It requires `manage_rewards`, validates a non-empty reason, rejects distributed periods, and rejects periods with any payout in `submitting`, `submitted`, `uncertain`, `confirmed`, or `incident` state. Safe `pending`/`failed` payouts are cancelled with a reason instead of deleted, and `user_rewards` records are superseded rather than deleted so foreign-key integrity is preserved. The reason is captured in the audit log.
 - `approveRewards()` remains unchanged but now operates on a period that has been locked into the `calculating` state by `calculateRewards()` or `correctRewards()`.
 - `airdropRewards()` in `lib/actions.ts` now:
   - Requires `manage_rewards` capability.
   - Verifies the reward period is `approved`.
   - Loads approved rewards joined to `users.wallet_address` and `users.wallet_verified`.
   - Skips unverified, missing, invalid, or zero-amount destinations.
-  - Creates a deterministic `operation_id` (`payout:<periodId>:<rewardId>`) per reward. Existing `confirmed` operations are skipped; existing `submitted` operations are reconciled on-chain before any retry; existing `submitting` operations are left alone (no auto-retry); only `pending` or `failed` operations may be claimed.
+  - Creates a deterministic `operation_id` (`payout:<periodId>:<rewardId>`) per reward. Existing `confirmed` operations are skipped; existing `submitted` operations are reconciled on-chain before any retry; `submitting`, `uncertain`, and `incident` operations are left non-retryable; only `pending` or `failed` operations may be claimed.
   - Claims each eligible operation atomically via `public.claim_payout_operation()`. Only the winning caller may submit a blockchain transaction for that reward; concurrent callers receive `NULL` and skip the operation.
-  - Checks the treasury wallet's token and SOL balances using exact raw amounts for the claimed operations only.
-  - Submits transfers via `executePayoutTransfers` and immediately persists each returned transaction hash as `submitted`.
-  - Reconciles each submitted transfer on-chain via `confirmTokenTransfer`, updating operations to `confirmed` and `user_rewards` to `distributed` only after on-chain verification. Operations that cannot be confirmed (network outage, unknown status) remain `submitted` and are **not** automatically re-submitted; they require explicit reconciliation or manual review.
+  - Checks the treasury wallet's token and SOL balances using exact raw amounts for the candidate set **before** any operation is moved to `submitted`.
+  - Prepares each transfer with `preparePayoutSubmission()`, signs it, derives the transaction hash, and persists the signed transaction, hash, and last blockhash as `submitted` **before** broadcasting. The persistence result is checked; if it fails, the operation is recovered to `failed` and the signed transaction is never broadcast.
+  - Broadcasts via `broadcastPayoutSubmission()`. Broadcast errors move the operation to `uncertain` (not retryable) because the transaction may have already landed.
+  - Reconciles each broadcast transfer on-chain via `confirmPayoutSubmission`/`confirmTokenTransfer`. Matching transfers update operations to `confirmed` and `user_rewards` to `distributed`. Inconclusive outcomes remain `uncertain`. Verified on-chain failures return to `failed` (retryable only when non-execution is established). **Confirmed on-chain mismatches** — where the transaction landed but the recipient, amount, source, mint, or authority does not match — are moved to a separate non-retryable `incident` status so they cannot trigger an automatic replacement payment.
   - Updates the reward period to `distributed` only when every reward has a confirmed operation.
 - `sendTestAirdrop()` is now disabled unless `ENABLE_TEST_AIRDROP=true`, preventing accidental production outflows. It also confirms the test transfer on-chain before reporting success.
 - The manual "Mark Distributed" form and `distributeRewards()`/`distributeRewardsWithTx()` have been removed from `lib/actions.ts` and `app/admin/rewards/page.tsx`.
 
 ### Acceptance test
 
-An administrator cannot mark rewards distributed without an on-chain transfer. A reward cannot be paid twice for the same period because the deterministic `operation_id` is guarded by `claim_payout_operation()`: only one process can move an operation from `pending`/`failed` to `submitting`, and `submitted` operations are reconciled rather than re-submitted. A member whose wallet is unverified cannot receive a payout, and a transfer that reaches the blockchain but cannot be confirmed (network partition, dropped response) remains `submitted` and is never automatically retried as a new payment.
+An administrator cannot mark rewards distributed without an on-chain transfer. A reward cannot be paid twice for the same period because the deterministic `operation_id` is guarded by `claim_payout_operation()`: only one process can move an operation from `pending`/`failed` to `submitting`, and `submitted` operations are reconciled rather than re-submitted. A member whose wallet is unverified cannot receive a payout. A transfer that reaches the blockchain but cannot be confirmed (network partition, dropped response) moves to `uncertain` and is never automatically retried as a new payment. A confirmed on-chain transfer that does not match the expected recipient, amount, source, mint, or authority is moved to the non-retryable `incident` status and cannot trigger an automatic replacement payment.
 
 ## Task 5 — Strengthen database security
 
@@ -158,7 +159,7 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 - `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
 - `lib/payout.test.ts` — exact token-unit conversion and round-trips.
 - `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, shared-store delegation, `MemoryRateLimitStore` unit tests, and trusted-proxy client-identifier selection.
-- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010`, `011`, and `012`.
+- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `015`, including incident-state non-retryability and immutability.
 
 ### Test results
 
@@ -174,7 +175,7 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 
 1. **Security Audit Report** — this document.
 2. **Implemented Fixes** — working code on `security/phase-1-hardening`.
-3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`.
+3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`.
 4. **Wallet Authentication Upgrade** — `lib/wallet-crypto.ts`, `lib/wallet-verification.ts`, `app/dashboard/wallet/page.tsx`.
 5. **Token Distribution Improvements** — `lib/payout.ts`, hardened `airdropRewards()`, `payout_operations`.
 6. **Automated Test Results** — 24 unit tests + migration replay test passing.
@@ -186,7 +187,7 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 
 ## Remaining work
 
-- Apply and verify migrations `010`, `011`, and `012` in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification.
+- Apply and verify migrations `010` through `015` in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification.
 - Regenerate Supabase TypeScript database types after the migrations are applied to a linked project.
 - Migrate admin user-management reads and UI filtering from compatibility `users.role/status` to an authorized server-side join/view when convenient.
 - Add an explicit capability-management UI/action if delegated capability editing is required; any such action must use `manage_security` plus AAL2 and must retain the last-security-admin safeguards.

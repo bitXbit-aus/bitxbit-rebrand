@@ -55,6 +55,8 @@ export interface ConfirmationResult {
   verificationError?: string;
   /** true if the outcome is inconclusive and must not be treated as failure/ retryable */
   uncertain?: boolean;
+  /** true if the transaction landed on-chain but does not match the expected transfer. Non-retryable incident. */
+  incident?: boolean;
 }
 
 function getConnection(): Connection {
@@ -502,13 +504,16 @@ export async function confirmTokenTransfer(
 
     if (!match.found) {
       // The transaction is on-chain and parsed, but it does not contain the
-      // expected transfer. This is a verified mismatch, not an uncertain outcome.
+      // expected transfer. This is a verified mismatch: it may represent a real
+      // transfer to an unexpected destination and must not be retried
+      // automatically. Treat it as an incident requiring investigation.
       return {
         confirmed: false,
         uncertain: false,
+        incident: true,
         verificationError:
           match.error ||
-          "Transaction does not contain the expected source/mint/recipient/amount/authority",
+          "Transaction landed on-chain but does not match the expected source/mint/recipient/amount/authority",
       };
     }
 
