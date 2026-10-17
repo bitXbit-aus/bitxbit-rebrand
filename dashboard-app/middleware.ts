@@ -90,18 +90,18 @@ export async function middleware(request: NextRequest) {
   if (user && (isAdminRoute || isDashboardRoute) && !isActive) {
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("error", "account_inactive");
-    return NextResponse.redirect(loginUrl);
+    return applySecurityHeaders(NextResponse.redirect(loginUrl));
   }
 
   if (user && isAdminRoute && authorization?.role !== "admin") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return applySecurityHeaders(NextResponse.redirect(new URL("/dashboard", request.url)));
   }
 
   if (user && isAuthEntryRoute && isActive) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return applySecurityHeaders(NextResponse.redirect(new URL("/dashboard", request.url)));
   }
 
-  return response;
+  return applySecurityHeaders(response);
 }
 
 export const config = {
