@@ -172,14 +172,16 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 ## Deliverables
 
 1. **Security Audit Report** — this document.
-2. **Implemented Fixes** — working code on `security/phase-1-hardening` (commits `b087bad`, `af16085`, `66aab29`, `3cd8a64`, `ea0c301`).
+2. **Implemented Fixes** — working code on `security/phase-1-hardening`.
 3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`.
 4. **Wallet Authentication Upgrade** — `lib/wallet-crypto.ts`, `lib/wallet-verification.ts`, `app/dashboard/wallet/page.tsx`.
 5. **Token Distribution Improvements** — `lib/payout.ts`, hardened `airdropRewards()`, `payout_operations`.
-6. **Automated Test Results** — 20 unit tests + migration replay test passing.
-7. **Deployment and Recovery Guide** — `docs/security/database-migration-and-recovery.md`.
-8. **Dependency Audit** — `docs/security/dependency-audit.md`.
-9. **One Good Turn Integration Readiness Report** — `docs/security/one-good-turn-readiness.md`.
+6. **Automated Test Results** — 24 unit tests + migration replay test passing.
+7. **Continuous Integration** — `.github/workflows/dashboard-ci.yml` runs `npm test`, `npm run test:migration`, and `npm run build` on every push to `main`/`security/phase-1-hardening` and every PR to `main`.
+8. **Staging Smoke Test** — `scripts/staging-smoke-test.ts` and `docs/security/staging-smoke-test.md` for non-production verification of wallet verification, payout safeguards, trusted clicks, and audit logging.
+9. **Deployment and Recovery Guide** — `docs/security/database-migration-and-recovery.md`.
+10. **Dependency Audit** — `docs/security/dependency-audit.md`.
+11. **One Good Turn Integration Readiness Report** — `docs/security/one-good-turn-readiness.md`.
 
 ## Remaining work
 
