@@ -11,6 +11,7 @@ MIGRATION_013="$ROOT_DIR/supabase/migrations/013_payout_hardening.sql"
 MIGRATION_014="$ROOT_DIR/supabase/migrations/014_reward_correction_history.sql"
 MIGRATION_015="$ROOT_DIR/supabase/migrations/015_payout_incident_state.sql"
 MIGRATION_016="$ROOT_DIR/supabase/migrations/016_reward_calculation_history_safe.sql"
+MIGRATION_017="$ROOT_DIR/supabase/migrations/017_fix_user_rewards_active_uniqueness.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -45,6 +46,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -57,6 +59,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_013" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_014" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_015" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_016" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_017" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -562,6 +565,32 @@ BEGIN
       RAISE EXCEPTION 'new recalculated reward did not receive version 2 (got %)',
         (SELECT version FROM public.user_rewards WHERE id = v_recalc_reward);
     END IF;
+  END;
+
+  -- The active-reward uniqueness index must prevent two active records for the
+  -- same member and period, regardless of version.
+  DECLARE
+    v_unique_user UUID := 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    v_unique_period UUID := 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_unique_user, 'unique-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_unique_period, '2026-04-01', '2026-04-30', '55555555-5555-4555-8555-555555555555', 'approved');
+
+    INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+    VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1', v_unique_user, v_unique_period, 1.0, 'pending', 1);
+
+    BEGIN
+      INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+      VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2', v_unique_user, v_unique_period, 2.0, 'pending', 2);
+      RAISE EXCEPTION 'duplicate active reward was inserted';
+    EXCEPTION WHEN unique_violation THEN
+      NULL;
+    WHEN OTHERS THEN
+      IF SQLERRM = 'duplicate active reward was inserted' THEN
+        RAISE;
+      END IF;
+    END;
   END;
 
   -- Clean up payout operations so the subsequent auth.users deletion can cascade.

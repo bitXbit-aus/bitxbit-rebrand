@@ -101,7 +101,7 @@ Application changes:
 - `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). The deprecated `distributeTokens()` wrapper was removed so there is no non-idempotent legacy distribution path.
 - `calculateRewards()` in `lib/actions.ts` now refuses to recalculate a period whose status is `approved` or `distributed`, and refuses to recalculate any period that already has `payout_operations` rows. This prevents accidental overwriting of rewards after they have been approved or once payout activity has begun.
 - `calculateRewards()` now calls the atomic `apply_reward_calculation()` RPC. That RPC deletes only active (`superseded_at IS NULL`) `user_rewards` records and inserts new records with the next version per user, so any superseded historical records from prior corrections are preserved.
-- `correctRewards(periodId, reason)` is an explicit audited correction process. It requires `manage_rewards`, validates a non-empty reason, rejects distributed periods, and rejects periods with any payout in `submitting`, `submitted`, `uncertain`, `confirmed`, or `incident` state. Safe `pending`/`failed` payouts are cancelled with a reason instead of deleted, and `user_rewards` records are superseded rather than deleted so foreign-key integrity is preserved. The reason is captured in the audit log.
+- `correctRewards(periodId, reason)` is an explicit audited correction process. It requires `manage_rewards`, validates a non-empty reason, rejects distributed periods, and rejects periods with any payout in `submitting`, `submitted`, `uncertain`, `confirmed`, or `incident` state. Safe `pending`/`failed` payouts are cancelled with a reason instead of deleted, and `user_rewards` records are superseded rather than deleted so foreign-key integrity is preserved. The reason is captured in the audit log. Migration `017` corrects the active-reward uniqueness constraint so only one active `(reward_period_id, user_id)` pair is permitted.
 - `approveRewards()` remains unchanged but now operates on a period that has been locked into the `calculating` state by `calculateRewards()` or `correctRewards()`.
 - `airdropRewards()` in `lib/actions.ts` now:
   - Requires `manage_rewards` capability.
@@ -160,7 +160,7 @@ Public API routes exposed some internal fields (`source_url` on activity, user I
 - `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
 - `lib/payout.test.ts` — exact token-unit conversion and round-trips.
 - `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, shared-store delegation, `MemoryRateLimitStore` unit tests, and trusted-proxy client-identifier selection.
-- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `016`, including incident-state non-retryability, immutability, and recalculation preserving superseded reward history.
+- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `010` through `017`, including incident-state non-retryability, immutability, recalculation preserving superseded reward history, and active-reward uniqueness enforcement.
 
 ### Test results
 
@@ -176,7 +176,7 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 
 1. **Security Audit Report** — this document.
 2. **Implemented Fixes** — working code on `security/phase-1-hardening`.
-3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`, `016_reward_calculation_history_safe.sql`.
+3. **Supabase Security Migrations** — `010_phase1_security_foundation.sql`, `011_wallet_verification.sql`, `012_secure_token_distribution.sql`, `013_payout_hardening.sql`, `014_reward_correction_history.sql`, `015_payout_incident_state.sql`, `016_reward_calculation_history_safe.sql`, `017_fix_user_rewards_active_uniqueness.sql`.
 4. **Wallet Authentication Upgrade** — `lib/wallet-crypto.ts`, `lib/wallet-verification.ts`, `app/dashboard/wallet/page.tsx`.
 5. **Token Distribution Improvements** — `lib/payout.ts`, hardened `airdropRewards()`, `payout_operations`.
 6. **Automated Test Results** — 24 unit tests + migration replay test passing.
@@ -188,7 +188,7 @@ A separate architecture report, `docs/security/one-good-turn-readiness.md`, iden
 
 ## Remaining work
 
-- Apply and verify migrations `010` through `016` in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification.
+- Apply and verify migrations `010` through `017` in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification. Migration `017` will refuse to run if active duplicate `(reward_period_id, user_id)` pairs exist; resolve any such duplicates before applying it to an existing database.
 - Regenerate Supabase TypeScript database types after the migrations are applied to a linked project.
 - Migrate admin user-management reads and UI filtering from compatibility `users.role/status` to an authorized server-side join/view when convenient.
 - Add an explicit capability-management UI/action if delegated capability editing is required; any such action must use `manage_security` plus AAL2 and must retain the last-security-admin safeguards.
