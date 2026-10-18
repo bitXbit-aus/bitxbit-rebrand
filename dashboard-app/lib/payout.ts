@@ -63,6 +63,12 @@ function getConnection(): Connection {
   return new Connection(process.env.SOLANA_RPC_URL || SOLANA_RPC, "confirmed");
 }
 
+export type PayoutBroadcastTransport = Pick<Connection, "sendRawTransaction">;
+export type PayoutConfirmationTransport = Pick<
+  Connection,
+  "getSignatureStatus" | "getParsedTransaction"
+>;
+
 function getSigner(): Keypair {
   if (!PRIVATE_KEY) {
     throw new Error("AIRDROP_WALLET_PRIVATE_KEY is not configured");
@@ -207,7 +213,8 @@ export async function preparePayoutSubmission(
 }
 
 export async function broadcastPayoutSubmission(
-  submission: PayoutSubmission
+  submission: PayoutSubmission,
+  transport: PayoutBroadcastTransport = getConnection()
 ): Promise<PayoutSubmission> {
   if (!submission.signedTransactionBase58 || !submission.txHash) {
     return {
@@ -216,11 +223,10 @@ export async function broadcastPayoutSubmission(
     };
   }
 
-  const connection = getConnection();
   const rawTx = bs58.decode(submission.signedTransactionBase58);
 
   try {
-    await connection.sendRawTransaction(rawTx, {
+    await transport.sendRawTransaction(rawTx, {
       skipPreflight: false,
       preflightCommitment: "confirmed",
       maxRetries: 3,
@@ -241,7 +247,8 @@ export async function confirmPayoutSubmission(
   submission: PayoutSubmission,
   expectedSourceWalletAddress: string,
   timeoutMs = 60000,
-  pollIntervalMs = 2000
+  pollIntervalMs = 2000,
+  transport: PayoutConfirmationTransport = getConnection()
 ): Promise<ConfirmationResult & { txHash: string | null }> {
   if (!submission.txHash) {
     return {
@@ -252,11 +259,10 @@ export async function confirmPayoutSubmission(
     };
   }
 
-  const connection = getConnection();
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const status = await connection.getSignatureStatus(submission.txHash, {
+    const status = await transport.getSignatureStatus(submission.txHash, {
       searchTransactionHistory: true,
     });
 
@@ -279,7 +285,9 @@ export async function confirmPayoutSubmission(
           submission.txHash,
           expectedSourceWalletAddress,
           submission.walletAddress,
-          submission.amountRaw
+          submission.amountRaw,
+          MINT!,
+          transport
         );
         return { ...confirmation, txHash: submission.txHash };
       }
@@ -441,12 +449,11 @@ export async function confirmTokenTransfer(
   expectedSourceWalletAddress: string,
   expectedWalletAddress: string,
   expectedAmountRaw: bigint,
-  mintAddress: string = MINT!
+  mintAddress: string = MINT!,
+  transport: PayoutConfirmationTransport = getConnection()
 ): Promise<ConfirmationResult> {
-  const connection = getConnection();
-
   try {
-    const status = await connection.getSignatureStatus(txHash, { searchTransactionHistory: true });
+    const status = await transport.getSignatureStatus(txHash, { searchTransactionHistory: true });
 
     if (!status?.value) {
       // A missing signature status is not proof of non-execution. RPC nodes can
@@ -479,7 +486,7 @@ export async function confirmTokenTransfer(
     }
 
     // Parse the transaction to verify source, mint, recipient, and amount.
-    const tx = await connection.getParsedTransaction(txHash, {
+    const tx = await transport.getParsedTransaction(txHash, {
       commitment: "confirmed",
       maxSupportedTransactionVersion: 0,
     });

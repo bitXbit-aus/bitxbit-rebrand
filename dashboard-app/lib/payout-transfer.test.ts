@@ -298,6 +298,34 @@ describe("payout submission lifecycle", () => {
     assert.equal(result.txHash, null);
   });
 
+  it("broadcastPayoutSubmission uses the injected transport and preserves identity on outage", async () => {
+    const wallet = randomWallet();
+    let attempts = 0;
+    const result = await broadcastPayoutSubmission(
+      {
+        operationId: "op:injected-outage",
+        walletAddress: wallet.toBase58(),
+        amountRaw: 1000000000n,
+        txHash: "prepared-transaction-hash",
+        signedTransactionBase58: "1",
+        lastBlockhash: "prepared-blockhash",
+        lastValidBlockHeight: 123,
+        preparationError: null,
+        broadcastError: null,
+      },
+      {
+        sendRawTransaction: async () => {
+          attempts += 1;
+          throw new Error("injected transport outage");
+        },
+      }
+    );
+
+    assert.equal(attempts, 1);
+    assert.equal(result.txHash, "prepared-transaction-hash");
+    assert.match(result.broadcastError || "", /injected transport outage/);
+  });
+
   it("confirmPayoutSubmission reports a non-uncertain failure when the transaction hash is missing", async () => {
     const wallet = randomWallet();
     const result = await confirmPayoutSubmission(

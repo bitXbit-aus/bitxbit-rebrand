@@ -12,9 +12,10 @@
  *   BITXBIT_TOKEN_MINT (devnet USDC mint recommended)
  *   BITXBIT_TOKEN_DECIMALS (6 for devnet USDC)
  *   AIRDROP_WALLET_PRIVATE_KEY (devnet treasury)
- *   SOLANA_RPC_URL (optional, defaults to devnet)
+ *   SOLANA_RPC_URL (required; must identify Solana devnet)
  */
 
+import { Connection } from "@solana/web3.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   preparePayoutSubmission,
@@ -40,6 +41,25 @@ if (!process.env.AIRDROP_WALLET_PRIVATE_KEY) {
 if (!process.env.BITXBIT_TOKEN_MINT) {
   console.error("Missing BITXBIT_TOKEN_MINT");
   process.exit(1);
+}
+
+const rpcUrl = process.env.SOLANA_RPC_URL;
+if (!rpcUrl) {
+  console.error("Missing SOLANA_RPC_URL; fault tests require an explicit Solana devnet endpoint");
+  process.exit(1);
+}
+
+const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+const verifiedDevnetConnection = new Connection(rpcUrl, "confirmed");
+
+async function verifyDevnetConnection(): Promise<void> {
+  const genesisHash = await verifiedDevnetConnection.getGenesisHash();
+  if (genesisHash !== DEVNET_GENESIS_HASH) {
+    throw new Error(
+      `SOLANA_RPC_URL is not Solana devnet (genesis hash ${genesisHash}); refusing all broadcasts`
+    );
+  }
+  console.log(`Verified Solana devnet RPC (${genesisHash})`);
 }
 
 const supabase = createClient(url, serviceKey, {
@@ -148,6 +168,9 @@ async function persistSubmitted(
 }
 
 async function main() {
+  // This is deliberately the first network action. No transaction may be
+  // prepared or broadcast until the configured RPC proves it is devnet.
+  await verifyDevnetConnection();
   await setup();
   const sourceWalletAddress = getAirdropWalletAddress();
   const operationId = `fault:${runId}:reward`;
@@ -173,23 +196,25 @@ async function main() {
       throw new Error(`preparation failed: ${prepared.preparationError}`);
     }
 
-    // Point RPC at an unreachable endpoint to simulate a dropped / failed broadcast.
-    const originalRpc = process.env.SOLANA_RPC_URL;
-    process.env.SOLANA_RPC_URL = "http://127.0.0.1:1";
-    try {
-      const broadcasted = await broadcastPayoutSubmission(prepared);
-      if (!broadcasted.broadcastError) {
-        throw new Error("broadcast did not report an error against unreachable RPC");
-      }
-      if (broadcasted.txHash !== prepared.txHash) {
-        throw new Error("broadcast error path lost the prepared transaction hash");
-      }
-    } finally {
-      if (originalRpc === undefined) {
-        delete process.env.SOLANA_RPC_URL;
-      } else {
-        process.env.SOLANA_RPC_URL = originalRpc;
-      }
+    // Inject a transport that deterministically fails before touching any RPC.
+    // This proves the broadcast error path itself rather than relying on an
+    // environment-variable mutation or a possibly reachable endpoint.
+    let sendAttempts = 0;
+    const failedTransport = {
+      sendRawTransaction: async () => {
+        sendAttempts += 1;
+        throw new Error("injected Solana RPC broadcast outage");
+      },
+    };
+    const broadcasted = await broadcastPayoutSubmission(prepared, failedTransport);
+    if (!broadcasted.broadcastError?.includes("injected Solana RPC broadcast outage")) {
+      throw new Error(`broadcast did not report the injected outage: ${broadcasted.broadcastError}`);
+    }
+    if (sendAttempts !== 1) {
+      throw new Error(`expected one mocked broadcast attempt, got ${sendAttempts}`);
+    }
+    if (broadcasted.txHash !== prepared.txHash) {
+      throw new Error("broadcast error path lost the prepared transaction hash");
     }
   });
 
@@ -205,7 +230,13 @@ async function main() {
       preparationError: null,
       broadcastError: null,
     };
-    const confirmation = await confirmPayoutSubmission(fakeSubmission, sourceWalletAddress, 5000, 500);
+    const confirmation = await confirmPayoutSubmission(
+      fakeSubmission,
+      sourceWalletAddress,
+      5000,
+      500,
+      verifiedDevnetConnection
+    );
     if (!confirmation.uncertain) {
       throw new Error(`expected uncertain for unknown tx, got confirmed=${confirmation.confirmed}`);
     }
@@ -223,7 +254,7 @@ async function main() {
 
     await persistSubmitted(operationId, prepared);
 
-    const broadcasted = await broadcastPayoutSubmission(prepared);
+    const broadcasted = await broadcastPayoutSubmission(prepared, verifiedDevnetConnection);
     if (broadcasted.broadcastError) {
       throw new Error(`real devnet broadcast failed: ${broadcasted.broadcastError}`);
     }
@@ -241,7 +272,8 @@ async function main() {
       mismatchedSubmission,
       sourceWalletAddress,
       60000,
-      2000
+      2000,
+      verifiedDevnetConnection
     );
 
     if (!confirmation.incident) {
