@@ -17,6 +17,7 @@ MIGRATION_019="$ROOT_DIR/supabase/migrations/019_prevent_finalised_payout_deleti
 MIGRATION_020="$ROOT_DIR/supabase/migrations/020_create_or_claim_payout_operation.sql"
 MIGRATION_021="$ROOT_DIR/supabase/migrations/021_remove_obsolete_correction_overload.sql"
 MIGRATION_022="$ROOT_DIR/supabase/migrations/022_create_or_claim_recheck_wallet_and_period.sql"
+MIGRATION_023="$ROOT_DIR/supabase/migrations/023_remove_obsolete_create_or_claim_overload.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -57,6 +58,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_021" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_022" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_023" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -75,6 +77,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_019" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_021" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_022" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_023" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -885,6 +888,35 @@ BEGIN
         RAISE;
       END IF;
     END;
+  END;
+
+  -- Migration 023 must drop the obsolete six-parameter overload of
+  -- create_or_claim_payout_operation. Only the hardened seven-parameter
+  -- signature should remain callable.
+  DECLARE
+    v_create_claim_overload_count INT;
+  BEGIN
+    SELECT COUNT(*) INTO v_create_claim_overload_count
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'create_or_claim_payout_operation'
+      AND pg_get_function_identity_arguments(p.oid) = 'p_period_id uuid, p_reward_id uuid, p_user_id uuid, p_wallet_address text, p_amount_raw bigint, p_actor_id uuid';
+
+    IF v_create_claim_overload_count IS DISTINCT FROM 0 THEN
+      RAISE EXCEPTION 'obsolete six-parameter create_or_claim_payout_operation overload still exists';
+    END IF;
+
+    SELECT COUNT(*) INTO v_create_claim_overload_count
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'create_or_claim_payout_operation'
+      AND pg_get_function_identity_arguments(p.oid) = 'p_period_id uuid, p_reward_id uuid, p_user_id uuid, p_wallet_address text, p_amount_raw bigint, p_token_decimals integer, p_actor_id uuid';
+
+    IF v_create_claim_overload_count IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'authoritative seven-parameter create_or_claim_payout_operation not found (count=%)', v_create_claim_overload_count;
+    END IF;
   END;
 
   -- Migration 021 must drop the obsolete three-parameter overload of
