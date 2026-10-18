@@ -72,9 +72,39 @@ Record the backup identifier, creation timestamp, migration commit/branch, and o
 
 1. Schedule a low-write window.
 2. Confirm no older migration is being modified.
-3. Apply migrations `010` through `024` once each through the normal migration runner.
+3. Apply migrations `010` through `026` once each through the normal migration runner.
 4. Run the verification SQL below before enabling dependent application changes.
 5. Smoke-test login, active member dashboard, suspended-member denial, active admin access, profile display-name update, wallet update through the server action, public asset reads, blocked direct client writes, wallet ownership challenge signing, and reward airdrop idempotency.
+
+### 3a. Production pre-flight (run against production BEFORE applying)
+
+Staging was migrated `001`→`026` in a single pass, so it does not prove the
+upgrade path from production's *current* state. Run these against production
+first; the first is a hard stop.
+
+```sql
+-- HARD STOP: migration 017 refuses to apply when active duplicates exist.
+-- Must return zero rows.
+SELECT reward_period_id, user_id, COUNT(*) AS active_rows
+FROM public.user_rewards
+WHERE superseded_at IS NULL
+GROUP BY reward_period_id, user_id
+HAVING COUNT(*) > 1;
+
+-- Which migrations does production already record?
+SELECT version FROM supabase_migrations.schema_migrations ORDER BY version;
+
+-- Confirm production is not already past a migration you intend to apply.
+SELECT COUNT(*) AS already_applied_024_plus
+FROM supabase_migrations.schema_migrations
+WHERE version LIKE '024%' OR version LIKE '025%' OR version LIKE '026%';
+```
+
+If the duplicate check returns rows, resolve the duplicates in a forward migration
+before applying `017`. Do not delete financial rows.
+
+Also confirm the migration ledger on production records every version from `010`
+upward, so the runner does not attempt to re-apply an earlier migration.
 
 ## Verification SQL
 
@@ -286,6 +316,58 @@ Prefer a narrow forward fix:
 - Helper error: `CREATE OR REPLACE FUNCTION` with the corrected fixed search path, ownership, and grants.
 - Missing authorization rows: insert from `public.users` with `ON CONFLICT (user_id) DO NOTHING`.
 - Compatibility mismatch: reconcile from the protected table into `public.users` after confirming the intended authority.
+
+### Payout state recovery
+
+Payout operations are the highest-risk state in this release because they back
+real token transfers. Diagnose before acting:
+
+```sql
+SELECT operation_id, status, transaction_hash, reward_id, reward_period_id,
+       token_amount_raw, token_decimals, submission_error,
+       submitted_at, confirmed_at, uncertain_at, incident_at
+FROM public.payout_operations
+WHERE status IN ('submitted', 'uncertain', 'incident')
+ORDER BY reward_period_id, created_at;
+```
+
+- **`submitted`** — a signed transaction was persisted and broadcast. Do **not**
+  re-submit. Re-run `airdropRewards` for the period: reconciliation calls
+  `confirmTokenTransfer` against the stored signature and finalizes only on a
+  match. If the signature is absent from the chain, the operation is moved to
+  `uncertain`, not re-sent.
+- **`uncertain`** — outcome is inconclusive. Reconcile on-chain against the stored
+  signature. Never treat an inconclusive result as `failed` and never auto-retry.
+- **`incident`** — the transaction landed but does not match the expected
+  recipient, amount, source, mint, or authority. This is terminal and
+  non-retryable. Investigate on-chain manually; any correction must be a new
+  adjustment record, never a delete or an automatic replacement payment.
+- **`confirmed` but reward still `approved`** — a legacy partial commit. Re-run
+  finalization for that operation (the retry path passes a null payload and
+  repairs the reward/period transition from the immutable signature).
+- **`confirmed` with a conflicting `distribution_tx_hash`** — do not overwrite.
+  Investigate and record a new adjustment.
+
+Confirmed and incident rows are immutable and protected from deletion by trigger.
+Teardown scripts must retain them.
+
+### Release rollback policy
+
+The database is forward-only. Rolling back the *application* is normal and safe;
+rolling back the *schema* is not.
+
+1. **Application rollback** — redeploy the previous dashboard build. The Phase 1
+   migrations are additive and the previous application version continues to work
+   against the migrated schema, with one exception: the pre-Phase-1 code path
+   that approved rewards with separate writes is no longer reachable, which is the
+   intended behavior.
+2. **Schema rollback** — do **not** write down-migrations that drop
+   `user_authorizations`, `payout_operations`, audit rows, or reward history.
+   Correct defects with a new numbered forward-fix migration.
+3. **Data rollback** — restore from backup only when forward repair is unsafe.
+   Restoring discards everything written since the backup, including confirmed
+   payout history, so treat it as a last resort and reconcile any on-chain
+   transfers made in the interval separately.
 
 ### Full restore
 
