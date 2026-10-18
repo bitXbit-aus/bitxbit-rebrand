@@ -4,7 +4,7 @@ This guide describes how to validate the Phase 1 security hardening against a no
 
 ## Prerequisites
 
-1. A staging Supabase project with migrations `010`, `011`, and `012` applied.
+1. A staging Supabase project with migrations `010` through `024` applied.
 2. A deployed staging dashboard app (e.g., a Netlify deploy preview or branch deploy).
 3. The service-role key for the staging project. **Do not use production credentials.**
 4. Optional: the public URL of the staging dashboard app for HTTP-level checks.
@@ -14,6 +14,11 @@ This guide describes how to validate the Phase 1 security hardening against a no
 ```bash
 export STAGING_SUPABASE_URL="https://<staging-project>.supabase.co"
 export STAGING_SUPABASE_SERVICE_ROLE_KEY="<staging-service-role-key>"
+export BITXBIT_TOKEN_MINT="<devnet-token-mint>"
+export BITXBIT_TOKEN_DECIMALS=6
+export AIRDROP_WALLET_PRIVATE_KEY="<devnet-treasury-private-key>"
+export STAGING_RECIPIENT_WALLET="<on-curve-devnet-test-wallet>"
+export SOLANA_RPC_URL="https://api.devnet.solana.com"
 export STAGING_APP_URL="https://<staging-app>.netlify.app"   # optional
 ```
 
@@ -28,16 +33,19 @@ npm run test:staging
 This script:
 
 - Creates a disposable test user in Auth.
+- Verifies `approve_reward_period()` atomically approves all active rewards and the period, and rejects re-approval from an invalid state.
 - Verifies the wallet-verification flow end-to-end:
   - `verify_wallet_challenge()` consumes a challenge and marks the wallet verified.
   - Reused nonces are rejected.
   - Changing the wallet address resets `wallet_verified`.
 - Verifies trusted offer-click deduplication via `record_trusted_offer_click()`.
-- Verifies payout operation atomic claiming and immutability:
-  - `claim_payout_operation()` claims a pending operation.
-  - Concurrent claims return `NULL`.
+- Verifies payout operation atomic creation/claiming and finalization:
+  - `create_or_claim_payout_operation()` creates or claims only an eligible operation.
+  - Duplicate submission attempts are rejected.
+  - `finalize_payout_confirmation()` commits the confirmed operation, exact distributed reward, transaction identity, and complete-period state atomically.
   - Confirmed operations reject status and field mutations.
-- Cleans up all test data after the run.
+- Checks every Supabase fixture mutation for resolved `{ error }` results instead of assuming the promise rejected.
+- Cleans up transient test data. The confirmed payout fixture and its referenced user/reward/period/allocation history are intentionally retained because finalised financial records are immutable; the script prints the retained operation ID explicitly.
 
 If `STAGING_APP_URL` is set, it also performs lightweight HTTP health checks on public API endpoints.
 
@@ -76,7 +84,7 @@ Use disposable test accounts only. Never use production identities or wallets.
 15. Run **Calculate Rewards** and confirm `user_rewards` rows are created.
 16. Run **Approve Rewards** and confirm the period status moves to `approved`.
 17. Attempt to run **Calculate Rewards** again and confirm it is rejected.
-18. Use **Correct Rewards** with a reason, confirm the period returns to `pending`, rewards are recalculated, and the reason appears in the audit log.
+18. Use **Correct Rewards** with a reason, confirm the period returns to `calculating`, rewards are recalculated, and the reason appears in the audit log.
 
 ### Payout idempotency and immutability
 
@@ -105,5 +113,6 @@ Use disposable test accounts only. Never use production identities or wallets.
 
 ## Cleanup
 
-- Delete all test users, offers, reward periods, allocation models, and payout operations created during testing.
+- Delete transient test offers, activities, wallet challenges, and any non-finalised payout fixtures created during testing.
+- Do **not** delete or mutate confirmed/incident payout history. The automated smoke test prints the immutable operation ID and retains the referenced user, reward period, reward, and allocation model as an auditable staging fixture.
 - Verify no service-role keys or private keys were logged.

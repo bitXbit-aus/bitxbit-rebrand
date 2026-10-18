@@ -13,9 +13,10 @@
  *   BITXBIT_TOKEN_DECIMALS (6 for devnet USDC)
  *   AIRDROP_WALLET_PRIVATE_KEY (devnet treasury)
  *   SOLANA_RPC_URL (required; must identify Solana devnet)
+ *   STAGING_RECIPIENT_WALLET (required; on-curve devnet test recipient)
  */
 
-import { Connection } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   preparePayoutSubmission,
@@ -49,6 +50,24 @@ if (!rpcUrl) {
   process.exit(1);
 }
 
+const recipientWallet = process.env.STAGING_RECIPIENT_WALLET;
+if (!recipientWallet) {
+  console.error("Missing STAGING_RECIPIENT_WALLET; provide an on-curve devnet test recipient");
+  process.exit(1);
+}
+
+let recipientPublicKey: PublicKey;
+try {
+  recipientPublicKey = new PublicKey(recipientWallet);
+} catch {
+  console.error("STAGING_RECIPIENT_WALLET is not a valid Solana public key");
+  process.exit(1);
+}
+if (!PublicKey.isOnCurve(recipientPublicKey.toBytes())) {
+  console.error("STAGING_RECIPIENT_WALLET must be an on-curve wallet owner, not a mint or PDA");
+  process.exit(1);
+}
+
 const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 const verifiedDevnetConnection = new Connection(rpcUrl, "confirmed");
 
@@ -69,7 +88,7 @@ const supabase = createClient(url, serviceKey, {
 const runId = `fault-${Date.now()}`;
 const testUserId = `11111111-1111-4111-8111-${runId.slice(-12)}`;
 const testEmail = `${runId}@staging-fault.bitxbit`;
-const testWallet = "DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5";
+const testWallet = recipientPublicKey.toBase58();
 const testModelId = `55555555-5555-4555-8555-${runId.slice(-12)}`;
 const testPeriodId = `33333333-3333-4333-8333-${runId.slice(-12)}`;
 const testRewardId = `44444444-4444-4444-8444-${runId.slice(-12)}`;
@@ -79,6 +98,20 @@ const amountDisplay = 0.001;
 const amountRaw = amountToRaw(amountDisplay, tokenDecimals);
 
 let failures = 0;
+
+interface SupabaseResult {
+  error?: { message?: string; code?: string } | null;
+}
+
+async function requireNoError(
+  label: string,
+  resultPromise: PromiseLike<SupabaseResult>
+): Promise<void> {
+  const result = await resultPromise;
+  if (result.error) {
+    throw new Error(`${label}: ${result.error.message ?? result.error.code ?? "Supabase error"}`);
+  }
+}
 
 async function section(name: string, fn: () => Promise<void>) {
   try {
@@ -100,44 +133,75 @@ async function setup() {
   });
   if (authError) throw authError;
 
-  await supabase.from("users").update({ wallet_address: testWallet }).eq("id", testUserId);
-  await supabase.from("users").update({ wallet_verified: true }).eq("id", testUserId);
+  await requireNoError(
+    "set staging fault wallet address",
+    supabase.from("users").update({ wallet_address: testWallet }).eq("id", testUserId)
+  );
+  await requireNoError(
+    "verify staging fault wallet",
+    supabase.from("users").update({ wallet_verified: true }).eq("id", testUserId)
+  );
 
-  await supabase.from("allocation_models").insert({
-    id: testModelId,
-    name: "Staging Fault Model",
-    community_rewards_pct: 50,
-    liquidity_pct: 10,
-    buybacks_pct: 10,
-    projects_pct: 20,
-    operations_pct: 10,
-    effective_date: "2026-01-01",
-  });
+  await requireNoError(
+    "insert staging fault allocation model",
+    supabase.from("allocation_models").insert({
+      id: testModelId,
+      name: "Staging Fault Model",
+      community_rewards_pct: 50,
+      liquidity_pct: 10,
+      buybacks_pct: 10,
+      projects_pct: 20,
+      operations_pct: 10,
+      effective_date: "2026-01-01",
+    })
+  );
 
-  await supabase.from("reward_periods").insert({
-    id: testPeriodId,
-    start_date: "2026-01-01",
-    end_date: "2026-01-31",
-    allocation_model_id: testModelId,
-    status: "approved",
-  });
+  await requireNoError(
+    "insert staging fault reward period",
+    supabase.from("reward_periods").insert({
+      id: testPeriodId,
+      start_date: "2026-01-01",
+      end_date: "2026-01-31",
+      allocation_model_id: testModelId,
+      status: "approved",
+    })
+  );
 
-  await supabase.from("user_rewards").insert({
-    id: testRewardId,
-    user_id: testUserId,
-    reward_period_id: testPeriodId,
-    bitxbit_amount: amountDisplay,
-    status: "approved",
-  });
+  await requireNoError(
+    "insert staging fault reward",
+    supabase.from("user_rewards").insert({
+      id: testRewardId,
+      user_id: testUserId,
+      reward_period_id: testPeriodId,
+      bitxbit_amount: amountDisplay,
+      status: "approved",
+    })
+  );
 }
 
 async function teardown() {
-  await supabase.from("payout_operations").delete().eq("reward_id", testRewardId);
-  await supabase.from("user_rewards").delete().eq("id", testRewardId);
-  await supabase.from("reward_periods").delete().eq("id", testPeriodId);
-  await supabase.from("allocation_models").delete().eq("id", testModelId);
-  await supabase.from("users").delete().eq("id", testUserId);
-  await supabase.auth.admin.deleteUser(testUserId);
+  await requireNoError(
+    "delete staging fault payout operations",
+    supabase.from("payout_operations").delete().eq("reward_id", testRewardId)
+  );
+  await requireNoError(
+    "delete staging fault reward",
+    supabase.from("user_rewards").delete().eq("id", testRewardId)
+  );
+  await requireNoError(
+    "delete staging fault reward period",
+    supabase.from("reward_periods").delete().eq("id", testPeriodId)
+  );
+  await requireNoError(
+    "delete staging fault allocation model",
+    supabase.from("allocation_models").delete().eq("id", testModelId)
+  );
+  await requireNoError(
+    "delete staging fault profile",
+    supabase.from("users").delete().eq("id", testUserId)
+  );
+  const { error: authDeleteError } = await supabase.auth.admin.deleteUser(testUserId);
+  if (authDeleteError) throw authDeleteError;
 }
 
 async function rpc<T>(fn: string, args: unknown): Promise<T> {
@@ -156,7 +220,7 @@ async function persistSubmitted(
     reward_id: testRewardId,
     user_id: testUserId,
     wallet_address: testWallet,
-    token_amount_raw: Number(prepared.amountRaw),
+    token_amount_raw: prepared.amountRaw.toString() as any,
     token_decimals: tokenDecimals,
     status: "submitting",
     transaction_hash: prepared.txHash,

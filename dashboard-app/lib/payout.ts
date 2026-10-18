@@ -86,6 +86,13 @@ export function getAirdropWalletAddress(): string {
   return signer.publicKey.toBase58();
 }
 
+export function parseRawTokenAmount(value: unknown): bigint {
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) {
+    throw new Error("Raw token amount must be a canonical non-negative decimal string");
+  }
+  return BigInt(value);
+}
+
 export function amountToRaw(amountDisplay: number, decimals = DECIMALS): bigint {
   return BigInt(Math.round(amountDisplay * Math.pow(10, decimals)));
 }

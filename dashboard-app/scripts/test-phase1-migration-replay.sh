@@ -18,6 +18,8 @@ MIGRATION_020="$ROOT_DIR/supabase/migrations/020_create_or_claim_payout_operatio
 MIGRATION_021="$ROOT_DIR/supabase/migrations/021_remove_obsolete_correction_overload.sql"
 MIGRATION_022="$ROOT_DIR/supabase/migrations/022_create_or_claim_recheck_wallet_and_period.sql"
 MIGRATION_023="$ROOT_DIR/supabase/migrations/023_remove_obsolete_create_or_claim_overload.sql"
+MIGRATION_024="$ROOT_DIR/supabase/migrations/024_atomic_reward_approval_and_payout_finalization.sql"
+MIGRATION_025="$ROOT_DIR/supabase/migrations/025_exact_payout_amount_reads.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -59,6 +61,8 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_021" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_022" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_023" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_024" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -78,6 +82,8 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_020" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_021" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_022" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_023" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_024" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -890,6 +896,204 @@ BEGIN
     END;
   END;
 
+  -- Reward approval must update the period and all active rewards atomically,
+  -- under the same period advisory lock used by correction and payout paths.
+  DECLARE
+    v_approval_user UUID := '12121212-1212-4212-8212-121212121212';
+    v_approval_period UUID := '13131313-1313-4313-8313-131313131313';
+    v_approval_reward UUID := '14141414-1414-4414-8414-141414141414';
+    v_approval_result JSONB;
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_approval_user, 'approval-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_approval_period, '2026-09-01', '2026-09-30', '55555555-5555-4555-8555-555555555555', 'calculating');
+    INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+    VALUES (v_approval_reward, v_approval_user, v_approval_period, 4.25, 'pending', 1);
+
+    SELECT public.approve_reward_period(v_approval_period) INTO v_approval_result;
+
+    IF (v_approval_result->>'approved_rewards')::INT IS DISTINCT FROM 1 THEN
+      RAISE EXCEPTION 'approve_reward_period did not approve exactly one reward (got %)', v_approval_result;
+    END IF;
+    IF (SELECT status FROM public.reward_periods WHERE id = v_approval_period) IS DISTINCT FROM 'approved' THEN
+      RAISE EXCEPTION 'approve_reward_period did not set period approved';
+    END IF;
+    IF (SELECT status FROM public.user_rewards WHERE id = v_approval_reward) IS DISTINCT FROM 'approved' THEN
+      RAISE EXCEPTION 'approve_reward_period did not set reward approved';
+    END IF;
+
+    UPDATE public.reward_periods SET status = 'distributed' WHERE id = v_approval_period;
+    BEGIN
+      PERFORM public.approve_reward_period(v_approval_period);
+      RAISE EXCEPTION 'approve_reward_period reopened a distributed period';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM = 'approve_reward_period reopened a distributed period' THEN
+        RAISE;
+      END IF;
+    END;
+  END;
+
+  -- Confirming a payout must atomically finalize the immutable operation and its
+  -- exact reward, and mark the period distributed only when every active reward
+  -- has a confirmed payout.
+  DECLARE
+    v_finalize_user UUID := '15151515-1515-4515-8515-151515151515';
+    v_finalize_period UUID := '16161616-1616-4616-8616-161616161616';
+    v_finalize_reward UUID := '17171717-1717-4717-8717-171717171717';
+    v_finalize_result JSONB;
+    v_finalize_op TEXT := 'payout:atomic-finalize:test';
+    v_finalize_tx TEXT := 'atomic-finalize-signature';
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_finalize_user, 'finalize-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_finalize_period, '2026-10-01', '2026-10-31', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+    VALUES (v_finalize_reward, v_finalize_user, v_finalize_period, 5.50, 'approved', 1);
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address,
+      token_amount_raw, token_decimals, status, transaction_hash
+    ) VALUES (
+      v_finalize_op, v_finalize_period, v_finalize_reward, v_finalize_user,
+      'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 5500000000, 9,
+      'submitted', v_finalize_tx
+    );
+
+    SELECT public.finalize_payout_confirmation(
+      v_finalize_op,
+      jsonb_build_object('confirmed', true, 'source', 'migration-replay')
+    ) INTO v_finalize_result;
+
+    IF (SELECT status FROM public.payout_operations WHERE operation_id = v_finalize_op) IS DISTINCT FROM 'confirmed' THEN
+      RAISE EXCEPTION 'finalize_payout_confirmation did not confirm operation';
+    END IF;
+    IF (SELECT status FROM public.user_rewards WHERE id = v_finalize_reward) IS DISTINCT FROM 'distributed' THEN
+      RAISE EXCEPTION 'finalize_payout_confirmation did not distribute exact reward';
+    END IF;
+    IF (SELECT distribution_tx_hash FROM public.user_rewards WHERE id = v_finalize_reward) IS DISTINCT FROM v_finalize_tx THEN
+      RAISE EXCEPTION 'finalize_payout_confirmation did not preserve transaction identity';
+    END IF;
+    IF (SELECT status FROM public.reward_periods WHERE id = v_finalize_period) IS DISTINCT FROM 'distributed' THEN
+      RAISE EXCEPTION 'finalize_payout_confirmation did not distribute complete period';
+    END IF;
+    IF (v_finalize_result->>'period_distributed')::BOOLEAN IS DISTINCT FROM TRUE THEN
+      RAISE EXCEPTION 'finalize_payout_confirmation result omitted distributed period state (got %)', v_finalize_result;
+    END IF;
+  END;
+
+  -- The finalization RPC must repair a legacy partial commit where the operation
+  -- is already confirmed but its reward was never marked distributed.
+  DECLARE
+    v_repair_user UUID := '18181818-1818-4818-8818-181818181818';
+    v_repair_period UUID := '19191919-1919-4919-8919-191919191919';
+    v_repair_reward UUID := '20202020-2020-4020-8020-202020202020';
+    v_repair_op TEXT := 'payout:atomic-finalize:repair';
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_repair_user, 'finalize-repair@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_repair_period, '2026-11-01', '2026-11-30', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+    VALUES (v_repair_reward, v_repair_user, v_repair_period, 6.00, 'approved', 1);
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address,
+      token_amount_raw, token_decimals, status, transaction_hash, confirmed_at
+    ) VALUES (
+      v_repair_op, v_repair_period, v_repair_reward, v_repair_user,
+      'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 6000000000, 9,
+      'confirmed', 'atomic-repair-signature', NOW()
+    );
+
+    PERFORM public.finalize_payout_confirmation(v_repair_op, NULL);
+
+    IF (SELECT status FROM public.user_rewards WHERE id = v_repair_reward) IS DISTINCT FROM 'distributed' THEN
+      RAISE EXCEPTION 'finalization RPC did not repair confirmed-operation reward state';
+    END IF;
+    IF (SELECT status FROM public.reward_periods WHERE id = v_repair_period) IS DISTINCT FROM 'distributed' THEN
+      RAISE EXCEPTION 'finalization RPC did not repair confirmed-operation period state';
+    END IF;
+  END;
+
+  -- The finalization RPC must also repair the later legacy partial-commit point:
+  -- reward distributed, operation confirmed, but period still approved.
+  DECLARE
+    v_period_repair_user UUID := '21212121-2121-4121-8121-212121212121';
+    v_period_repair_period UUID := '22222222-2222-4222-8222-222222222221';
+    v_period_repair_reward UUID := '22222222-2222-4222-8222-222222222223';
+    v_period_repair_op TEXT := 'payout:atomic-finalize:period-repair';
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_period_repair_user, 'period-repair@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_period_repair_period, '2026-12-01', '2026-12-31', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (
+      id, user_id, reward_period_id, bitxbit_amount, status, version,
+      distribution_tx_hash, distributed_at
+    ) VALUES (
+      v_period_repair_reward, v_period_repair_user, v_period_repair_period,
+      7.00, 'distributed', 1, 'period-repair-signature', NOW()
+    );
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address,
+      token_amount_raw, token_decimals, status, transaction_hash, confirmed_at
+    ) VALUES (
+      v_period_repair_op, v_period_repair_period, v_period_repair_reward,
+      v_period_repair_user, 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5',
+      7000000000, 9, 'confirmed', 'period-repair-signature', NOW()
+    );
+
+    PERFORM public.finalize_payout_confirmation(v_period_repair_op, NULL);
+
+    IF (SELECT status FROM public.reward_periods WHERE id = v_period_repair_period) IS DISTINCT FROM 'distributed' THEN
+      RAISE EXCEPTION 'finalization RPC did not repair distributed-reward period state';
+    END IF;
+  END;
+
+  -- Exact payout-read functions must cross the PostgREST boundary as decimal
+  -- text, including values above JavaScript Number.MAX_SAFE_INTEGER.
+  DECLARE
+    v_exact_user UUID := '26262626-2626-4626-8626-262626262626';
+    v_exact_period UUID := '27272727-2727-4727-8727-272727272727';
+    v_exact_reward UUID := '28282828-2828-4828-8828-282828282828';
+    v_exact_operation TEXT := 'payout:exact-read:large';
+    v_candidate_amount TEXT;
+    v_operation_amount TEXT;
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_exact_user, 'exact-read@example.test');
+    UPDATE public.users SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5' WHERE id = v_exact_user;
+    UPDATE public.users SET wallet_verified = TRUE WHERE id = v_exact_user;
+
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_exact_period, '2027-01-01', '2027-01-31', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (
+      id, user_id, reward_period_id, bitxbit_amount, status, version
+    ) VALUES (
+      v_exact_reward, v_exact_user, v_exact_period, 9007199254.740993, 'approved', 1
+    );
+
+    SELECT amount_raw INTO v_candidate_amount
+    FROM public.get_reward_payout_candidates_exact(v_exact_period, 6)
+    WHERE reward_id = v_exact_reward;
+
+    IF v_candidate_amount IS DISTINCT FROM '9007199254740993' THEN
+      RAISE EXCEPTION 'exact candidate amount crossed through an inexact representation: %', v_candidate_amount;
+    END IF;
+
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address,
+      token_amount_raw, token_decimals, status
+    ) VALUES (
+      v_exact_operation, v_exact_period, v_exact_reward, v_exact_user,
+      'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5',
+      9007199254740993, 6, 'submitted'
+    );
+
+    SELECT token_amount_raw INTO v_operation_amount
+    FROM public.get_period_payout_operations_exact(v_exact_period)
+    WHERE operation_id = v_exact_operation;
+
+    IF v_operation_amount IS DISTINCT FROM '9007199254740993' THEN
+      RAISE EXCEPTION 'exact operation amount crossed through an inexact representation: %', v_operation_amount;
+    END IF;
+  END;
+
   -- Migration 023 must drop the obsolete six-parameter overload of
   -- create_or_claim_payout_operation. Only the hardened seven-parameter
   -- signature should remain callable.
@@ -1146,3 +1350,72 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
 " >/dev/null
 
 printf 'concurrent create_or_claim vs correction race test passed (blocked %sms, creation failed, no operation inserted)\n' "$DURATION2"
+
+# ------------------------------------------------------------------------------
+# Concurrent reward approval vs correction race test
+# A correction that wins the period lock must fully replace rewards and set the
+# period back to calculating before approval proceeds. Approval then atomically
+# approves the replacement set; it must not approve stale rows or leave a mixed
+# calculating/approved state.
+# ------------------------------------------------------------------------------
+RACE3_USER='23232323-2323-4323-8323-232323232323'
+RACE3_PERIOD='24242424-2424-4424-8424-242424242424'
+RACE3_REWARD='25252525-2525-4525-8525-252525252525'
+
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+  INSERT INTO auth.users (id, email) VALUES ('$RACE3_USER', 'race3@example.test');
+  INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+  VALUES ('$RACE3_PERIOD', '2026-12-01', '2026-12-31', '55555555-5555-4555-8555-555555555555', 'approved');
+  INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+  VALUES ('$RACE3_REWARD', '$RACE3_USER', '$RACE3_PERIOD', 8.0, 'approved', 1);
+" >/dev/null
+
+(
+  psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+    BEGIN;
+    SELECT pg_advisory_xact_lock(0, hashtext('$RACE3_PERIOD'::text));
+    SELECT pg_sleep(1.5);
+    SELECT apply_reward_correction('$RACE3_PERIOD'::UUID, 'race3 correction', 400.00, '[{\"user_id\":\"$RACE3_USER\",\"estimated_aud_value\":4.00,\"bitxbit_amount\":4.0}]'::jsonb);
+    COMMIT;
+  " >/dev/null
+) &
+
+for i in {1..50}; do
+  if psql -d "$DB_NAME" -t -A -c "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = 0 AND objid = hashtext('$RACE3_PERIOD'::text) AND granted" 2>/dev/null | grep -q '^1$'; then
+    break
+  fi
+  sleep 0.1
+done
+
+START3_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "SELECT approve_reward_period('$RACE3_PERIOD'::UUID);" >/dev/null
+END3_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
+DURATION3=$((END3_MS - START3_MS))
+wait
+
+if [ "$DURATION3" -lt 1000 ]; then
+  echo "race3 test failed: approve_reward_period did not block on period lock (duration ${DURATION3}ms)" >&2
+  exit 1
+fi
+
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
+  DO \$\$
+  BEGIN
+    IF (SELECT status FROM public.reward_periods WHERE id = '$RACE3_PERIOD') IS DISTINCT FROM 'approved' THEN
+      RAISE EXCEPTION 'race3 test failed: replacement period was not approved';
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM public.user_rewards
+      WHERE reward_period_id = '$RACE3_PERIOD'
+        AND superseded_at IS NULL
+        AND status IS DISTINCT FROM 'approved'
+    ) THEN
+      RAISE EXCEPTION 'race3 test failed: active replacement rewards were not atomically approved';
+    END IF;
+    IF (SELECT superseded_at IS NOT NULL FROM public.user_rewards WHERE id = '$RACE3_REWARD') IS DISTINCT FROM TRUE THEN
+      RAISE EXCEPTION 'race3 test failed: original reward was not superseded';
+    END IF;
+  END \$\$;
+" >/dev/null
+
+printf 'concurrent approval-vs-correction race test passed (blocked %sms, replacement rewards approved atomically)\n' "$DURATION3"

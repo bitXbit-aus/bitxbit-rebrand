@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { amountToRaw, rawToAmount } from "./payout";
+import { amountToRaw, parseRawTokenAmount, rawToAmount } from "./payout";
 
 describe("payout token unit conversion", () => {
   it("converts display amount to raw integer using configured decimals", () => {
@@ -20,6 +20,18 @@ describe("payout token unit conversion", () => {
     const raw = amountToRaw(display, 9);
     assert.equal(raw, 123n);
     assert.equal(rawToAmount(raw, 9), display);
+  });
+
+  it("parses exact raw amounts without a JavaScript number boundary", () => {
+    assert.equal(parseRawTokenAmount("1500000"), 1500000n);
+    assert.equal(parseRawTokenAmount("9007199254740993"), 9007199254740993n);
+  });
+
+  it("rejects numbers and non-canonical raw amount strings", () => {
+    assert.throws(() => parseRawTokenAmount(1500000));
+    assert.throws(() => parseRawTokenAmount("01"));
+    assert.throws(() => parseRawTokenAmount("1.5"));
+    assert.throws(() => parseRawTokenAmount("-1"));
   });
 
   it("uses 9 decimals by default", () => {

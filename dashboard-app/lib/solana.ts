@@ -6,6 +6,7 @@ import {
 import {
   getAirdropWalletBalances,
   amountToRaw,
+  parseRawTokenAmount,
   rawToAmount,
   executePayoutTransfers,
   preparePayoutSubmission,
@@ -23,6 +24,7 @@ export type { PayoutTransfer, PayoutTransferResult, PayoutSubmission, Confirmati
 export {
   getAirdropWalletBalances,
   amountToRaw,
+  parseRawTokenAmount,
   rawToAmount,
   executePayoutTransfers,
   preparePayoutSubmission,

@@ -1,6 +1,6 @@
 # Database Migration and Recovery Guide
 
-This guide covers staged application of the Phase 1 security migrations (`010`, `011`, and `012`). It is operational guidance, not a claim that the migrations have been applied to any live database.
+This guide covers staged application of the Phase 1 security migrations (`010` through `024`). It is operational guidance; production rollout remains prohibited until explicitly authorized.
 
 ## Principles
 
@@ -14,7 +14,8 @@ This guide covers staged application of the Phase 1 security migrations (`010`, 
 
 - `010_phase1_security_foundation.sql` — protected authorization, RLS hardening, audit log, trusted offer clicks, integrity constraints.
 - `011_wallet_verification.sql` — challenge table, wallet verification status, atomic challenge consumption, verification reset trigger.
-- `012_secure_token_distribution.sql` — durable `payout_operations` table, idempotent distribution tracking, on-chain reconciliation support, fail-closed payout audit trigger (the operation fails if audit logging fails), confirmed-operation immutability trigger.
+- `012_secure_token_distribution.sql` through `023_remove_obsolete_create_or_claim_overload.sql` — durable payout state, exact token units, correction/recalculation history, period-lock coordination, immutable final states, test-operation constraints, atomic create-or-claim authorization, and obsolete-overload removal.
+- `024_atomic_reward_approval_and_payout_finalization.sql` — atomic period-locked reward approval and atomic confirmed-payout/reward/period finalization, including repair of legacy confirmed-operation partial commits.
 
 ## Staged application
 
@@ -49,7 +50,7 @@ SELECT * FROM public.transparency_reports WHERE total_income < 0;
 npm run test:migration
 ```
 
-The script creates and drops an isolated local PostgreSQL database, applies migrations `010`, `011`, and `012`, validates one new constraint, applies the migrations again, and asserts that policy replacement, constraint validation state, trusted click deduplication, wallet verification lifecycle, payout operation idempotency and immutability, audit immutability, actor retention, and grants still hold. It requires local `psql`, `createdb`, and `dropdb`; it does not contact Supabase or production.
+The script creates and drops an isolated local PostgreSQL database, applies migrations `010` through `024`, validates one new constraint, replays the migrations, and asserts authorization, wallet verification, payout immutability, exact reward history, overload removal, atomic approval/finalization, and concurrent period-lock races. It requires local `psql`, `createdb`, and `dropdb`; it does not contact Supabase or production.
 
 5. Apply migrations through the normal Supabase migration mechanism. Do not paste selected fragments unless recovering from a diagnosed partial manual application.
 
@@ -69,7 +70,7 @@ Record the backup identifier, creation timestamp, migration commit/branch, and o
 
 1. Schedule a low-write window.
 2. Confirm no older migration is being modified.
-3. Apply migrations `010`, `011`, and `012` once each through the normal migration runner.
+3. Apply migrations `010` through `024` once each through the normal migration runner.
 4. Run the verification SQL below before enabling dependent application changes.
 5. Smoke-test login, active member dashboard, suspended-member denial, active admin access, profile display-name update, wallet update through the server action, public asset reads, blocked direct client writes, wallet ownership challenge signing, and reward airdrop idempotency.
 
