@@ -1,0 +1,2709 @@
+{
+  "advisories": {
+    "@fractalwagmi/solana-wallet-adapter": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@keystonehq/bc-ur-registry-sol": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@keystonehq/sol-keyring": {
+      "effects": [
+        "@solana/wallet-adapter-keystone"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@next/eslint-plugin-next": {
+      "effects": [
+        "eslint-config-next"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "eslint-config-next",
+        "version": "16.4.2"
+      },
+      "isDirect": false,
+      "range": "14.0.5-canary.0 - 15.0.0-rc.1",
+      "severity": "high",
+      "via": []
+    },
+    "@particle-network/analytics": {
+      "effects": [
+        "@particle-network/auth"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@particle-network/auth": {
+      "effects": [
+        "@particle-network/solana-wallet"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": ">=0.6.3-alpha.0",
+      "severity": "moderate",
+      "via": []
+    },
+    "@particle-network/crypto": {
+      "effects": [
+        "@particle-network/auth"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@particle-network/solana-wallet": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@project-serum/sol-wallet-adapter": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@react-native/community-cli-plugin": {
+      "effects": [
+        "react-native"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": []
+    },
+    "@react-native/virtualized-lists": {
+      "effects": [
+        "react-native"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": ">=0.85.0-nightly-20260108-1236b6be4",
+      "severity": "high",
+      "via": []
+    },
+    "@reown/appkit": {
+      "effects": [
+        "@walletconnect/solana-adapter"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "<=1.7.3-fd380eb099c043db8c203f943692af94e8b00f5b.0",
+      "severity": "low",
+      "via": []
+    },
+    "@reown/appkit-controllers": {
+      "effects": [
+        "@reown/appkit",
+        "@reown/appkit-scaffold-ui",
+        "@reown/appkit-ui",
+        "@reown/appkit-utils"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "<=1.7.3-fd380eb099c043db8c203f943692af94e8b00f5b.0",
+      "severity": "low",
+      "via": []
+    },
+    "@reown/appkit-scaffold-ui": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=1.7.3-fd380eb099c043db8c203f943692af94e8b00f5b.0",
+      "severity": "low",
+      "via": []
+    },
+    "@reown/appkit-ui": {
+      "effects": [
+        "@reown/appkit",
+        "@reown/appkit-scaffold-ui"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "1.7.1-449657bc8f95adcfd295a2e883c4bcd439045044.0 - 1.7.3-fd380eb099c043db8c203f943692af94e8b00f5b.0",
+      "severity": "low",
+      "via": []
+    },
+    "@reown/appkit-utils": {
+      "effects": [
+        "@reown/appkit-scaffold-ui"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=1.7.3-fd380eb099c043db8c203f943692af94e8b00f5b.0",
+      "severity": "low",
+      "via": []
+    },
+    "@solana-mobile/mobile-wallet-adapter-protocol": {
+      "effects": [
+        "@solana-mobile/mobile-wallet-adapter-protocol-web3js",
+        "@solana-mobile/wallet-standard-mobile"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=0.0.0-canary-20260910202749 || >=2.2.6",
+      "severity": "high",
+      "via": []
+    },
+    "@solana-mobile/mobile-wallet-adapter-protocol-web3js": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": []
+    },
+    "@solana-mobile/wallet-adapter-mobile": {
+      "effects": [
+        "@solana/wallet-adapter-react"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": []
+    },
+    "@solana-mobile/wallet-standard-mobile": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=0.0.0-canary-20260910202749 || >=0.5.0-beta1",
+      "severity": "high",
+      "via": []
+    },
+    "@solana/buffer-layout-utils": {
+      "effects": [
+        "@solana/spl-token"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/spl-token",
+        "version": "0.1.8"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": []
+    },
+    "@solana/spl-token": {
+      "effects": [],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/spl-token",
+        "version": "0.1.8"
+      },
+      "isDirect": true,
+      "range": "*",
+      "severity": "high",
+      "via": []
+    },
+    "@solana/spl-token-group": {
+      "effects": [
+        "@solana/spl-token"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/spl-token",
+        "version": "0.1.8"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/spl-token-metadata": {
+      "effects": [
+        "@solana/spl-token"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/spl-token",
+        "version": "0.1.8"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-alpha": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-avana": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-base": {
+      "effects": [
+        "@fractalwagmi/solana-wallet-adapter",
+        "@solana/wallet-standard-wallet-adapter-react"
+      ],
+      "fixAvailable": false,
+      "isDirect": true,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-base-ui": {
+      "effects": [
+        "@solana/wallet-adapter-react-ui"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-bitkeep": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-bitpie": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-clover": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-coin98": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-coinbase": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-coinhub": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-fractal": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-huobi": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-hyperpay": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-keystone": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-krystal": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-ledger": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-mathwallet": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-neko": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-nightly": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-nufi": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-onto": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-particle": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-phantom": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-react": {
+      "effects": [],
+      "fixAvailable": false,
+      "isDirect": true,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-react-ui": {
+      "effects": [],
+      "fixAvailable": false,
+      "isDirect": true,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-safepal": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-saifu": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-salmon": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-sky": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-solflare": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-solong": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-spot": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-tokenary": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-tokenpocket": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-torus": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-trezor": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": []
+    },
+    "@solana/wallet-adapter-trust": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-unsafe-burner": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-walletconnect": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-wallets": {
+      "effects": [],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": true,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-adapter-xdefi": {
+      "effects": [
+        "@solana/wallet-adapter-wallets"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-standard-wallet-adapter-base": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/wallet-standard-wallet-adapter-react": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solana/web3.js": {
+      "effects": [
+        "@particle-network/solana-wallet",
+        "@project-serum/sol-wallet-adapter",
+        "@solana-mobile/mobile-wallet-adapter-protocol-web3js",
+        "@solana-mobile/wallet-adapter-mobile",
+        "@solana/spl-token",
+        "@solana/spl-token-group",
+        "@solana/spl-token-metadata",
+        "@solana/wallet-adapter-alpha",
+        "@solana/wallet-adapter-avana",
+        "@solana/wallet-adapter-base",
+        "@solana/wallet-adapter-base-ui",
+        "@solana/wallet-adapter-bitkeep",
+        "@solana/wallet-adapter-bitpie",
+        "@solana/wallet-adapter-clover",
+        "@solana/wallet-adapter-coin98",
+        "@solana/wallet-adapter-coinbase",
+        "@solana/wallet-adapter-coinhub",
+        "@solana/wallet-adapter-fractal",
+        "@solana/wallet-adapter-huobi",
+        "@solana/wallet-adapter-hyperpay",
+        "@solana/wallet-adapter-krystal",
+        "@solana/wallet-adapter-ledger",
+        "@solana/wallet-adapter-mathwallet",
+        "@solana/wallet-adapter-neko",
+        "@solana/wallet-adapter-nightly",
+        "@solana/wallet-adapter-nufi",
+        "@solana/wallet-adapter-onto",
+        "@solana/wallet-adapter-particle",
+        "@solana/wallet-adapter-phantom",
+        "@solana/wallet-adapter-react",
+        "@solana/wallet-adapter-react-ui",
+        "@solana/wallet-adapter-safepal",
+        "@solana/wallet-adapter-saifu",
+        "@solana/wallet-adapter-salmon",
+        "@solana/wallet-adapter-sky",
+        "@solana/wallet-adapter-solflare",
+        "@solana/wallet-adapter-solong",
+        "@solana/wallet-adapter-spot",
+        "@solana/wallet-adapter-tokenary",
+        "@solana/wallet-adapter-tokenpocket",
+        "@solana/wallet-adapter-torus",
+        "@solana/wallet-adapter-trezor",
+        "@solana/wallet-adapter-trust",
+        "@solana/wallet-adapter-unsafe-burner",
+        "@solana/wallet-adapter-walletconnect",
+        "@solana/wallet-adapter-wallets",
+        "@solana/wallet-adapter-xdefi",
+        "@solana/wallet-standard-wallet-adapter-base",
+        "@toruslabs/solana-embed",
+        "@walletconnect/solana-adapter",
+        "salmon-adapter-sdk"
+      ],
+      "fixAvailable": false,
+      "isDirect": true,
+      "range": "<=0.0.0-pr-29130 || 0.0.4 - 1.99.0",
+      "severity": "moderate",
+      "via": []
+    },
+    "@solflare-wallet/sdk": {
+      "effects": [
+        "@solana/wallet-adapter-solflare"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@stellar/stellar-sdk": {
+      "effects": [
+        "@trezor/blockchain-link",
+        "@trezor/blockchain-link-utils"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=15.1.0",
+      "severity": "high",
+      "via": []
+    },
+    "@supabase/ssr": {
+      "effects": [],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@supabase/ssr",
+        "version": "0.12.7"
+      },
+      "isDirect": true,
+      "range": "<=0.5.2-rc.7",
+      "severity": "low",
+      "via": []
+    },
+    "@toruslabs/base-controllers": {
+      "effects": [
+        "@toruslabs/solana-embed"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "1.6.16 - 8.17.0",
+      "severity": "low",
+      "via": []
+    },
+    "@toruslabs/broadcast-channel": {
+      "effects": [
+        "@toruslabs/base-controllers"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=12.0.0",
+      "severity": "low",
+      "via": []
+    },
+    "@toruslabs/eccrypto": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=6.2.0",
+      "severity": "low",
+      "via": []
+    },
+    "@toruslabs/metadata-helpers": {
+      "effects": [
+        "@toruslabs/broadcast-channel"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=7.0.2",
+      "severity": "low",
+      "via": []
+    },
+    "@toruslabs/solana-embed": {
+      "effects": [
+        "@solana/wallet-adapter-torus"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@trezor/blockchain-link": {
+      "effects": [
+        "@trezor/connect"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "2.1.0 - 10.0.0-beta.3",
+      "severity": "high",
+      "via": []
+    },
+    "@trezor/blockchain-link-types": {
+      "effects": [
+        "@trezor/blockchain-link",
+        "@trezor/connect"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "1.0.13 - 1.5.1",
+      "severity": "low",
+      "via": []
+    },
+    "@trezor/blockchain-link-utils": {
+      "effects": [
+        "@trezor/blockchain-link",
+        "@trezor/connect"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "1.4.0-beta.1 - 10.0.0-beta.3",
+      "severity": "high",
+      "via": []
+    },
+    "@trezor/connect": {
+      "effects": [
+        "@trezor/connect-web"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=10.0.0-beta.3",
+      "severity": "high",
+      "via": []
+    },
+    "@trezor/connect-web": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "9.1.2 - 9.7.3",
+      "severity": "high",
+      "via": []
+    },
+    "@trezor/device-authenticity": {
+      "effects": [
+        "@trezor/connect"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=1.1.2",
+      "severity": "high",
+      "via": []
+    },
+    "@trezor/protobuf": {
+      "effects": [
+        "@trezor/blockchain-link-utils",
+        "@trezor/connect",
+        "@trezor/device-authenticity",
+        "@trezor/transport"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=1.5.3",
+      "severity": "high",
+      "via": []
+    },
+    "@trezor/transport": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "1.1.15 - 1.6.3",
+      "severity": "high",
+      "via": []
+    },
+    "@trezor/utxo-lib": {
+      "effects": [
+        "@trezor/blockchain-link",
+        "@trezor/blockchain-link-types",
+        "@trezor/connect"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "1.0.0-beta.1 - 2.5.0",
+      "severity": "low",
+      "via": []
+    },
+    "@typescript-eslint/parser": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "6.16.0 - 7.5.0",
+      "severity": "high",
+      "via": []
+    },
+    "@typescript-eslint/typescript-estree": {
+      "effects": [
+        "@typescript-eslint/parser"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "3.10.2-alpha.0 - 8.2.1-alpha.25",
+      "severity": "high",
+      "via": []
+    },
+    "@walletconnect/core": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "2.15.0-canary-1b3068 - 2.19.1",
+      "severity": "low",
+      "via": []
+    },
+    "@walletconnect/sign-client": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "2.15.0-canary-1b3068 - 2.19.1",
+      "severity": "low",
+      "via": []
+    },
+    "@walletconnect/solana-adapter": {
+      "effects": [
+        "@solana/wallet-adapter-walletconnect"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "@walletconnect/universal-provider": {
+      "effects": [
+        "@reown/appkit",
+        "@reown/appkit-controllers",
+        "@reown/appkit-utils",
+        "@walletconnect/solana-adapter"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "2.15.0-canary-1b3068 - 2.19.1",
+      "severity": "moderate",
+      "via": []
+    },
+    "@walletconnect/utils": {
+      "effects": [
+        "@walletconnect/core",
+        "@walletconnect/sign-client",
+        "@walletconnect/solana-adapter",
+        "@walletconnect/universal-provider"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "1.2.3-1.3.0-rc.0.0 - 2.21.9",
+      "severity": "moderate",
+      "via": []
+    },
+    "bigint-buffer": {
+      "effects": [
+        "@solana/buffer-layout-utils"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/spl-token",
+        "version": "0.1.8"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-120"
+          ],
+          "range": "<=1.1.5",
+          "severity": "high",
+          "title": "bigint-buffer Vulnerable to Buffer Overflow via toBigIntLE() Function",
+          "url": "https://github.com/advisories/GHSA-3gc7-fjrx-p6mg"
+        }
+      ]
+    },
+    "braces": {
+      "effects": [
+        "chokidar",
+        "micromatch"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-674"
+          ],
+          "range": "<=3.0.3",
+          "severity": "high",
+          "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+          "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm"
+        }
+      ]
+    },
+    "browserify-sign": {
+      "effects": [
+        "crypto-browserify"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": ">=2.4.0",
+      "severity": "low",
+      "via": []
+    },
+    "chokidar": {
+      "effects": [
+        "tailwindcss"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "2.0.0 - 3.6.0",
+      "severity": "high",
+      "via": []
+    },
+    "cookie": {
+      "effects": [
+        "@supabase/ssr"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@supabase/ssr",
+        "version": "0.12.7"
+      },
+      "isDirect": false,
+      "range": "<0.7.0",
+      "severity": "low",
+      "via": [
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-74"
+          ],
+          "range": "<0.7.0",
+          "severity": "low",
+          "title": "cookie accepts cookie name, path, and domain with out of bounds characters",
+          "url": "https://github.com/advisories/GHSA-pxg6-pf52-xh8x"
+        }
+      ]
+    },
+    "create-ecdh": {
+      "effects": [
+        "crypto-browserify"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "low",
+      "via": []
+    },
+    "crypto-browserify": {
+      "effects": [
+        "@solana/wallet-adapter-torus",
+        "@trezor/blockchain-link"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": ">=3.4.0",
+      "severity": "low",
+      "via": []
+    },
+    "decode-uri-component": {
+      "effects": [
+        "query-string"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "<=0.4.2",
+      "severity": "moderate",
+      "via": [
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-400",
+            "CWE-405",
+            "CWE-407",
+            "CWE-1176"
+          ],
+          "range": "<=0.4.2",
+          "severity": "moderate",
+          "title": "decode-uri-component: Denial of service via exponential decoding of malformed percent-encoded input",
+          "url": "https://github.com/advisories/GHSA-vcc3-ghjq-m6fr"
+        }
+      ]
+    },
+    "elliptic": {
+      "effects": [
+        "@toruslabs/eccrypto",
+        "@toruslabs/metadata-helpers",
+        "@walletconnect/utils",
+        "browserify-sign",
+        "create-ecdh",
+        "tiny-secp256k1"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "*",
+      "severity": "low",
+      "via": [
+        {
+          "cvss": {
+            "score": 5.6,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L"
+          },
+          "cwe": [
+            "CWE-1240"
+          ],
+          "range": "<=6.6.1",
+          "severity": "low",
+          "title": "Elliptic Uses a Cryptographic Primitive with a Risky Implementation",
+          "url": "https://github.com/advisories/GHSA-848j-6mx2-7j84"
+        }
+      ]
+    },
+    "eslint-config-next": {
+      "effects": [],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "eslint-config-next",
+        "version": "16.4.2"
+      },
+      "isDirect": true,
+      "range": "14.0.5-canary.0 - 15.0.0-rc.1",
+      "severity": "high",
+      "via": []
+    },
+    "fast-glob": {
+      "effects": [
+        "globby"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": []
+    },
+    "glob": {
+      "effects": [
+        "@next/eslint-plugin-next"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "eslint-config-next",
+        "version": "16.4.2"
+      },
+      "isDirect": false,
+      "range": "10.2.0 - 10.4.5",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "cwe": [
+            "CWE-78"
+          ],
+          "range": ">=10.2.0 <10.5.0",
+          "severity": "high",
+          "title": "glob CLI: Command injection via -c/--cmd executes matches with shell:true",
+          "url": "https://github.com/advisories/GHSA-5j98-mcp5-4vw2"
+        }
+      ]
+    },
+    "globby": {
+      "effects": [
+        "@typescript-eslint/typescript-estree"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": ">=8.0.0",
+      "severity": "high",
+      "via": []
+    },
+    "jayson": {
+      "effects": [
+        "@solana/web3.js"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "2.0.6 - 4.3.0",
+      "severity": "moderate",
+      "via": []
+    },
+    "lodash": {
+      "effects": [
+        "@walletconnect/universal-provider"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "<=4.17.23",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 8.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "cwe": [
+            "CWE-94"
+          ],
+          "range": ">=4.0.0 <=4.17.23",
+          "severity": "high",
+          "title": "lodash vulnerable to Code Injection via `_.template` imports key names",
+          "url": "https://github.com/advisories/GHSA-r5fr-rjxr-66jc"
+        },
+        {
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L"
+          },
+          "cwe": [
+            "CWE-1321"
+          ],
+          "range": "<=4.17.23",
+          "severity": "moderate",
+          "title": "lodash vulnerable to Prototype Pollution via array path bypass in `_.unset` and `_.omit`",
+          "url": "https://github.com/advisories/GHSA-f23m-r3pf-42rh"
+        },
+        {
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L"
+          },
+          "cwe": [
+            "CWE-1321"
+          ],
+          "range": ">=4.0.0 <=4.17.22",
+          "severity": "moderate",
+          "title": "Lodash has Prototype Pollution Vulnerability in `_.unset` and `_.omit` functions",
+          "url": "https://github.com/advisories/GHSA-xxjr-mmjv-4gpg"
+        }
+      ]
+    },
+    "metro": {
+      "effects": [
+        "@react-native/community-cli-plugin",
+        "metro-config",
+        "metro-transform-worker"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": ">=0.71.0",
+      "severity": "high",
+      "via": []
+    },
+    "metro-config": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": ">=0.71.0",
+      "severity": "high",
+      "via": []
+    },
+    "metro-file-map": {
+      "effects": [
+        "metro"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "*",
+      "severity": "high",
+      "via": []
+    },
+    "metro-transform-worker": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": ">=0.71.0",
+      "severity": "high",
+      "via": []
+    },
+    "micromatch": {
+      "effects": [
+        "fast-glob",
+        "metro-file-map",
+        "tailwindcss"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": ">=0.2.0",
+      "severity": "high",
+      "via": []
+    },
+    "minimatch": {
+      "effects": [
+        "@typescript-eslint/typescript-estree"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "9.0.0 - 9.0.6",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-1333"
+          ],
+          "range": ">=9.0.0 <9.0.6",
+          "severity": "high",
+          "title": "minimatch has a ReDoS via repeated wildcards with non-matching literal in pattern",
+          "url": "https://github.com/advisories/GHSA-3ppc-4f35-3m26"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-407"
+          ],
+          "range": ">=9.0.0 <9.0.7",
+          "severity": "high",
+          "title": "minimatch has ReDoS: matchOne() combinatorial backtracking via multiple non-adjacent GLOBSTAR segments",
+          "url": "https://github.com/advisories/GHSA-7r86-cg39-jmmj"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-1333"
+          ],
+          "range": ">=9.0.0 <9.0.7",
+          "severity": "high",
+          "title": "minimatch ReDoS: nested *() extglobs generate catastrophically backtracking regular expressions",
+          "url": "https://github.com/advisories/GHSA-23c5-xmqv-rm74"
+        }
+      ]
+    },
+    "next": {
+      "effects": [],
+      "fixAvailable": {
+        "isSemVerMajor": false,
+        "name": "next",
+        "version": "14.2.35"
+      },
+      "isDirect": true,
+      "range": "0.9.9 - 16.3.0-preview.10",
+      "severity": "critical",
+      "via": [
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-918"
+          ],
+          "range": ">=13.4.0 <14.1.1",
+          "severity": "high",
+          "title": "Next.js Server-Side Request Forgery in Server Actions",
+          "url": "https://github.com/advisories/GHSA-fr5h-rqp8-mj6g"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-349",
+            "CWE-639"
+          ],
+          "range": ">=14.0.0 <14.2.10",
+          "severity": "high",
+          "title": "Next.js Cache Poisoning",
+          "url": "https://github.com/advisories/GHSA-gp8f-8m3g-qvj9"
+        },
+        {
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-674"
+          ],
+          "range": ">=10.0.0 <14.2.7",
+          "severity": "moderate",
+          "title": "Denial of Service condition in Next.js image optimization",
+          "url": "https://github.com/advisories/GHSA-g77x-44xx-532m"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-770"
+          ],
+          "range": ">=14.0.0 <14.2.21",
+          "severity": "moderate",
+          "title": "Next.js Allows a Denial of Service (DoS) with Server Actions",
+          "url": "https://github.com/advisories/GHSA-7m27-7ghc-44w9"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-1385"
+          ],
+          "range": ">=13.0 <14.2.30",
+          "severity": "low",
+          "title": "Information exposure in Next.js dev server due to lack of origin verification",
+          "url": "https://github.com/advisories/GHSA-3h52-269p-cp9r"
+        },
+        {
+          "cvss": {
+            "score": 6.2,
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-524"
+          ],
+          "range": ">=0.9.9 <14.2.31",
+          "severity": "moderate",
+          "title": "Next.js Affected by Cache Key Confusion for Image Optimization API Routes",
+          "url": "https://github.com/advisories/GHSA-g5qg-72qw-gw5v"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-285",
+            "CWE-863"
+          ],
+          "range": ">=9.5.5 <14.2.15",
+          "severity": "high",
+          "title": "Next.js authorization bypass vulnerability",
+          "url": "https://github.com/advisories/GHSA-7gfc-8cq8-jh5f"
+        },
+        {
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-918"
+          ],
+          "range": ">=0.9.9 <14.2.32",
+          "severity": "moderate",
+          "title": "Next.js Improper Middleware Redirect Handling Leads to SSRF",
+          "url": "https://github.com/advisories/GHSA-4342-x723-ch2f"
+        },
+        {
+          "cvss": {
+            "score": 4.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-20"
+          ],
+          "range": ">=0.9.9 <14.2.31",
+          "severity": "moderate",
+          "title": "Next.js Content Injection Vulnerability for Image Optimization",
+          "url": "https://github.com/advisories/GHSA-xv57-4mr9-wg8v"
+        },
+        {
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-362"
+          ],
+          "range": ">=0.9.9 <14.2.24",
+          "severity": "low",
+          "title": "Next.js Race Condition to Cache Poisoning",
+          "url": "https://github.com/advisories/GHSA-qpjv-v59x-3qc4"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-400",
+            "CWE-502",
+            "CWE-1395"
+          ],
+          "range": ">=13.3.0 <14.2.34",
+          "severity": "high",
+          "title": "Next Vulnerable to Denial of Service with Server Components",
+          "url": "https://github.com/advisories/GHSA-mwv6-3258-q52c"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-400",
+            "CWE-502",
+            "CWE-1395"
+          ],
+          "range": ">=13.3.1-canary.0 <14.2.35",
+          "severity": "high",
+          "title": "Next has a Denial of Service with Server Components - Incomplete Fix Follow-Up",
+          "url": "https://github.com/advisories/GHSA-5j59-xgg2-r9c4"
+        },
+        {
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-400",
+            "CWE-770"
+          ],
+          "range": ">=10.0.0 <15.5.10",
+          "severity": "moderate",
+          "title": "Next.js self-hosted applications vulnerable to DoS via Image Optimizer remotePatterns configuration",
+          "url": "https://github.com/advisories/GHSA-9g9p-9gw9-jx7f"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-400",
+            "CWE-502"
+          ],
+          "range": ">=13.0.0 <15.0.8",
+          "severity": "high",
+          "title": "Next.js HTTP request deserialization can lead to DoS when using insecure React Server Components",
+          "url": "https://github.com/advisories/GHSA-h25m-26qc-wcjf"
+        },
+        {
+          "cvss": {
+            "score": 9.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "cwe": [
+            "CWE-285",
+            "CWE-863"
+          ],
+          "range": ">=14.0.0 <14.2.25",
+          "severity": "critical",
+          "title": "Authorization Bypass in Next.js Middleware",
+          "url": "https://github.com/advisories/GHSA-f82v-jwr5-mffw"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-444"
+          ],
+          "range": ">=9.5.0 <15.5.13",
+          "severity": "moderate",
+          "title": "Next.js: HTTP request smuggling in rewrites",
+          "url": "https://github.com/advisories/GHSA-ggv3-7p47-pfv8"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-400"
+          ],
+          "range": ">=10.0.0 <15.5.14",
+          "severity": "moderate",
+          "title": "Next.js: Unbounded next/image disk cache growth can exhaust storage",
+          "url": "https://github.com/advisories/GHSA-3x4c-7xq6-9pq8"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-770"
+          ],
+          "range": ">=13.0.0 <15.5.15",
+          "severity": "high",
+          "title": "Next.js has a Denial of Service with Server Components",
+          "url": "https://github.com/advisories/GHSA-q4gf-8mx6-v5v3"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-770"
+          ],
+          "range": ">=13.0.0 <15.5.16",
+          "severity": "high",
+          "title": "Next.js Vulnerable to Denial of Service with Server Components",
+          "url": "https://github.com/advisories/GHSA-8h8q-6873-q5fj"
+        },
+        {
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-349"
+          ],
+          "range": ">=12.2.0 <15.5.16",
+          "severity": "low",
+          "title": "Next.js's Middleware / Proxy redirects can be cache-poisoned",
+          "url": "https://github.com/advisories/GHSA-3g8h-86w9-wvmq"
+        },
+        {
+          "cvss": {
+            "score": 4.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-79"
+          ],
+          "range": ">=13.4.0 <15.5.16",
+          "severity": "moderate",
+          "title": "Next.js vulnerable to cross-site scripting in App Router applications using CSP nonces",
+          "url": "https://github.com/advisories/GHSA-ffhc-5mcf-pf4q"
+        },
+        {
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-328"
+          ],
+          "range": ">=13.4.6 <15.5.16",
+          "severity": "low",
+          "title": "Next.js vulnerable to cache poisoning via collisions in React Server Component cache-busting",
+          "url": "https://github.com/advisories/GHSA-vfv6-92ff-j949"
+        },
+        {
+          "cvss": {
+            "score": 6.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-79"
+          ],
+          "range": ">=13.0.0 <15.5.16",
+          "severity": "moderate",
+          "title": "Next.js has cross-site scripting in beforeInteractive scripts with untrusted input",
+          "url": "https://github.com/advisories/GHSA-gx5p-jg67-6x7h"
+        },
+        {
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-770"
+          ],
+          "range": ">=10.0.0 <15.5.16",
+          "severity": "moderate",
+          "title": "Next.js has a Denial of Service in the Image Optimization API",
+          "url": "https://github.com/advisories/GHSA-h64f-5h5j-jqjh"
+        },
+        {
+          "cvss": {
+            "score": 8.6,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-918"
+          ],
+          "range": ">=13.4.13 <15.5.16",
+          "severity": "high",
+          "title": "Next.js vulnerable to server-side request forgery in applications using WebSocket upgrades",
+          "url": "https://github.com/advisories/GHSA-c4j6-fc7j-m34r"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-863"
+          ],
+          "range": ">=12.2.0 <15.5.16",
+          "severity": "high",
+          "title": "Next.js has a Middleware / Proxy bypass in Pages Router applications using i18n",
+          "url": "https://github.com/advisories/GHSA-36qx-fr4f-26g5"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-834"
+          ],
+          "range": ">=13.0.0 <15.5.21",
+          "severity": "high",
+          "title": "Next.js: Denial of Service in App Router using Server Actions",
+          "url": "https://github.com/advisories/GHSA-m99w-x7hq-7vfj"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-524"
+          ],
+          "range": ">=13.0.0 <15.5.21",
+          "severity": "moderate",
+          "title": "Next.js: Cache confusion of response bodies for requests with bodies",
+          "url": "https://github.com/advisories/GHSA-68g3-v927-f742"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-116"
+          ],
+          "range": ">=13.0.0 <15.5.21",
+          "severity": "moderate",
+          "title": "Next.js: Cache confusion of response bodies for requests with bodies containing invalid UTF-8 byte sequences",
+          "url": "https://github.com/advisories/GHSA-4633-3j49-mh5q"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-770"
+          ],
+          "range": ">=13.0.0 <15.5.21",
+          "severity": "moderate",
+          "title": "Next.js: Unbounded Server Action payload in Edge runtime",
+          "url": "https://github.com/advisories/GHSA-4c39-4ccg-62r3"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-918"
+          ],
+          "range": ">=12.0.0 <15.5.21",
+          "severity": "high",
+          "title": "Next.js: Server-Side Request Forgery in rewrites via attacker-controlled destination hostname",
+          "url": "https://github.com/advisories/GHSA-p9j2-gv94-2wf4"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-201"
+          ],
+          "range": ">=13.0.0 <15.5.21",
+          "severity": "moderate",
+          "title": "Next.js: Unauthenticated disclosure of internal Server Function endpoints",
+          "url": "https://github.com/advisories/GHSA-955p-x3mx-jcvp"
+        },
+        {
+          "cvss": {
+            "score": 9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H"
+          },
+          "cwe": [
+            "CWE-22"
+          ],
+          "range": ">=13.4.0 <15.5.24",
+          "severity": "critical",
+          "title": "Next.js: Unauthenticated Remote Code Execution on windows-hosted servers",
+          "url": "https://github.com/advisories/GHSA-p293-qw3h-jr36"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-1395"
+          ],
+          "range": ">=10.0.0 <15.5.24",
+          "severity": "critical",
+          "title": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used",
+          "url": "https://github.com/advisories/GHSA-2xp9-vwfh-vxw4"
+        }
+      ]
+    },
+    "pbkdf2": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=3.1.6",
+      "severity": "moderate",
+      "via": [
+        {
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-400"
+          ],
+          "range": "<=3.1.6",
+          "severity": "moderate",
+          "title": "pbkdf2 rehashes long passwords on every iteration, enabling denial of service",
+          "url": "https://github.com/advisories/GHSA-477h-4r7f-fvrx"
+        }
+      ]
+    },
+    "postcss": {
+      "effects": [
+        "next"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": false,
+        "name": "next",
+        "version": "14.2.35"
+      },
+      "isDirect": false,
+      "range": "<=8.5.22",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 6.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-79"
+          ],
+          "range": "<8.5.10",
+          "severity": "moderate",
+          "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+          "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-22",
+            "CWE-200"
+          ],
+          "range": "<=8.5.11",
+          "severity": "high",
+          "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+          "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-22",
+            "CWE-200"
+          ],
+          "range": "<=8.5.22",
+          "severity": "moderate",
+          "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q \u2014 attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+          "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-22"
+          ],
+          "range": "<=8.5.17",
+          "severity": "high",
+          "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+          "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849"
+        }
+      ]
+    },
+    "postcss-nested": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "2.0.3 - 6.2.0",
+      "severity": "moderate",
+      "via": []
+    },
+    "postcss-selector-parser": {
+      "effects": [
+        "postcss-nested",
+        "tailwindcss"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "<7.1.6",
+      "severity": "moderate",
+      "via": [
+        {
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-400",
+            "CWE-407"
+          ],
+          "range": "<7.1.6",
+          "severity": "moderate",
+          "title": "PostCSS: Quadratic complexity in flat selector parsing allows CPU exhaustion",
+          "url": "https://github.com/advisories/GHSA-rj75-hqrm-r3gf"
+        }
+      ]
+    },
+    "protobufjs": {
+      "effects": [
+        "@trezor/protobuf"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=7.6.4",
+      "severity": "critical",
+      "via": [
+        {
+          "cvss": {
+            "score": 9.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "cwe": [
+            "CWE-94"
+          ],
+          "range": "<7.5.5",
+          "severity": "critical",
+          "title": "Arbitrary code execution in protobufjs",
+          "url": "https://github.com/advisories/GHSA-xq3m-2v4x-88gg"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-94"
+          ],
+          "range": "<=7.5.5",
+          "severity": "high",
+          "title": "protobuf.js: Code injection through bytes field defaults in generated toObject code",
+          "url": "https://github.com/advisories/GHSA-66ff-xgx4-vchm"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-20"
+          ],
+          "range": "<=7.5.5",
+          "severity": "moderate",
+          "title": "protobuf.js: Denial of service from crafted field names in generated code",
+          "url": "https://github.com/advisories/GHSA-2pr8-phx7-x9h3"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-1321"
+          ],
+          "range": "<=7.5.5",
+          "severity": "moderate",
+          "title": "protobuf.js: Prototype injection in generated message constructors",
+          "url": "https://github.com/advisories/GHSA-fx83-v9x8-x52w"
+        },
+        {
+          "cvss": {
+            "score": 8.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "cwe": [
+            "CWE-94",
+            "CWE-1321"
+          ],
+          "range": "<=7.5.5",
+          "severity": "high",
+          "title": "protobuf.js: Code generation gadget after prototype pollution",
+          "url": "https://github.com/advisories/GHSA-75px-5xx7-5xc7"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-1321"
+          ],
+          "range": "<=7.5.5",
+          "severity": "high",
+          "title": "protobuf.js: Process-wide denial of service through unsafe option paths",
+          "url": "https://github.com/advisories/GHSA-jvwf-75h9-cwgg"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-674"
+          ],
+          "range": "<=7.5.5",
+          "severity": "high",
+          "title": "protobuf.js: Denial of service through unbounded protobuf recursion",
+          "url": "https://github.com/advisories/GHSA-685m-2w69-288q"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-176"
+          ],
+          "range": "<=7.5.5",
+          "severity": "moderate",
+          "title": "protobufjs has overlong UTF-8 decoding",
+          "url": "https://github.com/advisories/GHSA-q6x5-8v7m-xcrf"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-674"
+          ],
+          "range": "<=7.5.7",
+          "severity": "moderate",
+          "title": "protobufjs: Denial of Service via unbounded recursive JSON descriptor expansion",
+          "url": "https://github.com/advisories/GHSA-jggg-4jg4-v7c6"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-674"
+          ],
+          "range": "<=7.6.0",
+          "severity": "high",
+          "title": "protobufjs: Denial of service through unbounded Any expansion during JSON conversion",
+          "url": "https://github.com/advisories/GHSA-wcpc-wj8m-hjx6"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-674",
+            "CWE-754"
+          ],
+          "range": "<=7.6.2",
+          "severity": "moderate",
+          "title": "protobufjs : Schema-derived names can shadow runtime-significant properties",
+          "url": "https://github.com/advisories/GHSA-f38q-mgvj-vph7"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-835"
+          ],
+          "range": ">=7.5.0 <=7.6.4",
+          "severity": "moderate",
+          "title": "protobufjs: Denial of Service via infinite loop in .proto option parsing",
+          "url": "https://github.com/advisories/GHSA-j3f2-48v5-ccww"
+        }
+      ]
+    },
+    "query-string": {
+      "effects": [
+        "@walletconnect/utils"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "5.0.0 - 9.4.1",
+      "severity": "moderate",
+      "via": []
+    },
+    "react-native": {
+      "effects": [
+        "@react-native/virtualized-lists",
+        "@solana-mobile/mobile-wallet-adapter-protocol",
+        "@solana-mobile/wallet-adapter-mobile"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": ">=0.73.0-nightly-20230506-1af868c52",
+      "severity": "high",
+      "via": []
+    },
+    "salmon-adapter-sdk": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "source-map-js": {
+      "effects": [],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "1.0.0 - 1.2.1",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-1284"
+          ],
+          "range": ">=1.0.0 <1.2.2",
+          "severity": "high",
+          "title": "source-map-js allows event-loop denial of service through indexed source-map section offsets",
+          "url": "https://github.com/advisories/GHSA-68fv-2mgg-jv7q"
+        }
+      ]
+    },
+    "stream-json": {
+      "effects": [
+        "jayson"
+      ],
+      "fixAvailable": false,
+      "isDirect": false,
+      "range": "<=3.5.0",
+      "severity": "moderate",
+      "via": [
+        {
+          "cvss": {
+            "score": 6.2,
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-407"
+          ],
+          "range": "<=3.4.0",
+          "severity": "moderate",
+          "title": "stream-json: pick/ignore/filter/replace filters are O(depth\u00b2) on nested input \u2014 small crafted JSON blocks the event loop for seconds\u2192minutes (DoS)",
+          "url": "https://github.com/advisories/GHSA-528h-pc64-c93x"
+        },
+        {
+          "cvss": {
+            "score": 6.2,
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-407"
+          ],
+          "range": "<=3.5.0",
+          "severity": "moderate",
+          "title": "stream-json: JSONC parser and verifier re-scan the whole accumulated comment on every input chunk",
+          "url": "https://github.com/advisories/GHSA-hqr4-qq8f-hg3x"
+        },
+        {
+          "cvss": {
+            "score": 5.1,
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L"
+          },
+          "cwe": [
+            "CWE-1321"
+          ],
+          "range": "<3.6.0",
+          "severity": "moderate",
+          "title": "stream-json has a prototype pollution issue: Assembler writes this.current[this.key] on plain objects",
+          "url": "https://github.com/advisories/GHSA-mjw6-4jj6-33hc"
+        }
+      ]
+    },
+    "supabase": {
+      "effects": [],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "supabase",
+        "version": "2.121.0"
+      },
+      "isDirect": true,
+      "range": "1.1.6 - 2.72.8",
+      "severity": "high",
+      "via": []
+    },
+    "tailwindcss": {
+      "effects": [
+        "tailwindcss-animate"
+      ],
+      "fixAvailable": false,
+      "isDirect": true,
+      "range": "<=0.0.0-oxide-insiders.ff2c25f || 0.5.0 - 3.4.19",
+      "severity": "high",
+      "via": []
+    },
+    "tailwindcss-animate": {
+      "effects": [],
+      "fixAvailable": false,
+      "isDirect": true,
+      "range": "*",
+      "severity": "moderate",
+      "via": []
+    },
+    "tar": {
+      "effects": [
+        "supabase"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "supabase",
+        "version": "2.121.0"
+      },
+      "isDirect": false,
+      "range": "<=7.5.20",
+      "severity": "critical",
+      "via": [
+        {
+          "cvss": {
+            "score": 8.2,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N"
+          },
+          "cwe": [
+            "CWE-22",
+            "CWE-59"
+          ],
+          "range": "<7.5.7",
+          "severity": "high",
+          "title": "node-tar Vulnerable to Arbitrary File Creation/Overwrite via Hardlink Path Traversal",
+          "url": "https://github.com/advisories/GHSA-34x7-hfp2-rc4v"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-22"
+          ],
+          "range": "<=7.5.2",
+          "severity": "high",
+          "title": "node-tar is Vulnerable to Arbitrary File Overwrite and Symlink Poisoning via Insufficient Path Sanitization",
+          "url": "https://github.com/advisories/GHSA-8qq5-rm4j-mr97"
+        },
+        {
+          "cvss": {
+            "score": 7.1,
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N"
+          },
+          "cwe": [
+            "CWE-22"
+          ],
+          "range": "<7.5.8",
+          "severity": "high",
+          "title": "Arbitrary File Read/Write via Hardlink Target Escape Through Symlink Chain in node-tar Extraction",
+          "url": "https://github.com/advisories/GHSA-83g3-92jg-28cx"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-22",
+            "CWE-59"
+          ],
+          "range": "<=7.5.9",
+          "severity": "high",
+          "title": "tar has Hardlink Path Traversal via Drive-Relative Linkpath",
+          "url": "https://github.com/advisories/GHSA-qffp-2rhf-9h96"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-22"
+          ],
+          "range": "<=7.5.10",
+          "severity": "high",
+          "title": "node-tar Symlink Path Traversal via Drive-Relative Linkpath",
+          "url": "https://github.com/advisories/GHSA-9ppj-qmqm-q256"
+        },
+        {
+          "cvss": {
+            "score": 8.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:H/A:L"
+          },
+          "cwe": [
+            "CWE-176",
+            "CWE-367"
+          ],
+          "range": "<=7.5.3",
+          "severity": "high",
+          "title": "Race Condition in node-tar Path Reservations via Unicode Ligature Collisions on macOS APFS",
+          "url": "https://github.com/advisories/GHSA-r6q2-hw4h-h46w"
+        },
+        {
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "cwe": [
+            "CWE-436"
+          ],
+          "range": "<=7.5.15",
+          "severity": "moderate",
+          "title": "node-tar applies PAX size override to intermediary GNU long-name/long-link headers, causing tar parser interpretation differential (file smuggling)",
+          "url": "https://github.com/advisories/GHSA-vmf3-w455-68vh"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-704"
+          ],
+          "range": "<=7.5.17",
+          "severity": "moderate",
+          "title": "node-tar: Process crash via PAX numeric path type confusion",
+          "url": "https://github.com/advisories/GHSA-w8wr-v893-vjvp"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-770"
+          ],
+          "range": "<=7.5.18",
+          "severity": "critical",
+          "title": "node-tar: Decompression/parse DoS via unlimited input",
+          "url": "https://github.com/advisories/GHSA-23hp-3jrh-7fpw"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-835"
+          ],
+          "range": "<=7.5.17",
+          "severity": "high",
+          "title": "node-tar: Negative tar entry size causes infinite loop in archive replace",
+          "url": "https://github.com/advisories/GHSA-8x88-c5mf-7j5w"
+        },
+        {
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "cwe": [
+            "CWE-248"
+          ],
+          "range": "<=7.5.16",
+          "severity": "moderate",
+          "title": "node-tar: Uncaught Exception DoS via NUL byte in PAX path/linkpath records",
+          "url": "https://github.com/advisories/GHSA-gvwx-54wh-qm9j"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-400",
+            "CWE-674"
+          ],
+          "range": "<=7.5.20",
+          "severity": "high",
+          "title": "node-tar: Uncontrolled recursion in mapHas/filesFilter allows uncatchable stack-overflow DoS via crafted long-path tar with member selection",
+          "url": "https://github.com/advisories/GHSA-r292-9mhp-454m"
+        }
+      ]
+    },
+    "tiny-secp256k1": {
+      "effects": [
+        "@trezor/utxo-lib"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "0.0.0-rc-1560324438 || 0.2.0 - 1.1.7",
+      "severity": "low",
+      "via": []
+    },
+    "toml": {
+      "effects": [
+        "@stellar/stellar-sdk"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": "<=4.1.2",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-674"
+          ],
+          "range": "<4.2.0",
+          "severity": "high",
+          "title": "toml-node: Uncontrolled Recursion",
+          "url": "https://github.com/advisories/GHSA-82x6-q7mm-w9cf"
+        },
+        {
+          "cvss": {
+            "score": 8.2,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:L"
+          },
+          "cwe": [
+            "CWE-1321"
+          ],
+          "range": "<4.1.2",
+          "severity": "high",
+          "title": "toml-node: Prototype Pollution Leads to `Object.prototype` Corruption via `__proto__` Key-Path Desynchronization",
+          "url": "https://github.com/advisories/GHSA-v5mp-jgw5-2x6j"
+        }
+      ]
+    },
+    "uuid": {
+      "effects": [
+        "@keystonehq/bc-ur-registry-sol",
+        "@keystonehq/sol-keyring",
+        "@solflare-wallet/sdk",
+        "jayson",
+        "uuidv4"
+      ],
+      "fixAvailable": false,
+      "isDirect": true,
+      "range": "<11.1.1",
+      "severity": "moderate",
+      "via": [
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N"
+          },
+          "cwe": [
+            "CWE-787",
+            "CWE-1285"
+          ],
+          "range": "<11.1.1",
+          "severity": "moderate",
+          "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+          "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq"
+        }
+      ]
+    },
+    "uuidv4": {
+      "effects": [
+        "@particle-network/analytics",
+        "@particle-network/crypto"
+      ],
+      "fixAvailable": true,
+      "isDirect": false,
+      "range": ">=1.0.1",
+      "severity": "moderate",
+      "via": []
+    },
+    "viem": {
+      "effects": [
+        "@walletconnect/utils"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "<=0.0.0-wagmiv2-20230628182101 || 0.2.2 - 2.49.3",
+      "severity": "moderate",
+      "via": []
+    },
+    "ws": {
+      "effects": [
+        "viem"
+      ],
+      "fixAvailable": {
+        "isSemVerMajor": true,
+        "name": "@solana/wallet-adapter-wallets",
+        "version": "0.18.2"
+      },
+      "isDirect": false,
+      "range": "8.0.0 - 8.20.1",
+      "severity": "high",
+      "via": [
+        {
+          "cvss": {
+            "score": 4.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "cwe": [
+            "CWE-908"
+          ],
+          "range": ">=8.0.0 <8.20.1",
+          "severity": "moderate",
+          "title": "ws: Uninitialized memory disclosure",
+          "url": "https://github.com/advisories/GHSA-58qx-3vcg-4xpx"
+        },
+        {
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "cwe": [
+            "CWE-400",
+            "CWE-770",
+            "CWE-1050"
+          ],
+          "range": ">=8.0.0 <8.21.0",
+          "severity": "high",
+          "title": "ws: Memory exhaustion DoS from tiny fragments and data chunks",
+          "url": "https://github.com/advisories/GHSA-96hv-2xvq-fx4p"
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "dependencies": {
+      "dev": 276,
+      "optional": 55,
+      "peer": 235,
+      "peerOptional": 0,
+      "prod": 1214,
+      "total": 1740
+    },
+    "vulnerabilities": {
+      "critical": 3,
+      "high": 41,
+      "info": 0,
+      "low": 20,
+      "moderate": 70,
+      "total": 134
+    }
+  }
+}
