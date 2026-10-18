@@ -428,7 +428,11 @@ async function main() {
       period_distributed?: boolean;
     }>("finalize_payout_confirmation", {
       p_operation_id: first,
-      p_blockchain_confirmation: { confirmed: true, source: "staging-smoke" },
+      p_blockchain_confirmation: {
+        confirmed: true,
+        txHash: stagingTxHash,
+        source: "staging-smoke",
+      },
     });
     if (
       finalization.operation_status !== "confirmed" ||

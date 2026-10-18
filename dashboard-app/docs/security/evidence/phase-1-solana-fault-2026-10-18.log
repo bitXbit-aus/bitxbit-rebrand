@@ -1,0 +1,11 @@
+
+> bitxbit-dashboard@0.1.0 test:solana-fault
+> tsc scripts/staging-solana-fault-test.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/scripts/staging-solana-fault-test.js && rm -rf .staging-dist
+
+Verified Solana devnet RPC (EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG)
+✓ prepare real devnet payout submission
+✓ broadcast failure preserves durable transaction identity
+✓ confirmation of unknown transaction returns uncertain
+✓ on-chain mismatch is reported as non-retryable incident
+
+All Solana fault-injection tests passed.

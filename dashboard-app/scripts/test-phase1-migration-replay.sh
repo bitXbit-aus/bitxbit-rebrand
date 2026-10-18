@@ -20,6 +20,7 @@ MIGRATION_022="$ROOT_DIR/supabase/migrations/022_create_or_claim_recheck_wallet_
 MIGRATION_023="$ROOT_DIR/supabase/migrations/023_remove_obsolete_create_or_claim_overload.sql"
 MIGRATION_024="$ROOT_DIR/supabase/migrations/024_atomic_reward_approval_and_payout_finalization.sql"
 MIGRATION_025="$ROOT_DIR/supabase/migrations/025_exact_payout_amount_reads.sql"
+MIGRATION_026="$ROOT_DIR/supabase/migrations/026_harden_payout_confirmation_evidence.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -63,6 +64,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_022" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_023" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_024" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -84,6 +86,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_022" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_023" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_024" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -960,7 +963,7 @@ BEGIN
 
     SELECT public.finalize_payout_confirmation(
       v_finalize_op,
-      jsonb_build_object('confirmed', true, 'source', 'migration-replay')
+      jsonb_build_object('confirmed', true, 'txHash', v_finalize_tx, 'source', 'migration-replay')
     ) INTO v_finalize_result;
 
     IF (SELECT status FROM public.payout_operations WHERE operation_id = v_finalize_op) IS DISTINCT FROM 'confirmed' THEN
@@ -977,6 +980,129 @@ BEGIN
     END IF;
     IF (v_finalize_result->>'period_distributed')::BOOLEAN IS DISTINCT FROM TRUE THEN
       RAISE EXCEPTION 'finalize_payout_confirmation result omitted distributed period state (got %)', v_finalize_result;
+    END IF;
+  END;
+
+  -- Finalization must reject evidence that does not positively confirm the exact
+  -- stored transaction signature.
+  DECLARE
+    v_evidence_user UUID := '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a01';
+    v_evidence_period UUID := '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a02';
+    v_evidence_reward UUID := '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a03';
+    v_evidence_op TEXT := 'payout:atomic-finalize:evidence';
+    v_evidence_tx TEXT := 'evidence-signature-alpha';
+    v_rejected INT := 0;
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_evidence_user, 'evidence-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_evidence_period, '2027-03-01', '2027-03-31', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (id, user_id, reward_period_id, bitxbit_amount, status, version)
+    VALUES (v_evidence_reward, v_evidence_user, v_evidence_period, 3.25, 'approved', 1);
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address,
+      token_amount_raw, token_decimals, status, transaction_hash
+    ) VALUES (
+      v_evidence_op, v_evidence_period, v_evidence_reward, v_evidence_user,
+      'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 3250000000, 9,
+      'submitted', v_evidence_tx
+    );
+
+    -- NULL payload.
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(v_evidence_op, NULL);
+    EXCEPTION WHEN OTHERS THEN v_rejected := v_rejected + 1;
+    END;
+    -- Missing confirmed flag.
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(v_evidence_op, jsonb_build_object('txHash', v_evidence_tx));
+    EXCEPTION WHEN OTHERS THEN v_rejected := v_rejected + 1;
+    END;
+    -- confirmed: false.
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(v_evidence_op, jsonb_build_object('confirmed', false, 'txHash', v_evidence_tx));
+    EXCEPTION WHEN OTHERS THEN v_rejected := v_rejected + 1;
+    END;
+    -- confirmed as a non-boolean.
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(v_evidence_op, jsonb_build_object('confirmed', 'true', 'txHash', v_evidence_tx));
+    EXCEPTION WHEN OTHERS THEN v_rejected := v_rejected + 1;
+    END;
+    -- Conflicting incident flag.
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(
+        v_evidence_op, jsonb_build_object('confirmed', true, 'incident', true, 'txHash', v_evidence_tx));
+    EXCEPTION WHEN OTHERS THEN v_rejected := v_rejected + 1;
+    END;
+    -- Missing transaction signature.
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(v_evidence_op, jsonb_build_object('confirmed', true));
+    EXCEPTION WHEN OTHERS THEN v_rejected := v_rejected + 1;
+    END;
+    -- Signature that does not match the stored operation identity.
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(v_evidence_op, jsonb_build_object('confirmed', true, 'txHash', 'a-different-signature'));
+    EXCEPTION WHEN OTHERS THEN v_rejected := v_rejected + 1;
+    END;
+    -- Non-object payload.
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(v_evidence_op, to_jsonb('confirmed'::TEXT));
+    EXCEPTION WHEN OTHERS THEN v_rejected := v_rejected + 1;
+    END;
+
+    IF v_rejected IS DISTINCT FROM 8 THEN
+      RAISE EXCEPTION 'expected 8 rejected confirmation payloads, got %', v_rejected;
+    END IF;
+    IF (SELECT status FROM public.payout_operations WHERE operation_id = v_evidence_op) IS DISTINCT FROM 'submitted' THEN
+      RAISE EXCEPTION 'rejected evidence mutated the payout operation';
+    END IF;
+
+    -- A payload that names the exact stored signature still finalizes.
+    PERFORM public.finalize_payout_confirmation(
+      v_evidence_op, jsonb_build_object('confirmed', true, 'txHash', v_evidence_tx));
+    IF (SELECT status FROM public.payout_operations WHERE operation_id = v_evidence_op) IS DISTINCT FROM 'confirmed' THEN
+      RAISE EXCEPTION 'valid evidence did not finalize the payout operation';
+    END IF;
+  END;
+
+  -- Finalization must refuse to overwrite a conflicting recorded distribution
+  -- signature on an already-distributed reward.
+  DECLARE
+    v_conflict_user UUID := '2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b01';
+    v_conflict_period UUID := '2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b02';
+    v_conflict_reward UUID := '2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b03';
+    v_conflict_op TEXT := 'payout:atomic-finalize:conflict';
+    v_conflict_rejected BOOLEAN := FALSE;
+  BEGIN
+    INSERT INTO auth.users (id, email) VALUES (v_conflict_user, 'conflict-test@example.test');
+    INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
+    VALUES (v_conflict_period, '2027-04-01', '2027-04-30', '55555555-5555-4555-8555-555555555555', 'approved');
+    INSERT INTO public.user_rewards (
+      id, user_id, reward_period_id, bitxbit_amount, status, version,
+      distribution_tx_hash, distributed_at
+    ) VALUES (
+      v_conflict_reward, v_conflict_user, v_conflict_period, 2.00, 'distributed', 1,
+      'original-distribution-signature', NOW()
+    );
+    INSERT INTO public.payout_operations (
+      operation_id, reward_period_id, reward_id, user_id, wallet_address,
+      token_amount_raw, token_decimals, status, transaction_hash, confirmed_at
+    ) VALUES (
+      v_conflict_op, v_conflict_period, v_conflict_reward, v_conflict_user,
+      'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 2000000000, 9,
+      'confirmed', 'different-operation-signature', NOW()
+    );
+
+    BEGIN
+      PERFORM public.finalize_payout_confirmation(v_conflict_op, NULL);
+    EXCEPTION WHEN OTHERS THEN v_conflict_rejected := TRUE;
+    END;
+
+    IF NOT v_conflict_rejected THEN
+      RAISE EXCEPTION 'finalization overwrote a conflicting distribution signature';
+    END IF;
+    IF (SELECT distribution_tx_hash FROM public.user_rewards WHERE id = v_conflict_reward)
+       IS DISTINCT FROM 'original-distribution-signature' THEN
+      RAISE EXCEPTION 'conflicting distribution signature was not preserved';
     END IF;
   END;
 

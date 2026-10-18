@@ -1,0 +1,14 @@
+
+> bitxbit-dashboard@0.1.0 test:staging
+> tsc scripts/staging-smoke-test.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/staging-smoke-test.js && rm -rf .staging-dist
+
+✓ atomic reward approval
+✓ wallet verification challenge lifecycle
+✓ trusted offer click deduplication
+✓ payout operation atomic creation and rejection
+✓ payout operation rejects stale rewards and mismatches
+  (skipped: STAGING_APP_URL not set)
+✓ public API health and rate-limit headers
+  (retained immutable staging payout fixture payout:33333333-3333-4333-8333-792366338908:44444444-4444-4444-8444-792366338908 with its referenced user/reward/period history)
+
+All staging smoke tests passed.

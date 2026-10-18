@@ -10,7 +10,7 @@ No credentials, private keys, service-role keys, database passwords, or signed t
 
 ## Database deployment and catalog verification
 
-Migration `024_atomic_reward_approval_and_payout_finalization.sql` and migration `025_exact_payout_amount_reads.sql` were applied directly to the non-production Supabase database using the staging database credential. Both were registered in `supabase_migrations.schema_migrations`.
+Migration `024_atomic_reward_approval_and_payout_finalization.sql`, `025_exact_payout_amount_reads.sql`, and `026_harden_payout_confirmation_evidence.sql` were applied directly to the non-production Supabase database using the staging database credential. All were registered in `supabase_migrations.schema_migrations`.
 
 Catalog verification after application:
 
@@ -21,9 +21,11 @@ migration_024=1
 candidate_exact=1
 operation_exact=1
 migration_025=1
+finalize_fn=1
+migration_026=1
 ```
 
-Migration `025` adds service-role-only functions that return raw token units as canonical decimal text, so payout reconciliation never constructs a `bigint` through a JavaScript `number`.
+Migration `025` adds service-role-only functions that return raw token units as canonical decimal text, so payout reconciliation never constructs a `bigint` through a JavaScript `number`. Migration `026` hardens `finalize_payout_confirmation()` so it validates that a confirmation payload positively reports `confirmed: true`, carries no conflicting `uncertain`/`incident` claim, and names a transaction signature matching the immutable operation hash, and refuses to overwrite a conflicting recorded distribution signature.
 
 ## Local verification
 
@@ -56,7 +58,9 @@ The smoke test ran against the non-production Supabase project after migration `
 All staging smoke tests passed.
 ```
 
-`STAGING_APP_URL` was not configured, so the optional deployed-app HTTP probe inside the public API section was skipped. Database-level smoke assertions ran successfully.
+`STAGING_APP_URL` was not configured, so the optional deployed-app HTTP probe inside the public API section was skipped. **This remains an open item:** the skipped probe is the only part of the smoke suite that exercises a deployed Next.js instance rather than the database directly. To close it, set `STAGING_APP_URL` to a non-production deployment and re-run.
+
+These are developer-authored records. The deterministic portion of the suite is independently reproducible in CI (`.github/workflows/dashboard-ci.yml` runs `npm test` and `npm run test:migration` on every push and PR), but the non-production Supabase and devnet steps require credentials and are therefore not reproducible by an outside reviewer from the repository alone.
 
 The test intentionally retained its confirmed payout operation and referenced user/reward/period history because finalised financial records are immutable. Transient fixtures were removed.
 

@@ -1329,7 +1329,10 @@ export async function airdropRewards(periodId: string) {
             "finalize_payout_confirmation",
             {
               p_operation_id: op.operation_id,
-              p_blockchain_confirmation: confirmation,
+              // Include the immutable operation signature so the database can
+              // verify the evidence corresponds to the stored transaction
+              // identity rather than trusting the payload's presence.
+              p_blockchain_confirmation: { ...confirmation, txHash: op.transaction_hash },
             }
           );
           if (finalizeError) throw finalizeError;
@@ -1669,7 +1672,8 @@ export async function airdropRewards(periodId: string) {
             "finalize_payout_confirmation",
             {
               p_operation_id: submission.operationId,
-              p_blockchain_confirmation: confirmation,
+              // Bind the evidence to the immutable operation signature.
+              p_blockchain_confirmation: { ...confirmation, txHash: submission.txHash },
             }
           );
           if (finalizeError) throw finalizeError;
