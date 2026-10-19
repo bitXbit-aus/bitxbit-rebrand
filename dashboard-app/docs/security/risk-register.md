@@ -188,29 +188,40 @@ no application-layer defence if the edge is misconfigured or the app is moved.
 
 ---
 
-## R-004 — Rate-limit store silently falls back to per-instance memory
+## R-004 — Rate limiting is per-instance in production (CONFIRMED)
 
-**Status:** OPEN — **not accepted, not closed.** **Severity:** medium.
-**Owner:** Shri — interim accountable owner.
+**Status:** OPEN — **CONFIRMED ACTIVE**, not merely unconfirmed. **Severity: HIGH**
+(raised from medium). **Owner:** Shri — interim accountable owner.
+**Confirmed:** 2026-10-19, Netlify environment audit.
 
-`getRateLimitStore()` uses Upstash Redis **only if** `UPSTASH_REDIS_REST_URL` and
-`UPSTASH_REDIS_REST_TOKEN` are both present; otherwise it silently uses an
-in-memory store. On serverless, in-memory limits apply per instance, so an attacker
-spreading requests across instances gets a multiple of the intended limit — and the
-fallback is invisible in logs.
+`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are **absent** — both from
+the site and from the (empty) team variable set. `getRateLimitStore()` therefore
+takes its `else` branch on every production instance and uses
+`MemoryRateLimitStore`.
 
-**Required action — close by proving the limit is shared on both environments and
-removing the silent production fallback:**
+**This is not a latent risk. It is the running configuration.** Limits apply per
+serverless instance, an attacker spreading requests across instances receives a
+multiple of the intended limit, and the fallback is **silent**.
 
-1. Confirm both Upstash variables are configured on the **staging** and
-   **production** Netlify sites.
-2. **Prove** limits are shared: exceed a limit across two concurrent instances and
-   observe a single shared counter (a single-instance test does not prove this).
+Two consequences beyond the risk itself:
+
+- **R-005 is not worth implementing yet.** Adding limits to a store that isn't
+  shared would create the appearance of protection without the substance.
+- **It weakens the basis of other accepted risks.** Any reasoning in this register
+  that assumed a request ceiling holds is unsound as configured.
+
+Evidence: `docs/security/evidence/netlify-environment-audit-2026-10-19.md`.
+
+**Required action — close by provisioning a shared store and removing the silent
+fallback:**
+
+1. Add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to the site.
+2. **Prove** sharing: exceed a limit across two concurrent instances and observe a
+   single counter (a single-instance test does not prove this).
 3. Remove the silent fallback in production — fail closed or log loudly rather than
    degrading quietly.
 
-**Tracked as NA-2.** This is a **prerequisite** for R-005 and for any accepted risk
-that relies on rate limiting.
+**Tracked as NA-2.**
 
 ---
 
@@ -288,17 +299,109 @@ hardening step.
 
 ---
 
+## R-009 — Production credentials exposed to deploy previews and branch deploys
+
+**Status:** OPEN — **CRITICAL**, newly identified 2026-10-19.
+**Owner:** Shri — interim accountable owner.
+
+Every variable present in the `production` context is **also present in
+`branch-deploy` and `deploy-preview` with the same value**, or is scoped to `all`:
+
+| Variable | Contexts | Significance |
+|---|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | **all** | Production service-role key — bypasses RLS |
+| `NEXT_PUBLIC_SUPABASE_URL` | **all** | Resolves to the **production** project |
+| `AIRDROP_WALLET_PRIVATE_KEY` | production, branch-deploy, deploy-preview | **Production treasury signing key**, identical across all three |
+| `BITXBIT_TOKEN_MINT` | production, branch-deploy, deploy-preview | Production mint, identical across all three |
+| `NEXT_PUBLIC_APP_URL` | **all** | `https://app.bitxbit.com.au` — previews identify as production |
+
+**Consequence:** a deploy preview or branch deploy executes **arbitrary branch
+code** with the **production treasury private key** and the **production
+service-role key** in its runtime, pointed at **production Supabase**. The
+repository is public and previews are publicly reachable. Any branch pushed to the
+repo — including work-in-progress code or a dependency's postinstall script — runs
+with the ability to sign transactions from the treasury wallet and to read/write
+the production database with service-role authority.
+
+This is a live path from "push a branch" to "sign with the treasury key", and it
+means **untrusted code currently runs with treasury signing capability.**
+
+**Required action:** rotate the treasury key and the service-role key; scope
+production credentials to the `production` context only; give preview and
+branch-deploy contexts staging values or none. Evidence:
+`docs/security/evidence/netlify-environment-audit-2026-10-19.md`.
+
+**Tracked as NA-8.**
+
+---
+
+## R-010 — Secret values are not marked secret
+
+**Status:** OPEN. **Severity:** medium-high. **Owner:** Shri — interim accountable owner.
+
+`is_secret` is **false on every variable**, including `AIRDROP_WALLET_PRIVATE_KEY`
+and `SUPABASE_SERVICE_ROLE_KEY`. Values marked secret are masked in the Netlify UI
+and withheld from API reads; these are not — the audit read the treasury private
+key over the API with no privilege beyond site read access, and it appears in
+plaintext in the dashboard.
+
+**Required action:** mark all credential variables `is_secret: true`. Note this is
+adjacent to R-009: marking secrets is necessary but does **not** fix the
+preview-context exposure, which is a scoping problem.
+
+**Tracked as NA-9.**
+
+---
+
+## R-011 — No non-production Solana RPC or devnet configuration
+
+**Status:** OPEN — **blocks D4**. **Severity:** medium-high.
+**Owner:** Shri — interim accountable owner.
+
+There is **no `SOLANA_RPC_URL` or `NEXT_PUBLIC_SOLANA_RPC_URL`** variable at all, so
+the application resolves its RPC endpoint from defaults and nothing constrains
+non-production deployments to devnet. D4 requires "Solana devnet only" for staging,
+which cannot currently be asserted, let alone verified.
+
+**Required action:** set an explicit RPC variable per context — devnet for preview
+and branch-deploy, mainnet for production — so the constraint is configuration
+rather than convention.
+
+**Tracked as NA-10.**
+
+---
+
+## D4 status
+
+**D4 is not satisfiable as currently configured**, and this blocks the deployed
+staging evidence PR #4 needs for R-003 closure.
+
+| D4 requirement | Status |
+|---|---|
+| Staging uses the staging Supabase project | ❌ previews/branch deploys use the production project |
+| Staging uses Solana devnet | ❌ no RPC variable exists to constrain it (R-011) |
+| No production service-role key reachable | ❌ shared via `all` scope (R-009) |
+| No production treasury wallet reachable | ❌ shared with preview and branch-deploy contexts (R-009) |
+
+D4 needs a configuration change — a dedicated staging site or properly scoped
+context — before any deployed evidence can be admitted.
+
+---
+
 ## Required next actions
 
 | ID | Action | Risk | Status |
 |---|---|---|---|
-| **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | **OPEN — to implement** |
-| **NA-2** | Confirm Upstash configured in staging **and** production; prove limits are shared; remove silent production fallback | R-004 | **OPEN — needs Netlify env access** |
-| **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **OPEN — depends on NA-2** |
+| **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | **IMPLEMENTED** — PR #4, 68/68 tests. Not closed: needs independent review + deployed staging evidence (blocked by D4) |
+| **NA-2** | Confirm Upstash configured; prove limits shared; remove silent fallback | R-004 | **INVESTIGATED — CONFIRMED ABSENT.** Not configured at site or team level, so the per-instance fallback is what runs. Fix requires adding the credentials. |
+| **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **BLOCKED** — de-prioritised until NA-2 lands; limits on an unshared store would be cosmetic |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | **OPEN — doc done, migration step pending** |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | **OPEN** |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
+| **NA-8** | Rotate treasury + service-role keys; scope production credentials to the `production` context only | **R-009 (critical)** | **OPEN — owner authorisation required; highest priority** |
+| **NA-9** | Mark all credential variables `is_secret: true` | R-010 | **OPEN** |
+| **NA-10** | Set an explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | **OPEN — blocks D4** |
 
 ### NA-6 detail
 
@@ -336,11 +439,14 @@ Options, in order of preference:
 |---|---|---|---|---|
 | R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 unmet) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
-| R-003 | No host-header validation | **OPEN** | Shri (interim) | NA-1 |
-| R-004 | Rate-limit store falls back to memory | **OPEN** | Shri (interim) | NA-2 |
-| R-005 | Server Actions not rate limited | **OPEN** | Shri (interim) | NA-3 |
+| R-003 | No host-header validation | **Implemented (PR #4)** — not closed | Shri (interim) | NA-1 |
+| R-004 | **Rate limiting per-instance in production** | **OPEN — CONFIRMED ACTIVE (HIGH)** | Shri (interim) | NA-2 |
+| R-005 | Server Actions not rate limited | **OPEN** — blocked behind R-004 | Shri (interim) | NA-3 |
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **OPEN** — blocking release | Shri (interim) | NA-5 |
+| **R-009** | **Production credentials in preview/branch-deploy contexts** | **OPEN — CRITICAL** | Shri (interim) | **NA-8** |
+| R-010 | Secrets not marked secret | **OPEN** | Shri (interim) | NA-9 |
+| R-011 | No devnet constraint for non-production | **OPEN** — blocks D4 | Shri (interim) | NA-10 |
 
 **Nothing in this register is closed by the ownership assignment.**
