@@ -21,6 +21,7 @@ MIGRATION_023="$ROOT_DIR/supabase/migrations/023_remove_obsolete_create_or_claim
 MIGRATION_024="$ROOT_DIR/supabase/migrations/024_atomic_reward_approval_and_payout_finalization.sql"
 MIGRATION_025="$ROOT_DIR/supabase/migrations/025_exact_payout_amount_reads.sql"
 MIGRATION_026="$ROOT_DIR/supabase/migrations/026_harden_payout_confirmation_evidence.sql"
+MIGRATION_027="$ROOT_DIR/supabase/migrations/027_shared_rate_limit_counter.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -65,6 +66,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_023" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_024" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_027" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -87,6 +89,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_023" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_024" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_027" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -1545,3 +1548,80 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
 " >/dev/null
 
 printf 'concurrent approval-vs-correction race test passed (blocked %sms, replacement rewards approved atomically)\n' "$DURATION3"
+
+# ------------------------------------------------------------------------------
+# Concurrent rate-limit counter test (R-004)
+# The rate limiter must be atomic ACROSS SESSIONS, not merely inside one process.
+# A read-modify-write implementation loses updates under concurrency and silently
+# undercounts, which is exactly the failure a single-instance test cannot detect.
+# 30 concurrent calls must yield exactly 30 increments, of which exactly `max`
+# are allowed.
+# ------------------------------------------------------------------------------
+RATE_KEY="rl:concurrency-test-$$"
+RATE_MAX=10
+RATE_CALLS=30
+RATE_OUT=$(mktemp -d)
+
+for i in $(seq 1 "$RATE_CALLS"); do
+  (
+    psql -d "$DB_NAME" -t -A -c \
+      "SELECT public.check_rate_limit('$RATE_KEY', 60000, $RATE_MAX);" \
+      > "$RATE_OUT/$i.json" 2>/dev/null
+  ) &
+done
+wait
+
+ALLOWED=$(cat "$RATE_OUT"/*.json | python3 -c '
+import sys, json
+allowed = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    if json.loads(line).get("allowed"):
+        allowed += 1
+print(allowed)
+')
+
+FINAL_COUNT=$(psql -d "$DB_NAME" -t -A -c "SELECT count FROM public.rate_limit_counters WHERE key = '$RATE_KEY';" | tr -d '[:space:]')
+
+rm -rf "$RATE_OUT"
+
+if [ "$FINAL_COUNT" != "$RATE_CALLS" ]; then
+  echo "rate-limit atomicity test failed: expected counter $RATE_CALLS, got '$FINAL_COUNT' (lost updates)" >&2
+  exit 1
+fi
+if [ "$ALLOWED" != "$RATE_MAX" ]; then
+  echo "rate-limit atomicity test failed: expected exactly $RATE_MAX allowed of $RATE_CALLS, got '$ALLOWED'" >&2
+  exit 1
+fi
+
+# A distinct key must be counted independently of the saturated one.
+OTHER_ALLOWED=$(psql -d "$DB_NAME" -t -A -c "SELECT (public.check_rate_limit('${RATE_KEY}:other', 60000, 3))->>'allowed';" | tr -d '[:space:]')
+if [ "$OTHER_ALLOWED" != "true" ]; then
+  echo "rate-limit atomicity test failed: a distinct key was denied ('$OTHER_ALLOWED')" >&2
+  exit 1
+fi
+
+# A non-positive window must be rejected rather than silently accepted.
+if psql -d "$DB_NAME" -t -A -c "SELECT public.check_rate_limit('${RATE_KEY}:bad', 0, 1);" >/dev/null 2>&1; then
+  echo "rate-limit atomicity test failed: a zero-length window was accepted" >&2
+  exit 1
+fi
+
+# Counters must not be reachable except through the RPC.
+if psql -d "$DB_NAME" -t -A -c "SELECT has_table_privilege('anon', 'public.rate_limit_counters', 'SELECT');" | grep -q '^t$'; then
+  echo "rate-limit atomicity test failed: anon can read the counter table" >&2
+  exit 1
+fi
+if psql -d "$DB_NAME" -t -A -c "SELECT has_function_privilege('authenticated', 'public.check_rate_limit(text,integer,integer)', 'EXECUTE');" | grep -q '^t$'; then
+  echo "rate-limit atomicity test failed: authenticated can execute the counter RPC" >&2
+  exit 1
+fi
+if ! psql -d "$DB_NAME" -t -A -c "SELECT has_function_privilege('service_role', 'public.check_rate_limit(text,integer,integer)', 'EXECUTE');" | grep -q '^t$'; then
+  echo "rate-limit atomicity test failed: service_role cannot execute the counter RPC" >&2
+  exit 1
+fi
+
+printf 'rate-limit atomicity test passed (%s concurrent calls, exactly %s allowed, counter=%s, privileges locked down)\n' \
+  "$RATE_CALLS" "$RATE_MAX" "$FINAL_COUNT"
