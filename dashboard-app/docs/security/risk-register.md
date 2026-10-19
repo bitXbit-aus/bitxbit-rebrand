@@ -453,7 +453,18 @@ to `sb_publishable_`, which touches `@supabase/ssr` (pinned at 0.1.0) and the au
 needs E2E testing rather than a toggle. Check whether the dashboard permits deactivating
 `service_role` alone.
 
-Tracked as NA-8.
+**CLOSED — 2026-10-19.** The owner deactivated the legacy `service_role` key and retained the
+legacy `anon` key, so **no user was signed out** and the app was unaffected. Verified by probing
+the production anon key *after* the change: `/rest/v1/projects` and `/auth/v1/settings` both
+return HTTP 200, with the new secret key also 200 and an unauthenticated request 401.
+
+**Verification limitation, stated rather than glossed:** the legacy `service_role` key cannot be
+probed independently for this record. Its value was deliberately overwritten and the key deleted,
+so no copy exists to test against. Closure rests on the owner's action plus two consistent
+observations — the anon key still authenticates, which means a per-key toggle was used rather than
+a blanket legacy-keys switch, and Supabase's key listing reports the legacy anon key as
+`disabled: false`. For independent confirmation, check that the legacy `service_role` key shows as
+disabled in **Settings → API Keys → Legacy API keys**.
 
 ---
 
@@ -505,7 +516,7 @@ deployment component — configuration assertions are not runtime proof.
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | **OPEN** |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
-| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | Re-scoping **DONE** (20/20). Treasury rotation **DONE + verified on-chain**. Supabase service key **ROTATED + applied** to production (new-format `sb_secret_`; anon key untouched, no sign-outs). **Exposure NOT closed** — the legacy key stays valid until deactivated; redeploy + verification first. |
+| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19.** Re-scoping 20/20. Treasury rotated, verified on-chain, then proven end-to-end by a real production airdrop. Service key rotated, verified **by use** (200 vs production / 401 vs staging), proven by the same airdrop. Legacy `service_role` key deactivated; legacy `anon` retained so nobody was signed out. |
 | **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. |
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
 | **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
@@ -553,7 +564,7 @@ Options, in order of preference:
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **OPEN** — blocking release | Shri (interim) | NA-5 |
-| **R-009** | **Production credentials in preview/branch-deploy contexts** | Forward path **CLOSED** (config). Credentials **rotated** — but the **legacy `service_role` key remains valid** until deactivated, so exposure stays **OPEN** | Shri (interim) | **NA-8** |
+| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19** — owner deactivated the legacy `service_role` key; `anon` retained, no sign-outs | Shri (interim) | **NA-8** ✅ |
 | R-010 | Secrets not marked secret | **OPEN** — deliberately withheld (see NA-9) | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
