@@ -196,13 +196,27 @@ Each milestone ends with a green gate; do not proceed on a red one.
 - Dummy-environment `npm run build`
 - `npm audit --omit=dev` — `next` must be **absent**
 
-### 5.2 Staging regression
+### 5.2 Staging regression — deployed HTTP test is MANDATORY (D4)
 
 - `npm run test:staging` against the non-production Supabase project
 - `npm run test:solana-fault` against devnet (`EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`), 6-decimal USDC
-- Deployed-app HTTP probe — **currently skipped** because `STAGING_APP_URL` is
-  unset. **Configure it for this migration**; a green local build is not evidence
-  that the Netlify runtime behaves
+- **Deployed Netlify staging HTTP test — mandatory, not optional.** The probe is
+  currently skipped because `STAGING_APP_URL` is unset. It must be configured and
+  the probe must pass: **a green local build is not evidence that the Netlify
+  runtime behaves**, and the adapter is the highest-uncertainty component in this
+  migration.
+
+**Staging isolation — verify explicitly, do not assume (D4):**
+
+| Requirement | Verification |
+|---|---|
+| Staging Supabase only | The staging deployment's `NEXT_PUBLIC_SUPABASE_URL` resolves to the staging project ref, **not** production |
+| Solana devnet only | Genesis hash is `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`; the fault suite already refuses any other network |
+| **No production credentials or resources** | Confirm no production service-role key, mint, treasury wallet, or RPC endpoint is reachable from the staging deployment |
+| No production writes | Confirm the staging deployment cannot reach the production database even if misconfigured |
+
+A staging deployment that shares any production credential does **not** satisfy D4
+and its results are not admissible as evidence.
 
 ### 5.3 Authorisation matrix (mandatory, manual + automated)
 
@@ -239,17 +253,28 @@ catches it.
   **Netlify runtime behaviour** (undetectable locally), **caching defaults**
   (silent behaviour change), **payout paths** (financial consequence).
 
-## 7. Open decisions for the project owner
+## 7. Owner decisions — recorded
 
-| ID | Decision | Recommendation |
+Resolved by the project owner, October 19, 2026. See the risk register for the
+full decision record and the division of authority.
+
+| ID | Decision | Resolution |
 |---|---|---|
-| **D1** | Target 15.5.x or 16.x? | **15.5.x.** Minimum jump that clears all advisories; avoids stacking two majors |
-| **D2** | React 19 is mandatory with App Router — confirm scope expansion is accepted | Accepted by necessity; no alternative short of staying on 14.x |
-| **D3** | Should this run while PR #1 and PR #2 are unmerged? | Land the interim bump first, so the migration has a smaller diff and a proven CI baseline |
-| **D4** | Is the Netlify staging site available for the HTTP probe? | Required for M7 — `STAGING_APP_URL` must be configured |
+| **D1** | Target 15.5.x or 16.x? | **APPROVED — target `15.5.28`.** Do **not** move to Next.js 16 as part of this migration. **Re-check current advisories again immediately before deployment**, since advisory data changes. |
+| **D2** | React 19 scope expansion | **APPROVED.** React 19 plus the coupled `@supabase/ssr` and `@supabase/supabase-js` upgrades are in scope. **Authentication, session persistence, middleware authorisation, and Solana financial operations must pass end-to-end regression tests** — not build-only checks. |
+| **D3** | Sequencing | **APPROVED with sequencing.** Planning and isolated development may proceed, but release order is binding: **Phase 1 → interim Next.js security upgrade → full Next.js 15 migration.** Each change stays separately reviewable and independently approved. |
+| **D4** | Staging HTTP test | **APPROVED — mandatory.** A deployed Netlify staging HTTP test is required, on a deployment configured **exclusively** for staging Supabase and Solana devnet, with verification that **no production credentials or resources are involved.** |
+
+**D1 gate addition:** because advisory data drifts (observed moving within a single
+working session), the audit must be **re-run against the exact deployment candidate**
+and `next` re-confirmed absent before release — not carried over from this plan.
+
+**D3 gate addition:** this PR must **not** be merged ahead of the Phase 1 and interim
+bump releases. Draft and branch creation are fine; merge order is not negotiable.
 
 ## 8. Explicitly out of scope
 
+- **Next.js 16** — explicitly excluded by D1
 - No dependency upgrades outside the Next/React/Supabase set (wallet adapters and
   `bigint-buffer` remain as recorded in R-002)
 - No schema changes
