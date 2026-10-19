@@ -222,3 +222,34 @@ deriving its address.
       (`netlify-remediation-2026-10-19.md` §3b).
 - [ ] Record the rotation date in the risk register and close NA-8.
 - [ ] Decide whether preview/branch-deploy should keep staging credentials at all, or hold none.
+
+---
+
+## E. Local file layout — keep the two environments apart
+
+A production secret was briefly written into the staging fixture, which is what R-012
+was about. The fix is naming discipline, not just deletion:
+
+| File | Holds | Notes |
+|---|---|---|
+| `.env.staging.local` | staging Supabase URL + service key, devnet USDC mint, devnet airdrop key, staging recipient | 6 variables. **The airdrop key here must derive to the devnet wallet, never the production treasury.** |
+| `.env.production.local` | `SUPABASE_SERVICE_ROLE_KEY` (production) | Only needed until Netlify holds the key, which it now does — then delete it. The value stays available in the Supabase dashboard, so no local copy is required. |
+
+Both match `.env.*.local` in `.gitignore`, and backups match `.env.*.bak*`.
+
+**Two traps worth remembering:**
+
+1. **A backup can be staler than it looks.** The 14:11 backup predates the devnet swap, so
+   its `AIRDROP_WALLET_PRIVATE_KEY` derives to the *old production treasury* `E5qLq…ffQ`.
+   Restoring that file wholesale would reintroduce the exact leak. Take the airdrop key from
+   the devnet keypair directly and everything else from the backup.
+2. **A pasted key can arrive line-wrapped.** A 41-character key split across two lines means
+   the second line has no `=` and looks like a comment. The variable then reads as 15
+   characters — easy to misdiagnose as truncated. Validate the assembled length (41 for
+   `sb_secret_`) before concluding anything about the key itself.
+
+**Verify a repair, don't assume it:** confirm the staging service key equals the Netlify
+preview value (so local tooling matches the deployed preview), confirm the airdrop key derives
+to the devnet address, and confirm the production key does **not** appear in the staging file.
+Then run `npm run test:staging` — a fixture that looks right but is wired to the wrong project
+fails there.
