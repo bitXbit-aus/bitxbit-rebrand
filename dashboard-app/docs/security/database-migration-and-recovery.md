@@ -79,32 +79,51 @@ Record the backup identifier, creation timestamp, migration commit/branch, and o
 ### 3a. Production pre-flight (run against production BEFORE applying)
 
 Staging was migrated `001`→`026` in a single pass, so it does not prove the
-upgrade path from production's *current* state. Run these against production
-first; the first is a hard stop.
+upgrade path from production's *current* state.
 
-```sql
--- HARD STOP: migration 017 refuses to apply when active duplicates exist.
--- Must return zero rows.
-SELECT reward_period_id, user_id, COUNT(*) AS active_rows
-FROM public.user_rewards
-WHERE superseded_at IS NULL
-GROUP BY reward_period_id, user_id
-HAVING COUNT(*) > 1;
+Run the executable gate — read-only, and it aborts on a hard stop:
 
--- Which migrations does production already record?
-SELECT version FROM supabase_migrations.schema_migrations ORDER BY version;
-
--- Confirm production is not already past a migration you intend to apply.
-SELECT COUNT(*) AS already_applied_024_plus
-FROM supabase_migrations.schema_migrations
-WHERE version LIKE '024%' OR version LIKE '025%' OR version LIKE '026%';
+```bash
+psql "$PROD_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/production-preflight.sql
 ```
 
-If the duplicate check returns rows, resolve the duplicates in a forward migration
-before applying `017`. Do not delete financial rows.
+**Do not run a hand-written duplicate query instead.** An earlier version of this
+section gave inline SQL that assumed the Phase 1 schema was already present.
+Against a pre-Phase-1 database it did not fail cleanly — it errored with
+`42703: column "superseded_at" does not exist`. That is worse than a red result,
+because a crashed check can be mistaken for a passing one. Every check in the
+script guards on the object it depends on and degrades to an explicit
+"not applicable yet" notice.
 
-Also confirm the migration ledger on production records every version from `010`
-upward, so the runner does not attempt to re-apply an earlier migration.
+The script reports, and where relevant aborts on:
+
+1. Whether `supabase_migrations.schema_migrations` exists at all.
+2. Phase 1 schema landmarks: `user_authorizations`, `payout_operations`,
+   `user_rewards.superseded_at` / `version`, and the `024`/`025` functions.
+3. The obsolete 6-argument `create_or_claim_payout_operation` overload — must be 0.
+4. **Hard stop:** active duplicate `(reward_period_id, user_id)` rewards.
+5. Open `submitted` / `uncertain` / `incident` payout operations needing on-chain
+   reconciliation before the upgrade.
+
+### 3b. When the database has no migration ledger
+
+A pre-Phase-1 database may have **no `supabase_migrations.schema_migrations` table
+at all** — its schema was built by hand and never went through the runner. In that
+case:
+
+- The ledger cannot tell you the starting point. Derive it from the schema
+  landmarks in the preflight output instead.
+- The upgrade range is **`010` → `026`**, not `024` → `026`.
+- The migration-017 hard stop is **not applicable yet**, because the uniqueness
+  constraint it tightens does not exist until `014`/`017` have run. The preflight
+  states this explicitly rather than passing silently — a green result here does
+  not mean the duplicate condition was checked.
+- Recording the range in the ledger before applying is what makes the subsequent
+  run idempotent. Confirm the ledger is created and populated as part of the
+  rollout, or the next operator will face the same ambiguity.
+
+If a duplicate check *does* apply and returns rows, resolve the duplicates in a
+forward migration before applying `017`. Do not delete financial rows.
 
 ## Verification SQL
 
