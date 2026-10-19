@@ -61,31 +61,69 @@ Against staging Supabase and devnet:
 All staging smoke tests passed.
 ```
 
-## What did NOT run — and why
+## D4 — deployed-app HTTP test — SATISFIED (2026-10-19, later the same day)
 
-**D4's mandatory deployed-app HTTP test is still unsatisfied.** The suite reports:
+**Correction:** this section originally recorded D4 as unsatisfiable because no staging-scoped
+deployment existed. That was accurate at the time. A preview rebuild resolved it, and the test has
+now run.
+
+| Step | Result |
+|---|---|
+| Preview rebuilt | deploy `6ad6a1fddbd521239c086a6a`, 2026-10-19 23:04:29, state `ready`, commit `bdbdf003` |
+| `npm run test:staging` with `STAGING_APP_URL` set | **all sections pass**, the `(skipped: STAGING_APP_URL not set)` line is gone |
+| Endpoints asserted by D4 | `/api/public/offers`, `/api/public/transparency`, `/api/token-stats` — all **HTTP 200** |
+
+### Isolation proven by use, on three independent levels
+
+1. **Client bundle.** The login chunk is now `page-92e32d7a3dacb964.js` — a *different hash* from
+   the production bundle's `page-9473d2fb1854e1df.js`, i.e. a genuinely different build environment.
+   It contains `https://luqrwhgjtiyfmeawbtmp.supabase.co` (staging) and **zero** occurrences of
+   `flasgvendiiasuixeqzu` (production).
+2. **Runtime configuration.** `/api/token-stats` reports mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+   — **devnet** USDC. Production reports `DK6PWMyu…UH5` (mainnet).
+3. **Runtime data.** `/api/public/offers` on the preview returns **"Staging Smoke Offer"**;
+   production returns **"KAST"**. Different rows from different databases — the strongest available
+   evidence that the deployed app reads staging, not production.
+
+### Harness limitation, stated rather than implied
+
+The D4 section is named *"public API health and rate-limit headers"*, but the rate-limit assertion
+is an **empty branch** — the code comments it as optional and never fails on a missing header. The
+test therefore verifies only that three endpoints return HTTP 200. No rate-limit header was present
+on the preview responses. Treat the section name as overstating what it checks.
+
+### R-009 residue closed
+
+The rebuild alone did **not** clear the residue, contrary to an earlier claim here: Netlify serves
+each deploy at its own immutable URL, and the stale production-wired preview remained reachable at
+`https://6ad5779612fbd9e162ffbf39--bitxbit-dashboard.netlify.app` (HTTP 200, 1 production reference,
+0 staging) after the rebuild.
+
+All **seven** production-wired preview deploys were deleted:
 
 ```
-  (skipped: STAGING_APP_URL not set)
+6ad5779612fbd9e162ffbf39  6ad57512a51b157ce3564e22  6ad56031cf94e67c3dd805e3
+6ad55bc8399a41b9cd019782  6ad55a3bfdfcee7dc15b9380  6ad5576bd488cb7540b3eac8
+6ad54ac7c46d918def476ecb
 ```
 
-This is not an oversight that a variable would fix. It requires a **deployed preview that is
-verifiably staging-scoped**, and no such deployment exists:
+Verified after deletion: every deploy-specific URL returns **404**, the staging preview returns
+**200**, and production returns **200** and was untouched.
 
-- The existing preview (`deploy-preview-1--bitxbit-dashboard.netlify.app`, 7 deploys, one URL) was
-  built **before** the credential re-scoping. Its login chunk contains
-  `createClient("https://flasgvendiiasuixeqzu.supabase.co", …)` — the **production** project — and
-  `/api/token-stats` on it returns **mainnet** data, while the re-scoped `deploy-preview` context
-  specifies devnet. Its chunk hash is identical to the production bundle's.
-- Building a fresh staging-scoped preview via `netlify deploy --build --context deploy-preview`
-  failed twice with `Error: Project not found`. Diagnosis: the CLI session resolves sites within a
-  team context (`LivingCodex`), while `bitxbit-dashboard` belongs to the `millsy` account, so the
-  deploy path cannot resolve the project even though the API can read it by ID. Stopped rather than
-  repeating the command with variations.
+### Triggering a preview rebuild — what failed
 
-Therefore D4 remains **open**, and so does the R-009 residue for those seven preview deploys: until
-they are deleted and a staging-scoped preview is built, a reachable Netlify preview is running
-production credentials.
+Two automated attempts failed and were stopped rather than varied:
+
+- `netlify deploy --build --context deploy-preview` → `Error: Project not found`. The CLI resolves
+  sites within a team context (`LivingCodex`) while `bitxbit-dashboard` belongs to the `millsy`
+  account, so the deploy path cannot resolve the project even though the API reads it by ID.
+- A build hook created via `netlify api createSiteBuildHook --data '{"branch": "..."}'` returned
+  **`"branch": null`** — the field was silently dropped, producing a hook that would have rebuilt
+  **production**. It was deleted without ever being invoked. The guard was inspecting the response
+  *before* posting to the URL; without that check this would have deployed production.
+
+The rebuild was therefore performed from the site UI (deploy row → Retry deploy → Clear cache and
+retry deploy), which rebuilds that branch in that context with current environment values.
 
 ## Release-gate finding — independent review is NOT satisfied
 
