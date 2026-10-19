@@ -508,10 +508,20 @@ That was verified, not assumed. The reachable preview `deploy-preview-1--bitxbit
 **Seven preview deploys of `security/` branches are currently reachable**, all sharing the URL
 `deploy-preview-1--bitxbit-dashboard.netlify.app`.
 
-**Required to close:** delete the stale preview deploys, and rebuild the branch preview so it picks
-up the re-scoped staging/devnet values. Until then the exposure path is open for these deploys, and
-they cannot serve as the D4 staging target — D4 requires verified staging isolation, which this
-deploy does not have.
+**RESOLVED — 2026-10-19.** Both required actions were completed and verified.
+
+1. The branch preview was rebuilt from the site UI, picking up the re-scoped values. Isolation is
+   now proven on three levels, not assumed: the client chunk hash differs from production's and
+   contains only the staging project (zero production occurrences); `/api/token-stats` reports the
+   devnet USDC mint; and `/api/public/offers` returns staging rows ("Staging Smoke Offer") where
+   production returns "KAST".
+2. **All seven production-wired preview deploys were deleted.** This was necessary because the
+   rebuild alone did not close the hole — each deploy is served at its own immutable URL, and the
+   stale preview stayed reachable at `https://6ad5779612fbd9e162ffbf39--bitxbit-dashboard.netlify.app`
+   (HTTP 200, production reference present) after the rebuild. After deletion every deploy-specific
+   URL returns **404**, the staging preview returns 200, and production returns 200 untouched.
+
+D4's deployed-app HTTP test also ran for the first time as a result, and passed.
 
 **Superseded status (2026-10-19, earlier the same day):** the owner deactivated the legacy
 `service_role` key and retained the legacy `anon` key, so **no user was signed out** and the app was
@@ -625,7 +635,7 @@ Options, in order of preference:
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **OPEN** — blocking release | Shri (interim) | NA-5 |
-| **R-009** | **Production credentials in preview/branch-deploy contexts** | **REOPENED 2026-10-19** — forward path closed, but **existing preview deploys still run production credentials**; see correction below | Shri (interim) | **NA-8** (partial) |
+| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19** — forward path closed, preview rebuilt staging-scoped, **all 7 production-wired deploys deleted and verified 404** | Shri (interim) | **NA-8** ✅ |
 | R-010 | Secrets not marked secret | **OPEN** — deliberately withheld (see NA-9) | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
