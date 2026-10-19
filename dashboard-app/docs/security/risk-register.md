@@ -38,6 +38,41 @@ the business develops.
 **Standing constraint:** the agent does not merge to `main`, apply production
 migrations, or deploy, without explicit release authorisation.
 
+### Control change — 2026-10-19 (owner decision)
+
+The owner removed the required-review protection from `main`. Verified against the live
+protection settings the same day:
+
+| Control | Before | After |
+|---|---|---|
+| `required_pull_request_reviews` | 1 approval, stale reviews dismissed | **NONE** |
+| `required_status_checks` | "Tests, migration replay, and build" (strict) | unchanged |
+| `enforce_admins` | false | false |
+| force-push / deletion | blocked | blocked |
+| required conversation resolution | required | required |
+
+Recorded here because of what it is: **the independent-review gate is now waived, not
+satisfied.** The control that existed to place a separate qualified human in front of
+financially significant changes — atomic reward approval, payout finalisation, exact token
+amounts — is absent. With `enforce_admins` false the remaining check is also bypassable by an
+administrator, so the effective release control set is the CI status check alone.
+
+This is within the owner's authority: the owner holds sole power to accept risk. It is recorded
+as an **accepted risk with the owner accountable**, dated, rather than silently absorbed.
+
+**The waiver does not change any of the following, which remain open and are technical, not
+approval-related:**
+
+1. **The migration coupling.** PR #1's code calls `record_trusted_offer_click` (`010`),
+   `verify_wallet_challenge` (`011`), `apply_reward_calculation` (`016`) and
+   `approve_reward_period` (`024`). Production is pre-`010`. Merging to `main` auto-deploys,
+   so merging without applying the range first is an outage.
+2. **D4's deployed-app HTTP test** has no staging-scoped deployment to run against.
+3. **The R-009 residue** on the existing preview deploys, which still run production credentials.
+
+Removing the approval requirement therefore does not open the production window. It removes a
+review control; it does not satisfy a single one of the three blockers above.
+
 ## Owner decisions on record
 
 | ID | Decision | Recorded |
