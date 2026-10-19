@@ -37,6 +37,9 @@ Thumbs.db
 *.swo
 *~
 
+# TypeScript incremental build info
+*.tsbuildinfo
+
 # Misc
 .cache/
 .vercel

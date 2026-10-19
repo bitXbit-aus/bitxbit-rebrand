@@ -19,6 +19,21 @@ export function getRateLimitStore(): RateLimitStore {
       const { UpstashRedisRateLimitStore } = require("./rate-limit-redis");
       sharedStore = new UpstashRedisRateLimitStore({ url, token });
     } else {
+      // R-004: no shared store configured. On serverless, in-memory limits apply
+      // per instance, so an attacker spreading requests across instances receives a
+      // multiple of the intended limit. This used to happen silently, which made a
+      // degraded control indistinguishable from a working one. Log it loudly.
+      //
+      // Deliberately does NOT throw: refusing every rate-limited request because
+      // the store is missing would take the site down — worse than a degraded
+      // limit. The fix is provisioning the shared store, not failing closed here.
+      if (process.env.NODE_ENV === "production") {
+        console.error(
+          "[rate-limit] DEGRADED: UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not " +
+            "configured. Falling back to an in-memory store, so rate limits are PER-INSTANCE " +
+            "and NOT shared across instances. See R-004 in docs/security/risk-register.md."
+        );
+      }
       sharedStore = new MemoryRateLimitStore();
     }
   }
