@@ -31,20 +31,62 @@ carries an advisory.** Every finding below sits in the pre-existing tree that
 
 ---
 
-## 1. Critical: Next.js middleware authorization bypass
+## 1. Next.js: correction and current position
 
-**`next@14.1.0` is installed, and the application relies on middleware for route
-authorization.** `middleware.ts` redirects unauthenticated users, rejects
-inactive accounts, and blocks non-admins from `/admin/*`.
+> **Correction (2026-10-19).** An earlier revision of this assessment classified
+> **CVE-2025-29927 / GHSA-f82v-jwr5-mffw** (middleware authorization bypass) as
+> live and directly exploitable on this deployment. **That was wrong.** The
+> finding was read from the advisory's version range, which names only Vercel as
+> protected; the platform-specific impact was not checked. It has since been
+> verified against primary sources and corrected below.
 
-- Advisory: **GHSA-f82v-jwr5-mffw — Authorization Bypass in Next.js Middleware**
-- CVSS: **9.1 (critical)** — vulnerable range `>=14.0.0 <14.2.25`
-- Status: **live and applicable today.**
+### CVE-2025-29927 does **not** apply to this deployment
 
-This is the one finding that is both critical *and* squarely reachable. It is the
-strongest argument for remediating the Next.js version before production.
+This app deploys to Netlify via `@netlify/plugin-nextjs` (see `netlify.toml`).
+Netlify's adapter decouples application routing from the Next.js server, and the
+bypass depends on the `x-middleware-subrequest` header reaching a Next.js routing
+process that honours it — which does not happen on this adapter.
 
-### The npm-suggested fix is not sufficient
+Sources:
+
+- **Vercel postmortem** (nextjs.org/blog/cve-2025-29927): "Our team then examined
+  open-source Next.js adapters for deploying to other infrastructure platforms.
+  **Netlify and Cloudflare Workers were confirmed to never have been affected**,
+  for the same decoupling of application routing."
+- **Netlify advisory**: "Next.js sites on Netlify are **NOT vulnerable** to
+  CVE-2025-29927 … sites on Netlify are not and have **never been affected** by
+  this vulnerability. We've added end-to-end tests to the OpenNext Netlify adapter
+  validating this."
+- **oss-security / NCSC**: impact scope lists *not affected* — Vercel, **Netlify**,
+  static exports.
+
+**Conditional caveat.** This protection is a property of the Netlify adapter, not
+of the application. If the dashboard is ever self-hosted (`next start` /
+`output: 'standalone'`) or moved to a platform whose adapter does not decouple
+routing, CVE-2025-29927 applies in full and becomes urgent. Note also that
+`middleware.ts` here does real authorization gating — redirects for
+unauthenticated users, inactive accounts, and non-admins — so on such a platform
+the impact would be significant. Defense in depth: privileged Server Actions and
+RLS enforce authorization independently of middleware, which is the correct
+architecture regardless.
+
+### What does apply, and why the upgrade is still required
+
+Downgrading this one finding does not clear the Next.js version. These remain
+reachable because Netlify *does* run the Next.js server runtime as functions:
+
+- **Server Actions DoS** (GHSA-m99w-x7hq-7vfj) — Server Actions are used heavily
+  in `lib/actions.ts`.
+- **React Server Component DoS family** (GHSA-h25m-26qc-wcjf,
+  GHSA-q4gf-8mx6-v5v3, GHSA-8h8q-6873-q5fj, GHSA-mwv6-3258-q52c,
+  GHSA-5j59-xgg2-r9c4) — App Router with RSC is in use.
+- **WebSocket-upgrade SSRF** (GHSA-c4j6-fc7j-m34r) and **cache-poisoning**
+  findings — applicable depending on routing/caching configuration.
+
+These are availability and integrity risks rather than an authentication bypass,
+so the severity framing changes — but the remediation does not go away.
+
+### The npm-suggested fix is still not sufficient
 
 `npm audit` proposes `next@14.2.35` and reports `isSemVerMajor: false`. That reads
 like a safe in-range bump. It is not enough:
@@ -54,11 +96,15 @@ like a safe in-range bump. It is not enough:
 | 14.2.35 — npm's suggestion | **21** |
 | 15.5.24 | 0 |
 
-14.2.35 clears the middleware bypass and several older issues but leaves **2
-criticals and 7 highs**. Full clearance requires **Next 15.5.24+** — a
-**major-version migration** with genuine breaking changes (async request APIs,
-caching semantics, changed defaults). It must be planned and regression-tested,
-not applied as a patch bump.
+14.2.35 clears several older issues but leaves **2 criticals and 7 highs**. Full
+clearance requires **Next 15.5.24+** — a **major-version migration** with genuine
+breaking changes (async request APIs, caching semantics, changed defaults). It
+must be planned and regression-tested, not applied as a patch bump.
+
+**Priority note.** With the middleware bypass reclassified as not applicable, the
+Next.js upgrade is no longer the most urgent outstanding item — the dependency
+work remains required but is now driven by DoS/SSRF hardening and general hygiene
+rather than an active authentication bypass.
 
 ---
 
@@ -69,7 +115,7 @@ configuration (`next.config.mjs`, `middleware.ts`, Netlify/Linux hosting):
 
 | Advisory | Severity | Applies? | Reasoning |
 |---|---|---|---|
-| Next.js middleware authorization bypass (GHSA-f82v-jwr5-mffw) | critical | **Yes** | Middleware performs real authorization gating |
+| Next.js middleware authorization bypass (CVE-2025-29927 / GHSA-f82v-jwr5-mffw) | critical | **No** | Netlify's adapter decouples routing; Vercel postmortem and Netlify both confirm Netlify was never affected. Becomes applicable if self-hosted or moved off Netlify. |
 | Next.js RCE on **Windows**-hosted servers (GHSA-p293-qw3h-jr36) | critical | **No** | Deployment is Netlify (Linux); CI is `ubuntu-latest` |
 | Next.js RCE in **Image Optimization API**, AVIF (GHSA-2xp9-vwfh-vxw4) | critical | **No** | `images.unoptimized: true` disables the optimizer; `next/image` unused |
 | Next.js Middleware/Proxy bypass, **Pages Router i18n** (GHSA-36qx-fr4f-26g5) | high | **No** | App Router only; no `pages/`; no `i18n` config |
@@ -91,9 +137,10 @@ configuration (`next.config.mjs`, `middleware.ts`, Netlify/Linux hosting):
 `@solana/spl-token` to `0.1.8` and `@solana/wallet-adapter-wallets` to `0.18.2` —
 both major regressions that break the SPL-token transfer path.
 
-**Phase A — Next.js security posture (highest value, standalone PR)**
-1. Upgrade within 14.x to `14.2.35` as an interim step; this closes the live
-   middleware authorization bypass immediately.
+**Phase A — Next.js security posture (standalone PR)**
+1. Upgrade within 14.x to `14.2.35` as an interim step. This clears the older
+   advisories that do apply (Server Action and RSC DoS) — it is no longer framed
+   around the middleware bypass, which does not affect Netlify.
 2. Plan and execute the `15.5.24+` major migration separately, with full
    regression: middleware authorization, Server Actions, admin routes, payout
    flow, wallet verification, and the dummy-env production build.
