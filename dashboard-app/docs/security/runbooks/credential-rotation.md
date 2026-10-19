@@ -221,10 +221,38 @@ Rotated and **verified by use**, which is the only check that counts.
 revoke the original. The superseded key and the mistakenly-created staging key both remain
 valid in their projects until deleted individually.
 
-**Still outstanding:** a redeploy (env vars resolve at build time, so production is still
-running the previous configuration), then deactivating the legacy `service_role` key in
-**Settings → API Keys → Legacy API keys** — after verifying sign-in, admin operations and
-rate limiting.
+### End-to-end proof in production — 2026-10-19
+
+The redeploy and a real airdrop confirmed this works, verified independently rather than from
+the report of it.
+
+| Step | Evidence |
+|---|---|
+| Production build | deployed `bb3950a1`, state `ready`, 2026-10-19 06:06:45 |
+| Site health | `/` → 302 → `/dashboard`; `/auth/login` → 200; `/admin` → 307 (auth redirect) |
+| Sign-in | owner logged in successfully |
+| Airdrop signed by the **new** treasury | tx `2MoSQbxx…` at 06:12:45: `J3KDs55n…1NJu` **29.999 → 29.998** |
+| Recipient credited | `E5qLq…ffQ` **0 → 0.001** |
+| Fee paid by the new treasury | −0.000005 SOL |
+
+This is the check that matters, because it exercises both rotated credentials at once: the
+transfer is signed by the **treasury key** and the record is written with the **service-role
+key**. A wrong value for either would fail here.
+
+**A production build was required even though no dashboard code changed.** Every commit on
+`main` since the previous deploy touched `webflow-site/` (the marketing site), so Netlify kept
+cancelling the dashboard build with *"Canceled build due to no content change"* — recorded as
+`state: error` but entirely benign. A plain retrigger is skipped for the same reason; it needs
+**Clear cache and deploy** to force a rebuild that picks up new environment values.
+
+**Observed and worth confirming:** the test airdrop's recipient was `E5qLq…ffQ` — the *old*
+treasury address. That is the payout wallet registered on the account used for the test. If
+that was deliberate (the old wallet is empty and owner-controlled, so a convenient safe
+destination) it is fine; if not, payouts are landing on the treasury rather than the member's
+own wallet.
+
+**Still outstanding:** deactivating the legacy `service_role` key in **Settings → API Keys →
+Legacy API keys**. Only this closes R-009 — Supabase keeps legacy keys valid until deactivated.
 which is why step 1 is not optional.
 
 ---
