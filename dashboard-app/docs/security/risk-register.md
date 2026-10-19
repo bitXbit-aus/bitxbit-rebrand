@@ -301,7 +301,9 @@ hardening step.
 
 ## R-009 — Production credentials exposed to deploy previews and branch deploys
 
-**Status:** OPEN — **CRITICAL**, newly identified 2026-10-19.
+**Status:** OPEN — **CRITICAL** (identified 2026-10-19). **Preview exposure path CLOSED
+2026-10-19** by re-scoping preview/branch-deploy to staging + devnet. Still open pending
+**deploy-time verification** under D4 — nothing was deployed.
 **Owner:** Shri — interim accountable owner.
 
 Every variable present in the `production` context is **also present in
@@ -355,7 +357,9 @@ preview-context exposure, which is a scoping problem.
 
 ## R-011 — No non-production Solana RPC or devnet configuration
 
-**Status:** OPEN — **blocks D4**. **Severity:** medium-high.
+**Status:** **ADDRESSED for preview/branch-deploy** 2026-10-19 — `SOLANA_RPC_URL` set to
+devnet for those contexts. Production deliberately left on its existing mainnet default.
+Remains open until verified in a running deployment.
 **Owner:** Shri — interim accountable owner.
 
 There is **no `SOLANA_RPC_URL` or `NEXT_PUBLIC_SOLANA_RPC_URL`** variable at all, so
@@ -371,20 +375,64 @@ rather than convention.
 
 ---
 
+## R-012 — Production treasury key retained in a local staging file
+
+**Status:** OPEN — **HIGH**. Identified 2026-10-19. **Owner:** Shri — interim accountable owner.
+
+`dashboard-app/.env.staging.local` (mode 600, git-ignored) contains an
+`AIRDROP_WALLET_PRIVATE_KEY` whose SHA-256 is **identical to the production treasury key**,
+confirmed by hash comparison.
+
+Two consequences:
+
+- The staging/devnet tests run earlier in this engagement signed with the **production
+  treasury wallet**, so credential isolation was never real on the local side either.
+- The production treasury key exists in a **plaintext file on the workstation**, a second
+  exposure path independent of the Netlify API.
+
+This is an independent argument for rotating the treasury key **and** for replacing the local
+fixture with a devnet key. Not changed by the agent: swapping the fixture breaks staging
+payout tests until a devnet wallet is funded, which is an owner decision. The devnet wallet
+generated for previews is available for that purpose once funded.
+
+**Tracked as NA-11.**
+
+---
+
+## R-013 — Local Netlify link targets the wrong site
+
+**Status:** OPEN — **medium** (operational). Identified 2026-10-19.
+**Owner:** Shri — interim accountable owner.
+
+`dashboard-app/.netlify/state.json` links to `dazzling-vacherin-66d29b`
+(`cadeb6c3-b3c2-42cb-ad0c-2a430fd74ab2`), **not** `bitxbit-dashboard`
+(`9617719a-40f4-4743-8b85-770c2fe61f63` → `app.bitxbit.com.au`).
+
+The stray site carries **no environment variables**, so there is no credential leak. The
+hazard is operational: any `netlify env:*` command run without an explicit `--site` writes to
+the wrong project. Every remediation command passed `--site` explicitly for this reason.
+
+**Tracked as NA-12.**
+
+---
+
 ## D4 status
 
-**D4 is not satisfiable as currently configured**, and this blocks the deployed
-staging evidence PR #4 needs for R-003 closure.
+**D4 is now satisfiable in configuration, but NOT yet proven in a deployment.**
+Preview and branch-deploy contexts now resolve to staging Supabase and Solana devnet.
+Verification still requires an actual deployed probe — configuration is not evidence.
 
 | D4 requirement | Status |
 |---|---|
-| Staging uses the staging Supabase project | ❌ previews/branch deploys use the production project |
-| Staging uses Solana devnet | ❌ no RPC variable exists to constrain it (R-011) |
-| No production service-role key reachable | ❌ shared via `all` scope (R-009) |
-| No production treasury wallet reachable | ❌ shared with preview and branch-deploy contexts (R-009) |
+| Staging uses the staging Supabase project | ✅ configured 2026-10-19 (unverified in a deploy) |
+| Staging uses Solana devnet | ✅ `SOLANA_RPC_URL` → devnet (unverified in a deploy) |
+| No production service-role key reachable | ✅ re-scoped to staging (unverified in a deploy) |
+| No production treasury wallet reachable | ✅ re-scoped to a new devnet key (unverified in a deploy) |
 
-D4 needs a configuration change — a dedicated staging site or properly scoped
-context — before any deployed evidence can be admitted.
+D4's configuration prerequisite is met. What remains is the **deployed** test itself:
+bring up a preview or branch deploy, confirm it resolves staging/production separation, and
+capture the HTTP probe as evidence. Until that exists, R-003 closure still lacks its
+deployment component — configuration assertions are not runtime proof.
 
 ---
 
@@ -399,9 +447,11 @@ context — before any deployed evidence can be admitted.
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | **OPEN** |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
-| **NA-8** | Rotate treasury + service-role keys; scope production credentials to the `production` context only | **R-009 (critical)** | **OPEN — owner authorisation required; highest priority** |
-| **NA-9** | Mark all credential variables `is_secret: true` | R-010 | **OPEN** |
-| **NA-10** | Set an explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | **OPEN — blocks D4** |
+| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **Re-scoping DONE, 20/20 assertions pass.** Rotation **OPEN — owner only**; runbook at `docs/security/runbooks/credential-rotation.md` |
+| **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. |
+| **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
+| **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | **OPEN — owner decision.** Devnet wallet generated but unfunded |
+| **NA-12** | Re-link the local Netlify CLI to `bitxbit-dashboard` | R-013 | **OPEN** — prevents writing to the wrong project |
 
 ### NA-6 detail
 
@@ -445,8 +495,10 @@ Options, in order of preference:
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **OPEN** — blocking release | Shri (interim) | NA-5 |
-| **R-009** | **Production credentials in preview/branch-deploy contexts** | **OPEN — CRITICAL** | Shri (interim) | **NA-8** |
-| R-010 | Secrets not marked secret | **OPEN** | Shri (interim) | NA-9 |
-| R-011 | No devnet constraint for non-production | **OPEN** — blocks D4 | Shri (interim) | NA-10 |
+| **R-009** | **Production credentials in preview/branch-deploy contexts** | **Exposure path CLOSED** (config, 2026-10-19) — open pending deploy verification | Shri (interim) | **NA-8** |
+| R-010 | Secrets not marked secret | **OPEN** — deliberately withheld (see NA-9) | Shri (interim) | NA-9 |
+| R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
+| **R-012** | **Production treasury key in a local staging file** | **OPEN — HIGH** | Shri (interim) | **NA-11** |
+| R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
 
 **Nothing in this register is closed by the ownership assignment.**
