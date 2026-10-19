@@ -453,8 +453,34 @@ to `sb_publishable_`, which touches `@supabase/ssr` (pinned at 0.1.0) and the au
 needs E2E testing rather than a toggle. Check whether the dashboard permits deactivating
 `service_role` alone.
 
-**CLOSED — 2026-10-19.** The owner deactivated the legacy `service_role` key and retained the
-legacy `anon` key, so **no user was signed out** and the app was unaffected. Verified by probing
+**CORRECTION — 2026-10-19. Reopened the same day it was closed.** Closing this rested on the
+forward path being fixed and the credentials rotated. It did not account for **already-deployed
+preview builds**, which keep the environment they were deployed with — Netlify resolves environment
+variables at deploy time, so re-scoping the `deploy-preview` context does not change deploys that
+already exist.
+
+That was verified, not assumed. The reachable preview `deploy-preview-1--bitxbit-dashboard.netlify.app`
+(branch `security/phase-1-hardening` @ `bdbdf003`) is wired to **production** on both sides:
+
+- **Build time** — `/_next/static/chunks/app/auth/login/page-9473d2fb1854e1df.js` contains
+  `createClient("https://flasgvendiiasuixeqzu.supabase.co", "<production anon key>")`. The chunk hash
+  is identical to the production bundle's, because it was built from the same code with the same
+  environment.
+- **Runtime** — `/api/token-stats` on the preview returns **mainnet** token data for mint
+  `DK6PWMyu…UH5`, matching production. The re-scoped preview context specifies **devnet USDC**
+  (`4zMMC9s…ncDU`), so the live deploy is not using the re-scoped values.
+
+**Seven preview deploys of `security/` branches are currently reachable**, all sharing the URL
+`deploy-preview-1--bitxbit-dashboard.netlify.app`.
+
+**Required to close:** delete the stale preview deploys, and rebuild the branch preview so it picks
+up the re-scoped staging/devnet values. Until then the exposure path is open for these deploys, and
+they cannot serve as the D4 staging target — D4 requires verified staging isolation, which this
+deploy does not have.
+
+**Superseded status (2026-10-19, earlier the same day):** the owner deactivated the legacy
+`service_role` key and retained the legacy `anon` key, so **no user was signed out** and the app was
+unaffected. Verified by probing
 the production anon key *after* the change: `/rest/v1/projects` and `/auth/v1/settings` both
 return HTTP 200, with the new secret key also 200 and an unauthenticated request 401.
 
@@ -564,7 +590,7 @@ Options, in order of preference:
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **OPEN** — blocking release | Shri (interim) | NA-5 |
-| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19** — owner deactivated the legacy `service_role` key; `anon` retained, no sign-outs | Shri (interim) | **NA-8** ✅ |
+| **R-009** | **Production credentials in preview/branch-deploy contexts** | **REOPENED 2026-10-19** — forward path closed, but **existing preview deploys still run production credentials**; see correction below | Shri (interim) | **NA-8** (partial) |
 | R-010 | Secrets not marked secret | **OPEN** — deliberately withheld (see NA-9) | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
