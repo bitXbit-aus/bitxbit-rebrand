@@ -377,7 +377,10 @@ rather than convention.
 
 ## R-012 — Production treasury key retained in a local staging file
 
-**Status:** OPEN — **HIGH**. Identified 2026-10-19. **Owner:** Shri — interim accountable owner.
+**Status:** **LOCAL FIXTURE REMEDIATED** 2026-10-19 — `.env.staging.local` now holds the funded
+devnet key. **Rotation of the production key remains OPEN**: the exposure was historical and
+editing a fixture does not undo it.
+**Owner:** Shri — interim accountable owner.
 
 `dashboard-app/.env.staging.local` (mode 600, git-ignored) contains an
 `AIRDROP_WALLET_PRIVATE_KEY` whose SHA-256 is **identical to the production treasury key**,
@@ -391,11 +394,20 @@ Two consequences:
   exposure path independent of the Netlify API.
 
 This is an independent argument for rotating the treasury key **and** for replacing the local
-fixture with a devnet key. Not changed by the agent: swapping the fixture breaks staging
-payout tests until a devnet wallet is funded, which is an owner decision. The devnet wallet
-generated for previews is available for that purpose once funded.
+fixture with a devnet key.
 
-**Tracked as NA-11.**
+**Remediated 2026-10-19.** The owner funded the devnet wallet, and the fixture now holds the
+devnet key. Verified end to end: the stored key **derives to**
+`496yh6GUc7J7q8sepdoD9mgpf2Z38U54pB5kGsAqoGyU`, which holds **1 devnet SOL** and **10 devnet
+USDC**. Key-to-address derivation is the check that matters — matching a secret string proves
+nothing about which wallet it controls. Exactly one line of the file changed; a backup was
+taken, and the key set is otherwise identical.
+
+Note the backup of the old file **contains the production treasury key** and is retained
+locally only for rollback. It is now covered by `.gitignore` (`.env.*.bak*`) — it was
+untracked-but-unignored before, which is a real hazard when committing with `git add -A`.
+
+**Rotation is still required** — tracked as NA-8.
 
 ---
 
@@ -450,7 +462,7 @@ deployment component — configuration assertions are not runtime proof.
 | **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **Re-scoping DONE, 20/20 assertions pass.** Rotation **OPEN — owner only**; runbook at `docs/security/runbooks/credential-rotation.md` |
 | **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. |
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
-| **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | **OPEN — owner decision.** Devnet wallet generated but unfunded |
+| **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
 | **NA-12** | Re-link the local Netlify CLI to `bitxbit-dashboard` | R-013 | **OPEN** — prevents writing to the wrong project |
 
 ### NA-6 detail
@@ -498,7 +510,7 @@ Options, in order of preference:
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **Exposure path CLOSED** (config, 2026-10-19) — open pending deploy verification | Shri (interim) | **NA-8** |
 | R-010 | Secrets not marked secret | **OPEN** — deliberately withheld (see NA-9) | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
-| **R-012** | **Production treasury key in a local staging file** | **OPEN — HIGH** | Shri (interim) | **NA-11** |
+| **R-012** | Production treasury key in a local staging file | **Local fixture REMEDIATED** — rotation still open | Shri (interim) | NA-11 done / NA-8 |
 | R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
 
 **Nothing in this register is closed by the ownership assignment.**

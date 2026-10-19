@@ -160,3 +160,35 @@ netlify env:list --context production     --json --site 9617719a-40f4-4743-8b85-
 netlify env:list --context deploy-preview --json --site 9617719a-40f4-4743-8b85-770c2fe61f63
 netlify env:list --context branch-deploy  --json --site 9617719a-40f4-4743-8b85-770c2fe61f63
 ```
+
+---
+
+## 7. Follow-up applied 2026-10-19 (NA-11)
+
+The owner funded the devnet wallet, unblocking the local staging fixture.
+
+**`.env.staging.local` updated** — `AIRDROP_WALLET_PRIVATE_KEY` replaced with the devnet key.
+Exactly one line changed; the key set is otherwise identical; a timestamped backup was taken.
+
+**Verified by derivation, not by string comparison:**
+
+| Check | Result |
+|---|---|
+| Stored key derives to `496yh6GUc7J7q8sepdoD9mgpf2Z38U54pB5kGsAqoGyU` | ✅ |
+| That address holds devnet SOL | ✅ 1.0 SOL |
+| That address holds devnet USDC | ✅ 10.0 USDC (ATA `CoWrd6zhoE8SqZzZxXiDfJ8JiAcgXnkgXJthktYPMLxx`) |
+
+Deriving the public key is the check that matters — a matching secret string says nothing
+about which wallet it controls.
+
+**Nothing in the repository consumes `.env.staging.local`** (no references in any script,
+config or source file), so the swap breaks no automation.
+
+**Hardening:** the backup of the old file contains the production treasury key. It is now
+covered by `.gitignore` (`.env.*.bak*`); before this it was untracked but **not** ignored,
+which is a live hazard when committing with `git add -A`. `*.tsbuildinfo` was added to
+`.gitignore` at the same time, after a build artifact was nearly committed.
+
+**Still outstanding:** rotation of the production treasury key and the Supabase service-role
+key (NA-8), and the Upstash credentials (NA-2) — no Upstash credential exists anywhere on
+this machine.
