@@ -191,7 +191,40 @@ every issued user JWT** — all users are signed out. Far broader, and avoidable
 
 ### Rollback
 
-**None.** The old key is invalid the instant rotation completes. The mitigation is preparation —
+**None.** The old key is invalid the instant rotation completes. The mitigation is preparation — which is why step 1 is not optional.
+
+### Completion record — 2026-10-19
+
+Rotated and **verified by use**, which is the only check that counts.
+
+| Check | Result |
+|---|---|
+| Stored production key → **production** project | **HTTP 200** ✅ |
+| Stored production key → **staging** project | HTTP 401 ✅ (proves it is project-scoped) |
+| Control: staging key → staging project | HTTP 200 ✅ (proves the probe works) |
+| Anon key unchanged (legacy JWT) | ✅ no user signed out |
+| Preview / branch-deploy still staging | ✅ |
+| Stored value == the value supplied | ✅ |
+
+**Two false starts, both worth carrying forward:**
+
+1. **A key generated in the staging project was written into the production context**, and
+   every format check passed — 41 characters, correct prefix, valid character set, and a hash
+   matching the supplied file. **Format says nothing about which project a key belongs to or
+   whether it is live.** Probe the target with the credential before declaring a rotation
+   complete.
+2. **The first probe used `/rest/v1/`**, which returns 401 even with no key at all, so it
+   distinguished nothing. Use a real resource, and always include a control — if the control
+   fails, the probe is wrong rather than the credential.
+
+**Deleting one secret key does not revoke the others**, and creating a replacement does not
+revoke the original. The superseded key and the mistakenly-created staging key both remain
+valid in their projects until deleted individually.
+
+**Still outstanding:** a redeploy (env vars resolve at build time, so production is still
+running the previous configuration), then deactivating the legacy `service_role` key in
+**Settings → API Keys → Legacy API keys** — after verifying sign-in, admin operations and
+rate limiting.
 which is why step 1 is not optional.
 
 ---
