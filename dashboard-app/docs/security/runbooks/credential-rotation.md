@@ -102,6 +102,41 @@ and a key that has been readable in plaintext, that is cheap.
 Re-set the production variable to the old key and redeploy. Possible only while the old keypair
 still exists — which is why step 10 is last.
 
+### Completion record — 2026-10-19
+
+Executed by the owner. **Verified independently from chain data**, not from a report of what was
+done — the transfers below were read from mainnet transactions, and the old wallet's balances were
+queried directly.
+
+| Check | Evidence |
+|---|---|
+| Token balance moved | tx `P2VcVGPk…`: **29.999 BITXBIT** `E5qLq…ffQ` → `J3KDs55n…1NJu` |
+| Old wallet emptied of tokens | BITXBIT `0` |
+| Residual SOL swept | tx `3iPn4No2…`: −0.023304319 → +0.023292959 to the new wallet |
+| Old wallet fully drained | SOL `0.0` |
+| New wallet holds the balance | **29.999 BITXBIT** + 0.023292959 SOL, ATA `2vfQuHA7…iBvW` |
+| Env points at the new key | masked suffix `…3NuP` matches the key the owner holds |
+
+**New treasury address: `J3KDs55nHsUr47dLi1nqNsTPvGq6VJiemXAKYEh91NJU`.**
+
+**Two caveats, stated rather than glossed:**
+
+1. **The key match is a 4-character suffix check, not a derivation.** The value cannot be read back —
+   it is flagged secret, and Netlify does not return secret values through the UI, CLI or API in any
+   context. The suffix rules out *a different key* being stored, which is the failure that would
+   silently break airdrops; it does not prove the remainder is byte-identical. The definitive test is
+   a real airdrop after a deploy (§D).
+2. **`AIRDROP_WALLET_PRIVATE_KEY` is now flagged secret.** That protects the value — it is no longer
+   readable over the API, which was one of the original exposure paths. But the flag is
+   **irreversible**, and secret variables cannot carry the `post_processing` scope. More importantly,
+   secret values must still reach the runtime for signing to work; a documented failure mode has
+   secrets masked inside functions on branch deploys. **This needs verification on a deployment, not
+   an assumption.** Added to the D4 probe.
+
+**Not yet retired:** the old keypair. It controls a now-empty wallet, so the risk is minimal, but the
+local backup containing it (`dashboard-app/.env.staging.local.bak-*`) still exists and should be
+deleted once the airdrop test passes.
+
 ---
 
 ## B. Supabase service-role key
