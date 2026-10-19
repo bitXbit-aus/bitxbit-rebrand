@@ -48,7 +48,7 @@ means you can rotate **without invalidating user sessions** (see §B).
 | `dashboard-app/.env.staging.local` | `STAGING_SUPABASE_SERVICE_ROLE_KEY` (separate key) | only if staging rotates |
 | `.github/workflows/dashboard-ci.yml` | literal `dummy` | **nothing to rotate** |
 | `bitxbit-marketing`, `dazzling-vacherin-66d29b` | **no env vars at all** | none |
-| Mobile app backend | not reachable from this repo | **you must confirm** |
+| Mobile app backend | **does not exist** — the product is web-only | none |
 
 Good news: **CI carries no real secret** — it builds against dummy values, so there is no CI
 credential to rotate and no window where CI breaks.
@@ -165,8 +165,18 @@ every issued user JWT** — all users are signed out. Far broader, and avoidable
 
 ### Procedure
 
-1. **Finish §0's consumer table.** In particular confirm whether the mobile backend shares
-   this Supabase project — if it does, it breaks the moment the key rotates.
+1. **Finish §0's consumer table.** The consumer list is now complete: there is no mobile
+   app, the product is web-only, and CI carries only a dummy. The only place holding a real
+   production service-role key is the Netlify production context.
+
+   **The safe path is verified, not assumed.** `@supabase/supabase-js` 2.117.1 recognises
+   new-format keys — its built bundle contains
+   `isNewApiKey = (key) => key.startsWith("sb_publishable_") || key.startsWith("sb_secret_")`
+   and sends such keys **only** in the `apikey` header, never as a Bearer token. The staging
+   project already runs on an `sb_secret_` key and its smoke and fault tests pass, so the
+   format is proven in this codebase. Nothing decodes or validates the service key as a JWT.
+   `@supabase/ssr` (0.1.0) consumes only the anon key, which stays a legacy JWT, so auth
+   middleware is unaffected either way.
 2. **Create/rotate in the Supabase dashboard.** Note the exact time; anything before it is
    suspect.
 3. **Immediately update every consumer.** A gap of minutes is an outage.
