@@ -6,17 +6,20 @@
  * process. Read the key from stdin (or AIRDROP_KEY) rather than argv, so it does
  * not land in shell history, and so shell globbing cannot mangle it.
  *
- * Usage — expected address as the argument, key on stdin:
+ * Usage — expected address first, then the key by any of three routes:
  *
- *   printf '%s' '<private key>' | node scripts/verify-airdrop-key.cjs <expected-address>
+ *   # (a) SIMPLEST AND SAFEST: point it at a keypair file. The key never touches
+ *   #     the command line. Works with a solana-keygen id.json or a one-line file.
+ *   node scripts/verify-airdrop-key.cjs <expected-address> /path/to/keypair.json
  *
- * or interactively (paste the key, then Ctrl-D):
+ *   # (b) silent prompt: the key is not echoed and is not kept in shell history
+ *   read -s KEY; printf '%s' "$KEY" | node scripts/verify-airdrop-key.cjs <expected-address>
  *
- *   node scripts/verify-airdrop-key.cjs <expected-address>
+ *   # (c) env var
+ *   AIRDROP_KEY='<the actual key>' node scripts/verify-airdrop-key.cjs <expected-address>
  *
- * or via env var:
- *
- *   AIRDROP_KEY='<private key>' node scripts/verify-airdrop-key.cjs <expected-address>
+ * NOTE: the <angle-bracket> parts above are placeholders to be REPLACED. Passing
+ * them literally is detected and reported as such rather than as a decode error.
  *
  * Accepts, because key material arrives in several shapes in practice:
  *   - base58 secret key (what this app expects in AIRDROP_WALLET_PRIVATE_KEY)
@@ -42,11 +45,24 @@ try {
 
 const expected = process.argv[2];
 if (!expected) {
-  console.error("Usage: node scripts/verify-airdrop-key.cjs <expected-address>  (key on stdin)");
+  console.error("Usage: node scripts/verify-airdrop-key.cjs <expected-address> [key-file]");
+  console.error("  key comes from the file argument, AIRDROP_KEY_FILE, AIRDROP_KEY, or stdin.");
   process.exit(2);
 }
 
-function readStdin() {
+/**
+ * Resolve the key from, in order: a file path argument, AIRDROP_KEY_FILE, the
+ * AIRDROP_KEY env var, then stdin.
+ */
+function readKey(rawArgv2) {
+  const fromFile = process.argv[3] || process.env.AIRDROP_KEY_FILE;
+  if (fromFile) {
+    try {
+      return require("fs").readFileSync(fromFile, "utf8");
+    } catch (error) {
+      fail("Could not read the key file: " + fromFile, String((error && error.message) || error));
+    }
+  }
   try {
     if (process.env.AIRDROP_KEY) return process.env.AIRDROP_KEY;
     if (process.stdin.isTTY) return "";
@@ -64,7 +80,7 @@ function fail(message, hint) {
   process.exit(1);
 }
 
-const raw = readStdin();
+const raw = readKey();
 if (!raw || !raw.trim()) {
   fail(
     "No key received on stdin.",
@@ -81,8 +97,19 @@ if (!value) {
   fail("The value received was empty after trimming.");
 }
 
-// Netlify secret mask — the single most likely cause of a confusing failure now
-// that AIRDROP_WALLET_PRIVATE_KEY is flagged secret.
+// The placeholder from the instructions, passed through unedited. This is the
+// single most common confusion when a command block is copy-pasted wholesale, and
+// it deserves its own message rather than "Non-base58 character".
+if (/[<>]/.test(value) || /^(paste|your|the|new|my|insert|replace)\b/i.test(value) || /placeholder/i.test(value)) {
+  fail(
+    "That is a placeholder from the instructions, not a key.",
+    "Replace the <angle-bracket> text with the real value. Nothing inside angle brackets is ever meant " +
+      "to be used as-is."
+  );
+}
+
+// Netlify secret mask — the other cause of a confusing failure now that
+// AIRDROP_WALLET_PRIVATE_KEY is flagged secret.
 if (/^\*+/.test(value) || /^•+/.test(value) || /redacted/i.test(value)) {
   fail(
     "That is a masked value, not a key.",
