@@ -333,6 +333,25 @@ lands and is independently approved, **R-001 is closed as remediated, not renewe
 
 ## R-008 — Production is pre-migration-010 with no migration ledger
 
+**RESOLVED — 2026-10-19.** Production was migrated and the ledger backfilled the same day.
+
+| Step | Evidence |
+|---|---|
+| Backup | `pg_dump` of the `public` schema before any change — 10 tables, 10 data blocks, 4 functions, 20 policies, plain + custom format, sha256 recorded |
+| Preflight | Run through the real `psql` runner — `exit=0`, no hard stop |
+| Apply | `010` → `026`, 17 migrations in order, `ON_ERROR_STOP=1` — all OK |
+| Verify | All landmarks present; **every row count unchanged** (users 6, projects 3, categories 8, periods 0, rewards 0); backfill 6 authorization rows (1 admin, 5 members); mismatches **0**; obsolete 6-arg overload **0** |
+| Ledger | `001`–`026` backfilled, provenance recorded in-database via `COMMENT ON TABLE` |
+| Live app | All routes correct, four DB-backed public endpoints **200**, real data served |
+
+**Residual, stated rather than closed:** no provider point-in-time backup exists — the owner
+accepted proceeding on the logical dump. Parity evidence was structural (table and column sets),
+not types, defaults, indexes, RLS policies, triggers or grants.
+
+**The window remains open until the code is deployed.** Migrations are applied but PR #1 is not
+yet merged, so production runs the old code against the new schema. Verified healthy, because
+server-side paths use the service role, which bypasses the RLS changes.
+
 **Status:** OPEN — **blocking production release.** **Severity:** high (release risk).
 **Owner:** Shri — interim accountable owner.
 
@@ -584,7 +603,7 @@ deployment component — configuration assertions are not runtime proof.
 | **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ✅ **DONE** — migration 027 + Supabase store (PR #5). Atomicity proven on local **and** staging. Closure still needs the deployed D4 test. |
 | **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **UNBLOCKED** — limits are now genuinely shared, so they would be real rather than cosmetic. Still open. |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | **OPEN — doc done, migration step pending** |
-| **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | **OPEN** |
+| **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
 | **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19.** Re-scoping 20/20. Treasury rotated, verified on-chain, then proven end-to-end by a real production airdrop. Service key rotated, verified **by use** (200 vs production / 401 vs staging), proven by the same airdrop. Legacy `service_role` key deactivated; legacy `anon` retained so nobody was signed out. |
@@ -634,7 +653,7 @@ Options, in order of preference:
 | R-005 | Server Actions not rate limited | **OPEN** — no longer blocked behind R-004 | Shri (interim) | NA-3 |
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
-| R-008 | Production pre-010, no ledger | **OPEN** — blocking release | Shri (interim) | NA-5 |
+| R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19** — forward path closed, preview rebuilt staging-scoped, **all 7 production-wired deploys deleted and verified 404** | Shri (interim) | **NA-8** ✅ |
 | R-010 | Secrets not marked secret | **OPEN** — deliberately withheld (see NA-9) | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
