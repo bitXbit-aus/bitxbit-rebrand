@@ -108,8 +108,16 @@ The script reports, and where relevant aborts on:
 ### 3b. When the database has no migration ledger
 
 A pre-Phase-1 database may have **no `supabase_migrations.schema_migrations` table
-at all** — its schema was built by hand and never went through the runner. In that
-case:
+at all** — its schema was built by hand and never went through the runner.
+
+**Confirmed on production (`flasgvendiiasuixeqzu`, 2026-10-19):** no ledger, no
+Phase 1 objects of any kind, and no unique constraint on
+`(reward_period_id, user_id)`. Production is at a **pre-migration-010** state, so
+the intended range is **`010` → `026`**, and the migration-017 duplicate hard stop
+is **not applicable yet**. See
+`docs/security/evidence/phase-1-production-preflight-2026-10-19.md`.
+
+In that case:
 
 - The ledger cannot tell you the starting point. Derive it from the schema
   landmarks in the preflight output instead.
