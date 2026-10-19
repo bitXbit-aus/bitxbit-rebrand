@@ -90,27 +90,60 @@ The currently deployed build still works against the new schema — expected, be
 server-side paths use the service role, which bypasses the RLS changes, and the client-side
 reads now resolve through the backfilled `user_authorizations` rows.
 
-## 5. Open item — no migration ledger was created
+## 5. Migration ledger — backfilled `001`–`026` (RESOLVED same day)
 
-Because the range was applied with `psql` rather than the Supabase migration runner, the
-database now **has the Phase 1 schema but still no `supabase_migrations.schema_migrations`
-ledger**. The preflight flags exactly this: *"with no ledger, re-running a migration is not
-idempotent by ledger... say how the ledger will be created and populated, or the next operator
-inherits the same ambiguity."*
+The range was applied with `psql`, not the Supabase migration runner, so applying it left the
+database with the Phase 1 schema and **no ledger**. The preflight flags exactly this ambiguity:
+*"the next operator inherits the same ambiguity."* The ledger was therefore created and
+backfilled.
 
-Mitigating factor: every migration in this range is heavily guarded (`IF NOT EXISTS`,
-`CREATE OR REPLACE`, `DROP ... IF EXISTS`) and was proven re-applicable by the replay test's
-second pass, so re-running is safe without a ledger.
+**Structure copied from staging**, which has a genuine runner-created ledger — not invented:
 
-Recommended follow-up, metadata only: create the ledger and record `001`–`026` so the next
-operator can read the state instead of deriving it from schema landmarks.
+```sql
+CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+  version text NOT NULL PRIMARY KEY,
+  statements text,
+  name text
+);
+```
+
+**26 rows inserted in one transaction:** `version` = the 3-digit prefix, `name` = the descriptive
+remainder, `statements` NULL — matching staging's value shape.
+
+**Deliberate divergence, recorded rather than copied:** staging's rows for `001`–`023` store the
+**full filename stem** in `version` (`001_initial_schema`) with `name` NULL, while `024`–`027`
+use `version = '024'` + a separate `name`. That inconsistency reflects different tools applied at
+different times. Production is uniformly in the standard form (package-manager convention: numeric
+version + name), because a fresh ledger should be internally consistent rather than inherit
+someone else's drift.
+
+**Provenance is recorded in the database itself**, via `COMMENT ON TABLE`, so the next operator
+cannot mistake it for a runner-generated artefact:
+
+> Backfilled 2026-10-19. Migrations 001-026 were applied outside the migration runner: 001-009 by
+> hand when the schema was first built, 010-026 via psql with ON_ERROR_STOP. Rows here record what
+> IS applied, not that the runner applied it.
+
+**Access is not widened.** Grants remain `postgres` only — the same as staging. The
+`supabase_migrations` schema is not exposed to PostgREST (which defaults to `public` alone), so
+the ledger is not reachable through the API surface.
+
+**Verified through both readers:**
+
+- The preflight's step 2 now reports `Ledger present: 26 recorded migration(s)`, and step 4 reports
+  `6-arg(obsolete)=0 7-arg(hardened)=1` — the hardened overload is now visible.
+- Step 6, previously "NOT APPLICABLE", is now applicable and reports `OK: no active duplicate
+  rewards`; step 7 reports `Open payout_operations (submitted/uncertain/incident): 0`.
+- `PREFLIGHT COMPLETE — no hard stop detected`, `exit=0`.
+- The Supabase MCP `list_migrations` returns all 26 with versions `001`–`026` and their names.
 
 ## 6. Residual risks
 
 - **No provider point-in-time backup.** Accepted by the owner; the logical dump is the recovery basis.
 - **Parity was structural.** The fixture-vs-production comparison covered table and column sets,
   not types, defaults, NOT NULL flags, indexes, RLS policies, triggers or grants.
-- **Ledger absent** (section 5).
+- ~~Ledger absent~~ — **backfilled** `001`–`026` with provenance recorded in-database (section 5).
 - **The window between migration and code deploy.** Migrations are applied; PR #1's code is not
   yet deployed, so production currently runs the old code against the new schema. Verified healthy
   in section 4, but the window closes only when the code is deployed.
