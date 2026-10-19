@@ -190,9 +190,9 @@ no application-layer defence if the edge is misconfigured or the app is moved.
 
 ## R-004 — Rate limiting is per-instance in production (CONFIRMED)
 
-**Status:** OPEN — **CONFIRMED ACTIVE**, not merely unconfirmed. **Severity: HIGH**
-(raised from medium). **Owner:** Shri — interim accountable owner.
-**Confirmed:** 2026-10-19, Netlify environment audit.
+**Status:** **FIXED IN CODE AND PROVEN AT THE DATABASE LAYER** — **not yet closed**.
+**Severity: HIGH** (raised from medium). **Owner:** Shri — interim accountable owner.
+**Confirmed:** 2026-10-19 (Netlify environment audit). **Remediated:** 2026-10-19.
 
 `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are **absent** — both from
 the site and from the (empty) team variable set. `getRateLimitStore()` therefore
@@ -212,14 +212,38 @@ Two consequences beyond the risk itself:
 
 Evidence: `docs/security/evidence/netlify-environment-audit-2026-10-19.md`.
 
-**Required action — close by provisioning a shared store and removing the silent
-fallback:**
+**Remediated 2026-10-19** (PR #5). A shared store now exists: migration `027` adds
+`rate_limit_counters` and a `check_rate_limit()` RPC, with one atomic
+`INSERT … ON CONFLICT DO UPDATE … RETURNING`, `SECURITY DEFINER` and a pinned
+`search_path`. RLS is enabled with no policies, table access is revoked from
+`PUBLIC`/`anon`/`authenticated`, and only `service_role` may execute it.
+`resolveRateLimitBackend()` prefers Supabase (already in the stack — no new account
+or credential), then Upstash, then memory. The silent fallback now logs loudly, and
+any RPC error or malformed payload degrades to a per-instance check — **never** to
+"allowed".
 
-1. Add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to the site.
-2. **Prove** sharing: exceed a limit across two concurrent instances and observe a
-   single counter (a single-instance test does not prove this).
-3. Remove the silent fallback in production — fail closed or log loudly rather than
-   degrading quietly.
+**Netlify Blobs was evaluated and rejected.** Blobs is eventually consistent by
+default (updates propagate within 60s, against a window measured in seconds), has no
+transactions, and Netlify's own guidance says counters must not be built on a blob
+key "even with `onlyIfMatch` retries". A conditional-write loop would also ride on a
+known SDK defect reporting `modified: true` for non-412 failures — a silent lost
+write. It would have passed a single-instance test while over-allocating under
+concurrency.
+
+**Proven, not asserted.** Concurrent calls from independent database sessions:
+
+| Environment | Result |
+|---|---|
+| Local Postgres (replay) | 30 concurrent → counter **30**, allowed **10** |
+| Staging Supabase | 30 concurrent → counter **30**, allowed **10**, 0 connection failures |
+| Functional (`max=3`) | `true, true, true, false` |
+| Privileges (staging) | anon read/exec denied, authenticated exec denied, service_role allowed |
+
+Evidence: `docs/security/evidence/rate-limit-atomicity-2026-10-19.md`.
+
+**Why this is not closed.** Environment variables resolve at deploy time, so the
+change is inert until a deployment is built. The database proof shows the *store* is
+correct, not that the *wiring* is. Closure requires the deployed staging test (D4).
 
 **Tracked as NA-2.**
 
@@ -453,8 +477,8 @@ deployment component — configuration assertions are not runtime proof.
 | ID | Action | Risk | Status |
 |---|---|---|---|
 | **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | **IMPLEMENTED** — PR #4, 68/68 tests. Not closed: needs independent review + deployed staging evidence (blocked by D4) |
-| **NA-2** | Confirm Upstash configured; prove limits shared; remove silent fallback | R-004 | **INVESTIGATED — CONFIRMED ABSENT.** Not configured at site or team level, so the per-instance fallback is what runs. Fix requires adding the credentials. |
-| **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **BLOCKED** — de-prioritised until NA-2 lands; limits on an unshared store would be cosmetic |
+| **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ✅ **DONE** — migration 027 + Supabase store (PR #5). Atomicity proven on local **and** staging. Closure still needs the deployed D4 test. |
+| **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **UNBLOCKED** — limits are now genuinely shared, so they would be real rather than cosmetic. Still open. |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | **OPEN — doc done, migration step pending** |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | **OPEN** |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
@@ -502,8 +526,8 @@ Options, in order of preference:
 | R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 unmet) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **Implemented (PR #4)** — not closed | Shri (interim) | NA-1 |
-| R-004 | **Rate limiting per-instance in production** | **OPEN — CONFIRMED ACTIVE (HIGH)** | Shri (interim) | NA-2 |
-| R-005 | Server Actions not rate limited | **OPEN** — blocked behind R-004 | Shri (interim) | NA-3 |
+| R-004 | Rate limiting per-instance in production | **FIXED + PROVEN** (code, DB) — not closed pending D4 | Shri (interim) | NA-2 done |
+| R-005 | Server Actions not rate limited | **OPEN** — no longer blocked behind R-004 | Shri (interim) | NA-3 |
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **OPEN** — blocking release | Shri (interim) | NA-5 |
