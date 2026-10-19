@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { parseHostPolicy, validateRequestHost } from "@/lib/host-validation";
 
 interface MiddlewareAuthorization {
   role: "member" | "admin";
@@ -27,7 +28,34 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
+/**
+ * Host policy, built once per runtime from the environment.
+ * See lib/host-validation.ts — R-003.
+ */
+const HOST_POLICY = parseHostPolicy();
+
 export async function middleware(request: NextRequest) {
+  // Validate Host / X-Forwarded-Host first. Everything downstream — redirect
+  // targets, absolute URLs, cache keys — can be influenced by these headers, so
+  // a disallowed value must not reach it. Only present headers are checked.
+  const hostCheck = validateRequestHost(request.headers, HOST_POLICY);
+  if (!hostCheck.ok && hostCheck.rejected) {
+    console.error(
+      `Rejected request: disallowed "${hostCheck.rejected.header}" header "${hostCheck.rejected.host}". ` +
+        `Allowed: ${HOST_POLICY.exactHosts.join(", ")}` +
+        (HOST_POLICY.netlifySite ? `, <deploy>--${HOST_POLICY.netlifySite}.netlify.app` : "")
+    );
+    return applySecurityHeaders(
+      new NextResponse("Bad Request: unrecognised host.", {
+        status: 400,
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      })
+    );
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
