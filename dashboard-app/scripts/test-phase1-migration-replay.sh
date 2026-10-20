@@ -48,6 +48,17 @@ END $$;
 SQL
 createdb "$DB_NAME"
 
+# Mirror Supabase's default privileges. On a real Supabase project, new tables in
+# `public` are granted to anon/authenticated (RLS is the actual gate), so a
+# migration's REVOKE is what denies access. Without this the harness's `public`
+# schema has NO default privileges, which makes every REVOKE a no-op here and
+# makes removing one undetectable — while in production it is load-bearing.
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'DEFAULT_PRIVS'
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT ALL ON TABLES TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+DEFAULT_PRIVS
+
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$FIXTURE" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_010" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_011" >/dev/null
@@ -1556,6 +1567,13 @@ printf 'concurrent approval-vs-correction race test passed (blocked %sms, replac
 # undercounts, which is exactly the failure a single-instance test cannot detect.
 # 30 concurrent calls must yield exactly 30 increments, of which exactly `max`
 # are allowed.
+#
+# The calls run as `service_role` via PGOPTIONS='-c role=service_role', because
+# that is how PostgREST invokes the RPC in production. Running them as the
+# superuser would bypass every privilege check, so a dropped SECURITY DEFINER or a
+# missing table REVOKE would pass unnoticed. PGOPTIONS is used rather than
+# `SET ROLE` because the latter prints a `SET` command tag to stdout, which
+# corrupts the JSON the counters are parsed from.
 # ------------------------------------------------------------------------------
 RATE_KEY="rl:concurrency-test-$$"
 RATE_MAX=10
@@ -1564,7 +1582,7 @@ RATE_OUT=$(mktemp -d)
 
 for i in $(seq 1 "$RATE_CALLS"); do
   (
-    psql -d "$DB_NAME" -t -A -c \
+    PGOPTIONS='-c role=service_role' psql -d "$DB_NAME" -t -A -c \
       "SELECT public.check_rate_limit('$RATE_KEY', 60000, $RATE_MAX);" \
       > "$RATE_OUT/$i.json" 2>/dev/null
   ) &
@@ -1597,14 +1615,14 @@ if [ "$ALLOWED" != "$RATE_MAX" ]; then
 fi
 
 # A distinct key must be counted independently of the saturated one.
-OTHER_ALLOWED=$(psql -d "$DB_NAME" -t -A -c "SELECT (public.check_rate_limit('${RATE_KEY}:other', 60000, 3))->>'allowed';" | tr -d '[:space:]')
+OTHER_ALLOWED=$(PGOPTIONS='-c role=service_role' psql -d "$DB_NAME" -t -A -c "SELECT (public.check_rate_limit('${RATE_KEY}:other', 60000, 3))->>'allowed';" | tr -d '[:space:]')
 if [ "$OTHER_ALLOWED" != "true" ]; then
   echo "rate-limit atomicity test failed: a distinct key was denied ('$OTHER_ALLOWED')" >&2
   exit 1
 fi
 
 # A non-positive window must be rejected rather than silently accepted.
-if psql -d "$DB_NAME" -t -A -c "SELECT public.check_rate_limit('${RATE_KEY}:bad', 0, 1);" >/dev/null 2>&1; then
+if PGOPTIONS='-c role=service_role' psql -d "$DB_NAME" -t -A -c "SELECT public.check_rate_limit('${RATE_KEY}:bad', 0, 1);" >/dev/null 2>&1; then
   echo "rate-limit atomicity test failed: a zero-length window was accepted" >&2
   exit 1
 fi

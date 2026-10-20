@@ -131,8 +131,18 @@ BEGIN
 END;
 $$;
 
--- Only the server may call this. The app reaches it with the service-role key;
--- anon and authenticated must not be able to probe or exhaust counters.
-REVOKE ALL ON TABLE public.rate_limit_counters FROM PUBLIC, anon, authenticated;
+-- Only the server may call this, and only through the RPC. The app reaches it
+-- with the service-role key; anon and authenticated must not be able to probe or
+-- exhaust counters.
+--
+-- service_role is revoked from the TABLE as well as granted EXECUTE on the
+-- FUNCTION. Without that, service_role would hold direct table access through
+-- Supabase's default privileges, which would make SECURITY DEFINER decorative:
+-- the RPC would work whether or not it ran with the owner's rights, so losing
+-- the definer clause would be undetectable. Revoking the table makes the RPC the
+-- single path to the counter and makes the definer clause load-bearing. Nothing
+-- in the app reads the table directly — lib/rate-limit-supabase.ts calls only
+-- this RPC.
+REVOKE ALL ON TABLE public.rate_limit_counters FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.check_rate_limit(TEXT, INTEGER, INTEGER) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INTEGER, INTEGER) TO service_role;

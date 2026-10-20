@@ -57,7 +57,10 @@ and is logged (at most once a minute). It is **never** treated as "allowed": a b
 permitted traffic would be indistinguishable from a working limiter.
 
 **Privileges:** `SECURITY DEFINER` with `search_path` pinned; RLS enabled with no policies; table
-access revoked from `PUBLIC`, `anon`, `authenticated`; `EXECUTE` granted to `service_role` only.
+access revoked from `PUBLIC`, `anon`, `authenticated` **and `service_role`**; `EXECUTE` granted to
+`service_role` only. `service_role` is revoked from the *table* as well, so the RPC is the single
+path to the counter and the `SECURITY DEFINER` clause is load-bearing rather than decorative —
+see §6.3.
 
 ## 4. Proof of atomicity
 
@@ -112,3 +115,69 @@ the deployed staging HTTP test (D4) to confirm the app actually reaches the RPC 
 deployment — the database proof above shows the store is correct, not that the wiring is.
 
 That distinction is deliberate: configuration and unit proofs are not runtime evidence.
+
+---
+
+## 6. Independent verification — 2026-10-20
+
+The claims above were re-verified by mutation: baseline must pass, and each mutation must produce a
+failure. A mutation that produces none is either a hole in the harness or a semantically neutral
+edit, and the difference matters.
+
+### 6.1 The four controls are load-bearing
+
+| Mutation | Result |
+|---|---|
+| Atomic upsert → naive read-modify-write | **detected** — `counter=11`, not 30 (lost updates) |
+| Function `REVOKE` removed | **detected** — `authenticated can execute the counter RPC` |
+| Table `REVOKE` removed | **detected** — `anon can read the counter table` |
+| `SECURITY DEFINER` clause dropped | **detected** — RPC fails, `counter=''` |
+
+### 6.2 Two harness-fidelity defects found and fixed
+
+Both made the harness *look* stricter than it was. Neither would have been visible from a green run.
+
+1. **The fixture never set `ALTER DEFAULT PRIVILEGES`.** It created the `anon` / `authenticated` /
+   `service_role` roles, but nothing granted new tables in `public` to them. On a real Supabase
+   project those grants **do** exist (RLS is the gate), so the migration's `REVOKE` is load-bearing
+   there — but in the harness the schema had no default privileges, every `REVOKE` was a no-op, and
+   **removing one was undetectable**. Fixed by mirroring the platform's default privileges in the
+   replay script. With that in place, removing the table `REVOKE` is caught (§6.1, row 3).
+
+2. **The concurrency test called the RPC as a superuser.** A superuser bypasses every privilege
+   check, so a dropped `SECURITY DEFINER` was invisible. Fixed by invoking the RPC as
+   `service_role` — which is how PostgREST calls it in production. Note for anyone editing this:
+   `SET ROLE` prints a `SET` command tag to stdout that corrupts the JSON the counters are parsed
+   from; `PGOPTIONS='-c role=service_role'` sets the role at connection time and prints nothing.
+
+### 6.3 Migration tightened: `service_role` revoked from the table
+
+The migration's own comment stated *"callers never need direct table access"*, but `service_role`
+retained it through Supabase's default privileges. That made `SECURITY DEFINER` decorative: the RPC
+would work whether or not it ran with the owner's rights, so losing the clause was undetectable
+(and it was — see 6.2 defect 2). `REVOKE ALL ON TABLE … FROM PUBLIC, anon, authenticated,
+service_role` now makes the RPC the single path to the counter.
+
+Verified safe: nothing in the app reads the table directly — `lib/rate-limit-supabase.ts` calls only
+`check_rate_limit`.
+
+### 6.4 A false negative in the *mutation*, recorded
+
+The first attempt at the `SECURITY DEFINER` mutation reported "no failure", which read as a hole in
+the harness. It was a hole in the **mutation**: the phrase `SECURITY DEFINER` occurs **three** times
+in the migration — twice in explanatory comments — and a plain first-occurrence replace hit a
+comment, testing a semantically neutral edit. Retargeted at the clause
+(`LANGUAGE plpgsql\nSECURITY DEFINER`), it is detected. Worth keeping as a lesson: a mutation that
+changes nothing is not evidence about the test until you have confirmed it changed the code.
+
+### 6.5 Housekeeping
+
+The rebase onto `main` left a **duplicate** `*.tsbuildinfo` entry in `.gitignore` (main had added it
+via PR #7, this branch added it under a different heading). Removed.
+
+### 6.6 Status
+
+R-004 remains **fixed and proven at the database layer, not closed**. The proof above is about the
+store; closure still needs the deployed D4 HTTP test to confirm a running deployment reaches the
+RPC. The production migration ledger is at **`026`** — `027` is unapplied, so the per-instance
+fallback is still what runs in production until migrate → verify → merge is completed.
