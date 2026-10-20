@@ -107,3 +107,38 @@ observed, this fix is unproven in the environment where the defect was found.
 
 A second network would strengthen it: a request from a different address must produce a *different*
 key. That is the test that would have caught the original defect.
+
+---
+
+## 7. FALSIFIED 2026-10-20 — the fix was deployed and changed nothing
+
+The fix above was merged (`ad3ee01d`) and deployed (`6ad721eae21f5c2ab1597e0a`,
+`commit_ref ad3ee01d`, published `08:12:25Z`). **It did not change the identifier.**
+
+Observed after the deploy:
+
+| Check | Result |
+|---|---|
+| Counter key after the fix | still `api:token-stats:13.236.191.253` |
+| 5 requests from the client at `206.83.119.2`, distinct `_rsc` values | key moved **2 → 7** — exactly +5 |
+| Client egress IP, confirmed locally | `206.83.119.2` |
+
+The `+5` is the load-bearing measurement: it proves those requests **did** reach the route handler and **did** key on the edge address. They were not merely cache hits, so the absence of a client-keyed row cannot be explained away by caching.
+
+**This falsifies §2.** The header does not hold the real client at the edge either — it already carries `13.236.191.253` before any hop, so re-forwarding it changes nothing.
+
+### What the evidence now points to
+
+- Netlify's own support guidance: `x-nf-client-connection-ip` is **not reliably populated inside Edge Functions** — which is what Next.js middleware is on Netlify — and the supported replacement is `Context.ip`; the header "will no longer be directly accessible".
+- A separate production postmortem reports Netlify setting **`x-forwarded-for` to the edge network's own address**, so XFF is not the client either.
+- `13.236.191.253` is an AWS **Sydney edge-node** address, consistent with both.
+
+### Consequences
+
+1. **The identifier defect remains OPEN.** R-004 is deployed and still keyed per edge node, not per client.
+2. **The forwarding code is inert, not a fix.** It is retained only because it hardens validation (every source must now be a bare IP literal) and because it forwards whatever the edge provides. Its comments have been corrected to say so, so the code does not carry a false claim.
+3. **Do not repeat the mistake of reasoning from the platform's documented behaviour.** The next change must be driven by observing the headers the origin actually receives.
+
+### Next step — get the data, don't guess again
+
+A temporary, token-gated diagnostic route that echoes the request's forwarding headers (`x-nf-client-connection-ip`, `x-forwarded-for`, `x-real-ip`, `forwarded`, `x-nf-*`) as seen by the **origin serverless function**, deployed, queried once, then removed. That identifies which header, if any, still carries `206.83.119.2` — or establishes that none does, in which case the identifier must come from Netlify's edge `Context.ip` (not reachable from Next.js middleware) or the design must change to something that does not depend on the client IP.

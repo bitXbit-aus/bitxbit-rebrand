@@ -89,11 +89,11 @@ export interface RateLimitOptions {
 }
 
 export function getClientIdentifier(request: NextRequest): string {
-  // The middleware resolves the client address at the edge and forwards it in
-  // this header, because the edge -> origin hop replaces
-  // `x-nf-client-connection-ip` with the hop's own address — which made the
-  // limiter key on an infrastructure IP, so every client behind an edge node
-  // shared one bucket. See lib/client-ip.ts — R-004.
+  // The middleware forwards the address it can resolve at the edge. NOTE: that
+  // did NOT fix R-004 (deployed 2026-10-20, no change in behaviour) — the edge
+  // already reports an edge-node address, so the limiter still keys per edge
+  // node rather than per client. Identifier defect remains OPEN.
+  // See lib/client-ip.ts — R-004.
   //
   // Trustworthy only because the middleware overwrites this header
   // unconditionally before any route runs; a client-supplied value cannot
