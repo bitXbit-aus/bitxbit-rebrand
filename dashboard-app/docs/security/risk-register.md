@@ -154,7 +154,7 @@ Verified. Full evidence: `docs/security/evidence/phase-1-controls-verification-2
 | Control | Verified state |
 |---|---|
 | Server-side access controls | ✅ **Strong.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; 30 Server Actions guarded; admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
-| Shared rate limiting | ❌ **NOT satisfied in production.** A Supabase-backed shared store is implemented (migration `027`, PR #5) and proven on local and staging — but **`027` is unmerged and unapplied**: production's ledger is at `026`, so the silent per-instance in-memory fallback is still what runs. See R-004. |
+| Shared rate limiting | ❌ **Still not satisfied.** The store is deployed and correct (migration `027` applied, PR #5 merged, deploy `6ad71dde`), but post-deploy verification found the limiter keying on an **infrastructure address rather than the client's** — limits were per-edge-node, so the intended per-client control was not in force. Identifier fix in `security/client-ip-forwarding`. See R-004. |
 | Client identity for rate limiting | ✅ Uses Netlify's trusted `x-nf-client-connection-ip`; XFF trusted only behind an explicit `TRUST_PROXY` flag. |
 | Request limits | ⚠️ **Default only** — Next's 1 MB default. See R-006. |
 | Host-header validation | ✅ **Satisfied** — implemented and released 2026-10-20 (PR #4, deploy `6ad70e11`); refusal path proven, control live in production. The application-layer check is defence-in-depth behind the Netlify edge, which is a property of the hosting configuration. See R-003. |
@@ -230,7 +230,12 @@ no application-layer defence if the edge is misconfigured or the app is moved.
 
 ## R-004 — Rate limiting is per-instance in production (CONFIRMED)
 
-**Status:** **FIXED IN CODE AND PROVEN AT THE DATABASE LAYER** — **not yet closed**.
+**Status:** **DEPLOYED, BUT NOT EFFECTIVE AS DESIGNED** — **not closed.**
+Remediated 2026-10-19 (PR #5); migration `027` applied and released 2026-10-20 (deploy
+`6ad71dde`). **Post-deploy verification then found the limiter keying on an infrastructure
+address rather than the client's**, so limits were per-edge-node, not per-client. Identifier
+fix in `security/client-ip-forwarding`. See
+`evidence/rate-limit-client-identifier-2026-10-20.md`.
 **Severity: HIGH** (raised from medium). **Owner:** Shri — interim accountable owner.
 **Confirmed:** 2026-10-19 (Netlify environment audit). **Remediated:** 2026-10-19.
 
@@ -605,7 +610,7 @@ deployment component — configuration assertions are not runtime proof.
 | ID | Action | Risk | Status |
 |---|---|---|---|
 | **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | ✅ **RELEASED 2026-10-20** — PR #4 merged (deploy `6ad70e11`); harness mutation-verified (5/5 mutations detected); refusal path proven by a local integration run at the deployed commit. Not closed: independent review still waived. See `evidence/phase-1-host-origin-validation-released-2026-10-20.md` |
-| **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ⚠️ **IMPLEMENTED AND PROVEN LOCALLY/STAGING — NOT LIVE.** Migration `027` + Supabase store (PR #5); atomicity proven on local and staging. But **PR #5 is unmerged and `027` is unapplied** — production's ledger is at `026`, so the per-instance fallback still runs. "DONE" here means implemented, not deployed. |
+| **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ✅ **DEPLOYED 2026-10-20** — migration `027` applied to production (ledger row recorded) and PR #5 merged (deploy `6ad71dde`). Atomicity proven by a 30-session concurrency test; the harness is mutation-verified (4/4 mutations detected). **Not closed** — post-deploy verification found the limiter keying on an infrastructure address; see NA-13. |
 | **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **UNBLOCKED** — limits are now genuinely shared, so they would be real rather than cosmetic. Still open. |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | **OPEN — doc done, migration step pending** |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
@@ -615,7 +620,8 @@ deployment component — configuration assertions are not runtime proof.
 | **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. |
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
 | **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
-| **NA-12** | Re-link the local Netlify CLI to `bitxbit-dashboard` | R-013 | **OPEN** — prevents writing to the wrong project |
+| **NA-12** | Re-link the local Netlify CLI to `bitxbit-dashboard` | R-013 | ✅ **DONE 2026-10-20** — `dashboard-app/.netlify/state.json` now points at `9617719a-…` (`bitxbit-dashboard`); it previously held `cadeb6c3-…` (`dazzling-vacherin-66d29b`). The file is gitignored, so this is a workstation fix with no repository change. |
+| **NA-13** | Resolve the client address at the edge and forward it explicitly, so the rate limiter keys on the **client**, not an infrastructure address | **R-004** | **IN FLIGHT** — `security/client-ip-forwarding`. Unit-verified (103/103; 4/4 mutations detected). **Not verified until a deployed request is observed keying on the client's own address** — the unit tests cannot prove the platform assumption. |
 
 ### NA-6 detail
 
@@ -654,7 +660,7 @@ Options, in order of preference:
 | R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 still unmet — host validation now satisfied, shared rate limiting still not live). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
-| R-004 | Rate limiting per-instance in production | **FIXED + PROVEN** (code, DB) — not closed pending D4 | Shri (interim) | NA-2 done |
+| R-004 | Rate limiting per-instance in production | **DEPLOYED BUT NOT EFFECTIVE AS DESIGNED** — store correct and released (`027` applied, deploy `6ad71dde`), but the limiter keyed on an **infrastructure IP, not the client's** (limits per-edge-node). Identifier fix in `security/client-ip-forwarding` | Shri (interim) | NA-13 |
 | R-005 | Server Actions not rate limited | **OPEN** — no longer blocked behind R-004 | Shri (interim) | NA-3 |
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MemoryRateLimitStore, RateLimitResult, RateLimitStore } from "./rate-limit-store";
+import { CLIENT_IP_HEADER, isValidIp } from "./client-ip";
 
 let sharedStore: RateLimitStore | undefined;
 
@@ -88,11 +89,26 @@ export interface RateLimitOptions {
 }
 
 export function getClientIdentifier(request: NextRequest): string {
-  // Netlify exposes the original client IP in a trusted, edge-controlled header.
-  // Use it first so we never rely on a spoofable X-Forwarded-For chain.
+  // The middleware resolves the client address at the edge and forwards it in
+  // this header, because the edge -> origin hop replaces
+  // `x-nf-client-connection-ip` with the hop's own address — which made the
+  // limiter key on an infrastructure IP, so every client behind an edge node
+  // shared one bucket. See lib/client-ip.ts — R-004.
+  //
+  // Trustworthy only because the middleware overwrites this header
+  // unconditionally before any route runs; a client-supplied value cannot
+  // survive. Every source below is validated as a bare IP so a malformed or
+  // forged value can never become a rate-limit key.
+  const fromMiddleware = request.headers.get(CLIENT_IP_HEADER);
+  if (isValidIp(fromMiddleware)) {
+    return (fromMiddleware as string).trim();
+  }
+
+  // Fallback for a request that somehow bypassed the middleware. Correct only
+  // when the route is reached without the extra edge hop.
   const netlifyClientIp = request.headers.get("x-nf-client-connection-ip");
-  if (netlifyClientIp) {
-    return netlifyClientIp;
+  if (isValidIp(netlifyClientIp)) {
+    return (netlifyClientIp as string).trim();
   }
 
   // Only trust X-Forwarded-For when the deployment explicitly runs behind a
@@ -104,8 +120,8 @@ export function getClientIdentifier(request: NextRequest): string {
   if (trustProxy) {
     const forwarded = request.headers.get("x-forwarded-for");
     const ip = forwarded?.split(",")[0]?.trim();
-    if (ip) {
-      return ip;
+    if (isValidIp(ip)) {
+      return ip as string;
     }
   }
 
