@@ -201,7 +201,9 @@ Re-check on every advisory refresh.
 
 ## R-003 — No host-header validation
 
-**Status:** OPEN — **not accepted, not closed.** **Severity:** low–medium.
+**Status:** **RELEASED 2026-10-20** — implemented and deployed (PR #4, deploy `6ad70e11`),
+control verified in production. **NOT CLOSED:** independent review is still waived, not
+satisfied. **Severity:** low–medium.
 **Owner:** Shri — interim accountable owner.
 **Discovered:** 2026-10-19 control verification.
 
@@ -599,7 +601,7 @@ deployment component — configuration assertions are not runtime proof.
 
 | ID | Action | Risk | Status |
 |---|---|---|---|
-| **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | **IMPLEMENTED** — PR #4, 68/68 tests. Not closed: needs independent review + deployed staging evidence (blocked by D4) |
+| **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | ✅ **RELEASED 2026-10-20** — PR #4 merged (deploy `6ad70e11`); harness mutation-verified (5/5 mutations detected); refusal path proven by a local integration run at the deployed commit. Not closed: independent review still waived. See `evidence/phase-1-host-origin-validation-released-2026-10-20.md` |
 | **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ✅ **DONE** — migration 027 + Supabase store (PR #5). Atomicity proven on local **and** staging. Closure still needs the deployed D4 test. |
 | **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **UNBLOCKED** — limits are now genuinely shared, so they would be real rather than cosmetic. Still open. |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | **OPEN — doc done, migration step pending** |
@@ -648,7 +650,7 @@ Options, in order of preference:
 |---|---|---|---|---|
 | R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 unmet) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
-| R-003 | No host-header validation | **Implemented (PR #4)** — not closed | Shri (interim) | NA-1 |
+| R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | **FIXED + PROVEN** (code, DB) — not closed pending D4 | Shri (interim) | NA-2 done |
 | R-005 | Server Actions not rate limited | **OPEN** — no longer blocked behind R-004 | Shri (interim) | NA-3 |
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
