@@ -4,27 +4,73 @@ import { MemoryRateLimitStore, RateLimitResult, RateLimitStore } from "./rate-li
 let sharedStore: RateLimitStore | undefined;
 
 /**
- * Returns the shared rate-limit store for this process. When Upstash Redis
- * credentials are configured, uses Redis so limits are shared across all
- * serverless function instances. Otherwise falls back to an in-memory store.
+ * Which backing store a deployment will use.
+ *
+ * Supabase Postgres is preferred because it is already part of the stack — no
+ * extra account, no additional credential to hold or leak — and its single
+ * atomic upsert gives the cross-instance guarantee the RateLimitStore interface
+ * requires. Upstash remains supported for deployments that configure it.
+ */
+export type RateLimitBackend = "supabase" | "upstash" | "memory";
+
+export function resolveRateLimitBackend(
+  env: Record<string, string | undefined> = process.env
+): RateLimitBackend {
+  if (env.NEXT_PUBLIC_SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
+    return "supabase";
+  }
+  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
+    return "upstash";
+  }
+  return "memory";
+}
+
+/**
+ * Returns the shared rate-limit store for this process — shared across every
+ * serverless instance, not merely within one. Falls back to an in-memory store,
+ * loudly, when nothing shared is configured.
  */
 export function getRateLimitStore(): RateLimitStore {
   if (!sharedStore) {
-    const url = process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-    if (url && token) {
-      // Dynamic import keeps the Redis dependency out of the default bundle
-      // path and avoids eagerly loading it when only the memory store is used.
-      const { UpstashRedisRateLimitStore } = require("./rate-limit-redis");
-      sharedStore = new UpstashRedisRateLimitStore({ url, token });
-    } else {
-      sharedStore = new MemoryRateLimitStore();
-    }
+    sharedStore = createStore(resolveRateLimitBackend());
   }
-  // sharedStore is always initialized above; TypeScript cannot see through the
+  // createStore always returns a value; TypeScript cannot see through the
   // dynamic require, so we assert non-null.
   return sharedStore!;
+}
+
+function createStore(backend: RateLimitBackend): RateLimitStore {
+  if (backend === "supabase") {
+    // Dynamic requires keep each backend out of the bundle path unless selected.
+    const { createServiceClient } = require("./supabase/service");
+    const { SupabaseRateLimitStore } = require("./rate-limit-supabase");
+    return new SupabaseRateLimitStore({ client: createServiceClient() });
+  }
+
+  if (backend === "upstash") {
+    const { UpstashRedisRateLimitStore } = require("./rate-limit-redis");
+    return new UpstashRedisRateLimitStore({
+      url: process.env.UPSTASH_REDIS_REST_URL!,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    });
+  }
+
+  // R-004: nothing shared is configured, so in-memory limits apply per instance
+  // and an attacker spreading requests across instances receives a multiple of
+  // the intended allowance. This used to happen silently, which made a degraded
+  // control indistinguishable from a working one. Log it loudly.
+  //
+  // Deliberately does NOT throw: refusing every rate-limited request because the
+  // store is missing would take the site down — worse than a degraded limit.
+  if (process.env.NODE_ENV === "production") {
+    console.error(
+      "[rate-limit] DEGRADED: no shared store is configured (neither Supabase nor Upstash). " +
+        "Falling back to an in-memory store, so rate limits are PER-INSTANCE and NOT shared " +
+        "across instances. See R-004 in docs/security/risk-register.md."
+    );
+  }
+
+  return new MemoryRateLimitStore();
 }
 
 /**
