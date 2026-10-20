@@ -29,13 +29,24 @@ afterwards with `git merge-base --is-ancestor` that the branch head is now an an
 ### Two mechanical deviations, recorded rather than glossed
 
 1. **The merge was executed with `git push`, not the provider merge API.** The merge endpoint
-   returned **404 "Not Found"** for both credentials — which is how GitHub signals an
-   unauthorised write rather than 403. Diagnosis: the credentials are fine-grained PATs holding
-   `Contents: write` (so `git push` works) but **not `Pull requests: write`**. The repo's
-   `permissions` object reports `admin: true` because that reflects the *user's* role, not the
-   *token's* granted scopes. Merging locally and pushing produced the identical commit
-   topology and a merge commit the provider accepted and closed PR #1 against
-   (`merged: true`, `merge_commit_sha` matching).
+   returned **404 "Not Found"** for both credentials. GitHub commonly returns 404 rather than 403
+   to avoid confirming the existence of a resource the caller may not write, so the first reading
+   was an unauthorised write.
+
+   **That first reading was wrong, and is corrected here on the evidence.** The same credential
+   subsequently retargeted PRs #2–#5 with `PATCH /repos/.../pulls/{n}` and received **HTTP 200**
+   four times. A credential that can write to a pull request holds pull-request write, so a
+   simple scope gap is ruled out. The repo `permissions` object reporting `admin: true` only ever
+   described the *user's* role, not the token's granted scopes — which is why it cannot be used
+   either to confirm or to rule out the cause. **The cause of the merge 404 is therefore
+   unestablished**; what is established is that the token can write pull requests and could not
+   use the merge endpoint. Merging locally and pushing produced an identical commit topology, and
+   the provider accepted it and closed PR #1 against it (`merged: true`, `merge_commit_sha`
+   matching the pushed commit).
+
+   Left open rather than guessed: worth retrying the merge endpoint on PR #2 to see whether the
+   404 reproduces, which would distinguish a credential problem from an endpoint-specific one.
+   A `Pull requests: write` grant is the obvious thing to confirm first.
 
 2. **The push to `main` bypassed branch protection.** A direct push to a protected branch
    succeeded because `enforce_admins: false` lets an admin bypass the guard. The substantive
