@@ -18,6 +18,10 @@ import { CLIENT_IP_HEADER, resolveClientIp } from "@/lib/client-ip";
  * decides to activate it.
  *
  * REMOVE THIS ROUTE once the investigation concludes. It exists to be deleted.
+ *
+ * NOTE: the folder must NOT be underscore-prefixed. Next.js treats `_`-prefixed
+ * folders as private and excludes them from routing, so an earlier
+ * `app/api/_diag/...` path returned Next's 404 page and was never registered.
  */
 
 export const dynamic = "force-dynamic";
