@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { toast } from "@/components/ui/use-toast"
 import { cn } from "@/lib/utils"
+import { actionError } from "@/lib/action-result"
 
 interface FormWithToastProps
   extends Omit<React.FormHTMLAttributes<HTMLFormElement>, "action"> {
@@ -29,8 +30,13 @@ export function FormWithToast({
     const formData = new FormData(event.currentTarget)
 
     try {
-      await action(formData)
-      toast({ title: "Success", description: successMessage })
+      const result = await action(formData)
+      const refusal = actionError(result)
+      if (refusal) {
+        toast({ title: "Error", description: refusal, variant: "destructive" })
+      } else {
+        toast({ title: "Success", description: successMessage })
+      }
     } catch (error) {
       toast({
         title: "Error",
