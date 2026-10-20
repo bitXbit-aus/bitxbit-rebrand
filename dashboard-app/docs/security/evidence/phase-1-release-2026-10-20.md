@@ -54,6 +54,27 @@ afterwards with `git merge-base --is-ancestor` that the branch head is now an an
    merge endpoint on a current PR remains the cleanest discriminator; it was not retried here
    because the merge in question was already complete by other means.
 
+   **RESOLVED 2026-10-20 — the cause was the HTTP method, not the credential.** The
+   discriminator recommended above was run, on PR #4:
+
+   | Call (same keychain credential, same URL) | Result |
+   |---|---|
+   | `PUT /repos/{owner}/{repo}/pulls/4/merge` | **HTTP 200** — `{"merged": true}` |
+   | `POST /repos/{owner}/{repo}/pulls/4/merge` | **HTTP 404 Not Found** |
+
+   GitHub's merge endpoint is **`PUT`-only**. A `POST` to that path is not routed and 404s.
+   The original attempts used `POST`, which is why two different credentials failed
+   identically: the factor common to both attempts was the **verb**, not the token.
+
+   This **corrects the narrowing above.** There is no missing merge-specific grant, no
+   endpoint restriction, and no scope gap. The observation that two credentials both failed
+   was never evidence about the credentials — a `POST` 404s for any credential. Recorded
+   because the earlier text concluded "the cause is unestablished" and pointed at the token,
+   and a future reader would otherwise re-derive the same wrong hypothesis.
+
+   **Consequence for PR #4:** it was merged through this endpoint (`PUT`, `merge_method:
+   merge`), so its merge commit `8430ae22` is a provider-created merge, not a pushed one.
+
 2. **The push to `main` bypassed branch protection.** A direct push to a protected branch
    succeeded because `enforce_admins: false` lets an admin bypass the guard. The substantive
    checks had passed on the exact branch head and the merged content is byte-identical to it,
