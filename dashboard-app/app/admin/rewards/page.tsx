@@ -7,7 +7,6 @@ import {
   createRewardPeriod,
   calculateRewards,
   approveRewards,
-  distributeRewardsWithTx,
   getAirdropWalletBalanceAction,
   airdropRewards,
   sendTestAirdrop,
@@ -202,20 +201,6 @@ export default async function AdminRewardsPage() {
                       </Button>
                     </FormWithToast>
                   )}
-                  <FormWithToast
-                    action={distributeRewardsWithTx.bind(null, period.id)}
-                    successMessage="Marked as distributed"
-                    errorMessage="Could not mark distributed"
-                    className="flex gap-2 items-end"
-                  >
-                    <input
-                      name="txHash"
-                      placeholder="Manual tx signature"
-                      className="input text-sm w-48"
-                      required
-                    />
-                    <Button type="submit" size="sm" variant="outline">Mark Distributed</Button>
-                  </FormWithToast>
                 </div>
                 {canAirdrop && !canRunAirdrop && (
                   <div className="mt-3 text-xs text-amber-400">

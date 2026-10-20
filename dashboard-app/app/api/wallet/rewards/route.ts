@@ -1,7 +1,20 @@
 import { createClient } from "@/lib/supabase/server";
-import { NextResponse } from "next/server";
+import { checkRateLimit, getClientIdentifier, rateLimitResponse } from "@/lib/rate-limit";
+import { NextResponse, type NextRequest } from "next/server";
 
-export async function GET() {
+const WALLET_REWARDS_RATE_LIMIT = {
+  windowMs: 60_000,
+  maxRequests: 60,
+  keyPrefix: "api:wallet-rewards",
+};
+
+export async function GET(request: NextRequest) {
+  const identifier = getClientIdentifier(request);
+  const rateLimit = await checkRateLimit(identifier, WALLET_REWARDS_RATE_LIMIT);
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetAt);
+  }
+
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
 

@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { checkRateLimit, getClientIdentifier, rateLimitResponse } from "@/lib/rate-limit";
+import { NextResponse, type NextRequest } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 
 const TOKEN_MINT = process.env.BITXBIT_TOKEN_MINT || "DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5";
@@ -7,6 +8,12 @@ const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.s
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const TOKEN_CREATED_AT = "2021-10-17"; // bitxbit token creation date
 const CACHE_TTL_SECONDS = 3600; // update Birdeye stats once per hour
+
+const TOKEN_STATS_RATE_LIMIT = {
+  windowMs: 60_000,
+  maxRequests: 30,
+  keyPrefix: "api:token-stats",
+};
 
 interface TokenStats {
   price: number | null;
@@ -44,7 +51,13 @@ async function fetchHolderCountViaRpc(): Promise<number | null> {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const identifier = getClientIdentifier(request);
+  const rateLimit = await checkRateLimit(identifier, TOKEN_STATS_RATE_LIMIT);
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetAt);
+  }
+
   const stats: TokenStats = {
     price: null,
     priceChange24h: null,

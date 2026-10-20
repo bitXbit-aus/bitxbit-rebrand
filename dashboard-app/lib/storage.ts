@@ -1,6 +1,8 @@
 "use server";
 
 import { createServiceClient } from "@/lib/supabase/service";
+import { requireCapability } from "@/lib/authz";
+import { writeSecurityAudit } from "@/lib/audit";
 
 const ASSETS_BUCKET = "assets";
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -32,6 +34,8 @@ export interface UploadResult {
 }
 
 export async function uploadAsset(file: File, folder: string): Promise<UploadResult> {
+  const context = await requireCapability("manage_content");
+
   if (!file || file.size === 0) {
     return { url: null, error: "No file provided" };
   }
@@ -52,28 +56,44 @@ export async function uploadAsset(file: File, folder: string): Promise<UploadRes
   const random = Math.random().toString(36).slice(2, 10);
   const path = `${folder}/${baseName}-${timestamp}-${random}.${extension}`;
 
-  const { error: uploadError } = await supabase.storage
-    .from(ASSETS_BUCKET)
-    .upload(path, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type,
+  try {
+    const { error: uploadError } = await supabase.storage
+      .from(ASSETS_BUCKET)
+      .upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type,
+      });
+    if (uploadError) throw uploadError;
+
+    const { data: publicUrlData } = supabase.storage.from(ASSETS_BUCKET).getPublicUrl(path);
+    if (!publicUrlData?.publicUrl) {
+      throw new Error("Could not get public URL for uploaded file");
+    }
+
+    await writeSecurityAudit(context, {
+      action: "storage.asset_upload",
+      targetTable: "storage.objects",
+      targetId: path,
+      after: { bucket: ASSETS_BUCKET, path, content_type: file.type, size: file.size },
     });
-
-  if (uploadError) {
-    return { url: null, error: uploadError.message };
+    return { url: publicUrlData.publicUrl, error: null };
+  } catch (error) {
+    await writeSecurityAudit(context, {
+      action: "storage.asset_upload",
+      targetTable: "storage.objects",
+      targetId: path,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : "Asset upload failed",
+      metadata: { bucket: ASSETS_BUCKET, content_type: file.type, size: file.size },
+    });
+    return { url: null, error: error instanceof Error ? error.message : "Asset upload failed" };
   }
-
-  const { data: publicUrlData } = supabase.storage.from(ASSETS_BUCKET).getPublicUrl(path);
-
-  if (!publicUrlData?.publicUrl) {
-    return { url: null, error: "Could not get public URL for uploaded file" };
-  }
-
-  return { url: publicUrlData.publicUrl, error: null };
 }
 
 export async function deleteAsset(url: string): Promise<{ error: string | null }> {
+  const context = await requireCapability("manage_content");
+
   if (!url) return { error: null };
 
   const supabase = createServiceClient();
@@ -87,11 +107,25 @@ export async function deleteAsset(url: string): Promise<{ error: string | null }
 
   const path = url.slice(bucketUrlPrefix.length);
 
-  const { error } = await supabase.storage.from(ASSETS_BUCKET).remove([path]);
-
-  if (error) {
-    return { error: error.message };
+  try {
+    const { error } = await supabase.storage.from(ASSETS_BUCKET).remove([path]);
+    if (error) throw error;
+    await writeSecurityAudit(context, {
+      action: "storage.asset_delete",
+      targetTable: "storage.objects",
+      targetId: path,
+      before: { bucket: ASSETS_BUCKET, path },
+    });
+    return { error: null };
+  } catch (error) {
+    await writeSecurityAudit(context, {
+      action: "storage.asset_delete",
+      targetTable: "storage.objects",
+      targetId: path,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : "Asset deletion failed",
+      metadata: { bucket: ASSETS_BUCKET },
+    });
+    return { error: error instanceof Error ? error.message : "Asset deletion failed" };
   }
-
-  return { error: null };
 }

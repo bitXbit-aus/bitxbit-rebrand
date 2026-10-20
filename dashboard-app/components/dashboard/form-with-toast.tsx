@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 
 interface FormWithToastProps
   extends Omit<React.FormHTMLAttributes<HTMLFormElement>, "action"> {
-  action: (formData: FormData) => Promise<void>
+  action: (formData: FormData) => Promise<unknown>
   successMessage?: string
   errorMessage?: string
   children: React.ReactNode

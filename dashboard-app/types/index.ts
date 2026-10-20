@@ -1,5 +1,5 @@
 export type UserRole = 'member' | 'admin';
-export type UserStatus = 'active' | 'suspended';
+export type UserStatus = 'active' | 'suspended' | 'deactivated';
 export type ActivityType = 'click' | 'signup' | 'purchase' | 'other';
 export type ProjectStatus = 'planning' | 'active' | 'completed' | 'paused';
 export type RewardStatus = 'pending' | 'approved' | 'distributed' | 'rejected';

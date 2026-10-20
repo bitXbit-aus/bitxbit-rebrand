@@ -9,8 +9,14 @@ import { useToast } from "@/components/ui/use-toast";
 import { truncateAddress, formatDate, formatCurrency } from "@/lib/utils";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import {
+  requestWalletVerificationChallenge,
+  verifyWalletSignature,
+  getWalletVerificationStatus,
+} from "@/lib/wallet-verification";
 import { saveWalletAddress, getTokenBalanceAction } from "@/lib/actions";
-import { Coins, History, Wallet, AlertCircle } from "lucide-react";
+import bs58 from "bs58";
+import { Coins, History, Wallet, AlertCircle, Shield, ShieldAlert } from "lucide-react";
 
 interface RewardTx {
   id: string;
@@ -21,35 +27,65 @@ interface RewardTx {
   period?: { start_date: string; end_date: string } | null;
 }
 
+interface SavedWalletState {
+  address: string | null;
+  verified: boolean;
+  verifiedAt: string | null;
+}
+
 export default function WalletPage() {
-  const { connection } = useConnection();
-  const { publicKey, connected, disconnect, wallet } = useWallet();
+  const { publicKey, connected, disconnect, wallet, signMessage } = useWallet();
   const { toast } = useToast();
 
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
   const [transactions, setTransactions] = useState<RewardTx[]>([]);
   const [isLoadingTx, setIsLoadingTx] = useState(true);
+  const [savedWallet, setSavedWallet] = useState<SavedWalletState | null>(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  const connectedAddress = publicKey?.toBase58() ?? null;
+  const walletName = wallet?.adapter.name ?? "Wallet";
+
+  async function loadSavedWallet() {
+    setIsLoadingStatus(true);
+    try {
+      const status = await getWalletVerificationStatus();
+      setSavedWallet({
+        address: status.walletAddress,
+        verified: status.verified,
+        verifiedAt: status.verifiedAt,
+      });
+    } catch (error) {
+      console.error("Failed to load wallet status:", error);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  }
 
   useEffect(() => {
-    if (connected && publicKey) {
-      const address = publicKey.toBase58();
-      saveWalletAddress(address)
-        .then(() => {
-          toast({
-            title: "Wallet saved",
-            description: `Connected ${truncateAddress(address)}`,
-          });
-        })
-        .catch((error) => {
-          toast({
-            title: "Failed to save wallet",
-            description: error instanceof Error ? error.message : "Unknown error",
-            variant: "destructive",
-          });
-        });
+    loadSavedWallet();
+  }, []);
+
+  useEffect(() => {
+    async function handleConnectedWallet() {
+      if (!connectedAddress) return;
+
+      // If the connected wallet matches the saved verified wallet, allow an
+      // idempotent save so the UI reflects the latest connection. Otherwise
+      // prompt the user to verify ownership before it becomes the payout address.
+      try {
+        await saveWalletAddress(connectedAddress);
+        await loadSavedWallet();
+      } catch {
+        // Expected when the connected wallet differs from the saved address or
+        // when no wallet has been verified yet. The verify button handles this.
+      }
     }
-  }, [connected, publicKey, toast]);
+
+    handleConnectedWallet();
+  }, [connectedAddress]);
 
   useEffect(() => {
     async function loadBalance() {
@@ -91,12 +127,52 @@ export default function WalletPage() {
     loadTransactions();
   }, []);
 
+  async function handleVerifyOwnership() {
+    if (!connectedAddress || !signMessage) {
+      toast({
+        title: "Cannot verify",
+        description: "Please connect a wallet that supports message signing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const challenge = await requestWalletVerificationChallenge(connectedAddress);
+      const messageBytes = new TextEncoder().encode(challenge.message);
+      const signatureBytes = await signMessage(messageBytes);
+      const signatureBase58 = bs58.encode(signatureBytes);
+
+      await verifyWalletSignature(connectedAddress, signatureBase58, challenge.nonce);
+      await loadSavedWallet();
+
+      toast({
+        title: "Wallet verified",
+        description: `${truncateAddress(connectedAddress)} is now your verified payout address.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Verification failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsVerifying(false);
+    }
+  }
+
+  const isConnectedSaved =
+    !!connectedAddress &&
+    !!savedWallet?.address &&
+    savedWallet.address.toLowerCase() === connectedAddress.toLowerCase();
+
   return (
     <div className="dashboard-container">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Wallet</h1>
         <p className="text-muted-foreground mt-1">
-          Connect your Solana wallet to receive bitxbit rewards.
+          Connect and verify your Solana wallet to receive bitxbit rewards.
         </p>
       </div>
 
@@ -105,7 +181,7 @@ export default function WalletPage() {
           <CardHeader>
             <CardTitle>Wallet Connection</CardTitle>
             <CardDescription>
-              Connect a Solana wallet to track your bitxbit tokens.
+              Connect a Solana wallet, then verify ownership to set it as your payout address.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -114,10 +190,34 @@ export default function WalletPage() {
                 <div className="p-4 rounded-lg bg-muted space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-muted-foreground">Connected Address</p>
-                    <Badge variant="outline">{wallet?.adapter.name}</Badge>
+                    <Badge variant="outline">{walletName}</Badge>
                   </div>
                   <SolanaAddress address={publicKey.toBase58()} />
                 </div>
+
+                {!isLoadingStatus && savedWallet?.address && (
+                  <div className="p-4 rounded-lg bg-muted space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">Saved Payout Address</p>
+                      {savedWallet.verified ? (
+                        <Badge variant="default" className="gap-1">
+                          <Shield className="h-3 w-3" /> Verified
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1">
+                          <ShieldAlert className="h-3 w-3" /> Unverified
+                        </Badge>
+                      )}
+                    </div>
+                    <SolanaAddress address={savedWallet.address} />
+                    {savedWallet.verified && savedWallet.verifiedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Verified {formatDate(savedWallet.verifiedAt)}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div className="p-4 rounded-lg bg-muted space-y-2">
                   <div className="flex items-center gap-2">
                     <Coins className="h-4 w-4 text-primary" />
@@ -127,6 +227,32 @@ export default function WalletPage() {
                     {isLoadingBalance ? "Loading..." : tokenBalance?.toFixed(4) ?? "0.0000"}
                   </p>
                 </div>
+
+                {isConnectedSaved && savedWallet?.verified ? (
+                  <div className="text-sm text-emerald-400 flex items-center gap-2">
+                    <Shield className="h-4 w-4" />
+                    This wallet is verified and set as your payout address.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-sm text-amber-400 flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                      <span>
+                        {savedWallet?.address
+                          ? "The connected wallet does not match your saved payout address. Verify ownership to update it."
+                          : "Wallet connection is not proof of ownership. Verify ownership to set this as your payout address."}
+                      </span>
+                    </div>
+                    <Button
+                      onClick={handleVerifyOwnership}
+                      disabled={isVerifying || !signMessage}
+                      className="w-full sm:w-auto"
+                    >
+                      {isVerifying ? "Verifying..." : "Verify Ownership"}
+                    </Button>
+                  </div>
+                )}
+
                 <Button variant="outline" onClick={disconnect}>
                   Disconnect
                 </Button>
@@ -138,7 +264,8 @@ export default function WalletPage() {
                     <AlertCircle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
                     <p className="text-sm text-muted-foreground">
                       No wallet connected. Use the button below to connect Phantom, Solflare, or
-                      Coinbase Wallet.
+                      Coinbase Wallet. You will then be asked to sign a short message proving you
+                      control the wallet.
                     </p>
                   </div>
                 </div>

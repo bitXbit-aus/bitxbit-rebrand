@@ -25,14 +25,18 @@ export function OfferCard({ offer }: OfferCardProps) {
 
   const handleClick = async () => {
     setIsLoading(true);
+    const opened = window.open(offer.referral_url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      window.location.assign(offer.referral_url);
+      return;
+    }
+
     try {
-      await trackOfferClick(offer.id);
-      window.open(offer.referral_url, "_blank", "noopener,noreferrer");
-    } catch (error) {
+      await trackOfferClick(offer.id, offer.referral_url);
+    } catch {
       toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to track click",
-        variant: "destructive",
+        title: "Offer opened",
+        description: "The offer opened, but analytics could not be recorded.",
       });
     } finally {
       setIsLoading(false);

@@ -1,9 +1,13 @@
 import { createServiceClient } from "@/lib/supabase/service";
-import { publicJsonResponse, publicOptionsResponse } from "../_shared";
+import { checkPublicRateLimit, publicJsonResponse, publicOptionsResponse } from "../_shared";
+import type { NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const rateLimited = await checkPublicRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   const supabase = createServiceClient();
 
   const { data, error } = await supabase

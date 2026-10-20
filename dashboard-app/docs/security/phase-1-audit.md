@@ -1,0 +1,208 @@
+# Phase 1 Security Audit
+
+**Date:** October 18, 2026
+**Scope:** `dashboard-app` source code and versioned Supabase migrations  
+**Evidence level:** Repository source, local replay/concurrency tests, non-production Supabase migration/catalog verification, staging smoke tests, and real Solana devnet fault validation. No production database or production deployment was accessed.
+
+## Confirmed source findings
+
+1. **Admin authorization trusted mutable profile data.** Existing RLS policies, middleware, and layouts treated `public.users.role = 'admin'` as the authorization source. The original self-update policy allowed a member to update their entire own row, and table-level grants were not narrowed by column.
+2. **Suspension was not enforced at the route or policy boundary.** Dashboard routes required a valid auth session but did not reject `users.status = 'suspended'`. Existing admin predicates checked role only.
+3. **Admin policy predicates queried `public.users` from policies on `public.users`.** This pattern risks recursive RLS evaluation and coupled every administrative policy to a member-visible compatibility table.
+4. **Reward-bearing activity inserts were client-authorized.** `Activities insert own` allowed authenticated clients to create rows used by reward calculations.
+5. **Storage writes were open to every authenticated account.** The assets bucket had authenticated INSERT, UPDATE, and DELETE policies without an admin or ownership boundary.
+6. **Service-role server actions lacked a shared authorization guard.** User-management and storage helpers instantiated the service client without first proving the caller's session and protected authorization.
+7. **No append-only security audit relation existed.** Administrative and financial mutations had no common actor/action/before/after/request-id record.
+8. **Several state and amount fields lacked safe forward integrity checks.** Date ordering and non-negative financial constraints were absent on reward periods, income, rewards, projects, and transparency totals.
+9. **Security-definer signup functions did not set a fixed search path.** Existing trigger functions relied on ambient name resolution.
+10. **Compatibility-sensitive fields were used broadly.** Application code still reads `users.role` and `users.status`, so removing those columns in this phase would break the current UI and reports.
+
+## Initial fixes implemented
+
+Migration `010_phase1_security_foundation.sql`:
+
+- Adds protected `public.user_authorizations`, keyed one-to-one to `public.users`, and backfills every current profile while preserving role and status.
+- Gives existing admins the initial management capabilities and provisions new auth users with active member authorization.
+- Keeps `users.role/status` as synchronized compatibility fields, while revoking broad authenticated UPDATE and granting only `UPDATE(display_name)`. Admin promotion/demotion is now gated in server actions by `manage_security` plus AAL2; `manage_users` alone can only perform ordinary profile/status administration.
+- Adds fixed-search-path, owner-controlled `SECURITY DEFINER` helpers for active-user, active-admin, capability, and caller-scoped authorization RPC checks.
+- Replaces all source-defined admin RLS predicates with the protected helper and applies active-account checks to member-scoped policies.
+- Removes authenticated activity insertion and authenticated storage mutation policies/grants while retaining public storage reads. Offer clicks are restored through a service-role-only `record_trusted_offer_click` RPC called after `requireActiveUser`; the RPC validates the active offer and exact URL, serializes same-user/same-offer ingestion, and suppresses duplicates inside a 30-second window.
+- Adds append-only `security_audit_log`, active-admin read policy, immutable actor UUID attribution without a deleting-user foreign key, actor role/status/capability snapshots, service-role insert access, indexes, and database audit triggers on authorization, profile, income, reward-period, and reward records.
+- Adds data-preserving `NOT VALID` constraints for non-negative amounts and reward-period date ordering, plus supporting indexes.
+
+Application foundation:
+
+- Adds server-only `requireActiveUser`, `requireActiveAdmin`, and `requireCapability` helpers. They verify the auth session before creating a service client, reject missing/inactive authorization, and expose AAL scaffolding.
+- Adds a server-only application audit writer requiring a previously authorized context.
+- Changes middleware to use the caller-scoped authorization RPC; no service-role credential is instantiated at the edge.
+- Changes admin/dashboard layouts to enforce protected active authorization.
+- Restores member offer-click tracking through trusted server ingestion. Navigation is opened before analytics is awaited, so an audit or ingestion failure does not block the outbound offer.
+- Protects service-role user management, storage mutation, wallet mutation, treasury reads, and airdrop entry points with capability/session checks and actor-attributed success/failure audits. `writeSecurityAudit` rejects fabricated contexts at runtime.
+- Enforces bounded unique UUID batches, valid role/status values, no caller self-demotion/disable/delete, and preservation of at least one active security-capable admin where the affected rows can remove one.
+- Makes migration `010` replay-safe for replacement policies and new objects; existing constraints are added only when absent, so a later `VALIDATE CONSTRAINT` state is not reset by replay.
+- Limits the ordinary profile form to `display_name`; wallet updates remain in the separately validated wallet flow.
+
+## Task 3 — Wallet ownership verification
+
+### Confirmed source finding
+
+The previous `saveWalletAddress()` action accepted any syntactically valid Solana public key from the connected wallet adapter. Connection was treated as proof of ownership, so a member could register another party's public key as their payout destination.
+
+### Implemented fixes
+
+Migration `011_wallet_verification.sql`:
+
+- Adds `public.wallet_verification_challenges` with a unique nonce, the exact message to sign, expiry, and used/verified timestamps.
+- Adds `users.wallet_verified` and `users.wallet_verified_at`, backfills existing addresses as `FALSE` **only once** (only rows where `wallet_verified IS NULL` are touched), and protects these columns via RLS (members cannot write them directly). The one-time backfill ensures a migration replay cannot reset wallets that members have already verified.
+- Provides `public.consume_wallet_verification_challenge(UUID, TEXT, TEXT)` as a SECURITY DEFINER function that atomically locks, validates, and consumes a challenge exactly once.
+- Provides `public.verify_wallet_challenge(UUID, TEXT, TEXT)` as a SECURITY DEFINER function that consumes the signed challenge and updates the payout address + verified flag together inside a single database transaction.
+- Adds `sync_wallet_verification_status()` trigger that resets `wallet_verified` whenever `wallet_address` changes, preventing an unverified substitution from inheriting a previous verified flag. The verification function performs the address update and the verification update as two statements within the same transaction, so the final state is verified even though the trigger resets on the first statement.
+
+Application changes:
+
+- New server-only `lib/wallet-crypto.ts` builds a SIWS-compatible message and verifies Ed25519 detached signatures using `tweetnacl` and `@solana/web3.js`.
+- New server-only `lib/wallet-verification.ts` exposes:
+  - `requestWalletVerificationChallenge(walletAddress)` — creates a 5-minute, single-use challenge after `requireActiveUser()`.
+  - `verifyWalletSignature()` in `lib/wallet-verification.ts` validates the challenge, verifies the signature, and calls `public.verify_wallet_challenge()` so the nonce consumption, address update, and verified-flag update happen atomically inside the database.
+  - `getWalletVerificationStatus()` — returns the member's current saved/verified state.
+- `saveWalletAddress()` in `lib/actions.ts` now rejects address changes; it only permits idempotent re-saving of the currently verified address. All payout-address changes must go through `verifyWalletSignature`.
+- `/dashboard/wallet/page.tsx` no longer treats connection as verification. It displays verification status, shows a "Verify Ownership" button when the connected wallet differs from the saved address or is unverified, and signs the SIWS message with the wallet adapter before submitting it server-side.
+- Unit tests in `lib/wallet-crypto.test.ts` cover message construction, valid signatures, attacker keypairs, and message-replay attacks.
+
+### Acceptance test
+
+A member cannot register another user's wallet as their payout destination by knowing only the public address. They must produce a valid Ed25519 signature over a domain-bound, single-use, time-bound challenge generated for their authenticated account.
+
+## Task 4 — Secure token distribution and affiliate payouts
+
+### Confirmed source finding
+
+The previous `airdropRewards()` action updated `user_rewards` rows directly from an on-chain transfer result and offered a separate `distributeRewards()`/`distributeRewardsWithTx()` path that let an administrator mark rewards distributed by supplying a transaction hash. There was no durable record of each attempted payout, no cryptographic wallet-ownership gate before payout, and no on-chain reconciliation, so duplicate distributions, unverified destinations, or failed transfers could leave the database and ledger inconsistent.
+
+### Implemented fixes
+
+Migration `012_secure_token_distribution.sql`:
+
+- Adds `public.payout_operations` as the durable, idempotent record for every token distribution. Columns include a unique `operation_id`, reward period/reward/user references, exact `token_amount_raw` (smallest token units), `token_decimals`, status (`pending` → `submitting`/`submitted` → `confirmed`/`failed`/`cancelled`/`uncertain`/`incident`), `transaction_hash`, on-chain confirmation metadata, submission/error/incident timestamps, and the acting admin `actor_id`.
+- Enforces `UNIQUE(operation_id)`, a status check constraint (`pending`, `submitting`, `submitted`, `confirmed`, `failed`, `cancelled`, `uncertain`, `incident`), and indexes on `(reward_period_id, status)`, `(reward_id, created_at DESC)`, and `(transaction_hash)`.
+- Adds a `reward_periods_status_check` constraint limiting `reward_periods.status` to `pending`, `calculating`, `approved`, or `distributed`.
+- Revokes direct authenticated access; read access is admin-only via `is_active_admin()`. Writes go through service-role Server Actions after capability checks.
+- Adds `public.claim_payout_operation(TEXT, UUID)` — a `SECURITY DEFINER` function that atomically locks and moves a `pending`/`failed` operation to `submitting`, returning the operation ID only to the caller that wins the race. Concurrent callers receive `NULL`. Operations that are `submitting`, `submitted`, `uncertain`, `confirmed`, `cancelled`, or `incident` are non-retryable through this path.
+- Adds an audit trigger that writes every INSERT/UPDATE/DELETE on `payout_operations` to `security_audit_log`. The trigger is **fail-closed**: if the audit insert fails for any reason, the payout operation itself is aborted with `RAISE EXCEPTION`, so a financial state change can never commit without a durable audit record.
+- Adds `prevent_confirmed_payout_mutation()` trigger that rejects **any** `UPDATE` to a `confirmed` or `incident` operation. Once confirmed or incident, the entire row is immutable, not just its status.
+
+Application changes:
+
+- New server-only `lib/payout.ts` owns all Solana transfer logic:
+  - `getAirdropWalletBalances`, `amountToRaw`, `rawToAmount` for exact token-unit arithmetic.
+  - `getAirdropWalletAddress()` exposes the expected treasury wallet public key for on-chain reconciliation.
+  - `executePayoutTransfers(transfers[])` is retained as a deprecated legacy convenience path; new code should use the durable payout-operation workflow. `sendTestAirdrop()` now uses that durable workflow (create `payout_operations` record, prepare, persist, broadcast, confirm) and remains disabled unless `ENABLE_TEST_AIRDROP=true`.
+  - Finalised `payout_operations` records (`confirmed` or `incident`) are immutable: a `BEFORE UPDATE` trigger prevents status/field changes and a `BEFORE DELETE` trigger prevents deletion. Corrections must use explicit reversal or adjustment records.
+  - `confirmTokenTransfer(txHash, sourceWalletAddress, walletAddress, amountRaw)` waits for a finalized or confirmed signature status, parses the SPL-token `transfer` instruction, and verifies the program ID (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`), the source ATA, the destination ATA, the transfer authority, and the exact raw amount against the expected payout. Only transfers that match the expected treasury source, token mint (via deterministic ATAs), recipient, and amount are accepted as confirmed.
+- `lib/solana.ts` is refactored to re-export payout helpers and keep only Solana-specific utilities (`isValidSolanaAddress`, `getTokenBalance`). The deprecated `distributeTokens()` wrapper was removed so there is no non-idempotent legacy distribution path.
+- `calculateRewards()` in `lib/actions.ts` now refuses to recalculate a period whose status is `approved` or `distributed`, and refuses to recalculate any period that already has `payout_operations` rows. This prevents accidental overwriting of rewards after they have been approved or once payout activity has begun.
+- `calculateRewards()` now calls the atomic `apply_reward_calculation()` RPC for every calculation, including an empty reward set. That RPC deletes only active (`superseded_at IS NULL`) `user_rewards` records and inserts new records with the next version per user, so recalculation with zero recipients correctly retires obsolete active rewards while preserving any superseded historical records from prior corrections.
+- `correctRewards(periodId, reason)` is an explicit audited correction process. It requires `manage_rewards`, validates a non-empty reason, rejects distributed periods, and rejects periods with any payout in `submitting`, `submitted`, `uncertain`, `confirmed`, or `incident` state. The atomic `apply_reward_correction()` RPC cancels safe payouts, supersedes prior reward records, inserts new versioned records, and updates `reward_periods.status` to `calculating` and `total_income` in the same transaction. The complete committed result (correction id, cancelled payouts, superseded/inserted reward counts, period status, and total income) is returned to the application, so the period's accounting can never diverge from the corrected reward records. Migration `017` corrects the active-reward uniqueness constraint. Migration `018` adds a period-scoped advisory lock shared between `apply_reward_correction()`, `apply_reward_calculation()`, and `claim_payout_operation()` so a payout cannot be claimed after the correction's eligibility check has begun. Migration `021` installs the authoritative four-parameter `apply_reward_correction()` function and drops the obsolete three-parameter overload so service_role callers cannot bypass the newer accounting guarantees.
+- `approveRewards()` now calls migration `024`'s atomic `approve_reward_period()` RPC. The function acquires the shared period advisory lock, requires the period to be in `calculating`, rejects mixed active-reward states, approves every active pending reward, and moves the period to `approved` in the same transaction. It cannot reopen an already approved or distributed period, and a concurrent correction must finish before approval can examine and approve the replacement reward set.
+- `airdropRewards()` in `lib/actions.ts` now:
+  - Requires `manage_rewards` capability.
+  - Verifies the reward period is `approved`.
+  - Loads approved rewards joined to `users.wallet_address` and `users.wallet_verified`.
+  - Skips unverified, missing, invalid, or zero-amount destinations.
+  - Creates a deterministic `operation_id` (`payout:<periodId>:<rewardId>`) per reward. Existing `confirmed` operations are skipped; existing `submitted` operations are reconciled on-chain before any retry; `submitting`, `uncertain`, and `incident` operations are left non-retryable; only `pending` or `failed` operations may be claimed.
+  - Creates or claims each eligible operation atomically via `public.create_or_claim_payout_operation()`. The RPC acquires the period-wide advisory lock and re-verifies the reward period is `approved`, the recipient still has a verified wallet, the supplied payout address matches that verified wallet, the reward is still active/approved, the recipient matches, and the amount matches before inserting or claiming the operation. Concurrent callers are serialised; stale rewards, mismatched wallets, or non-approved periods abort the transaction. Expected stale-reward rejections are counted separately as `stale_reward` skipped payouts, while unexpected database errors abort the entire airdrop batch rather than being silently counted as ordinary skips.
+  - Verifies exactly one operation in the expected `submitting` state transitions to `submitted` with the prepared `signed_transaction_base58` and `last_blockhash` before broadcasting. If zero or multiple rows update, or if the persisted signature does not match the prepared transaction, the operation is moved to `failed` and is not broadcast.
+  - Checks the treasury wallet's token and SOL balances using exact raw amounts for the candidate set **before** any operation is moved to `submitted`.
+  - Prepares each transfer with `preparePayoutSubmission()`, signs it, derives the transaction hash, and persists the signed transaction, hash, and last blockhash as `submitted` **before** broadcasting. The persistence result is checked; if it fails, the operation is recovered to `failed` and the signed transaction is never broadcast.
+  - Broadcasts via `broadcastPayoutSubmission()`. Broadcast errors move the operation to `uncertain` (not retryable) because the transaction may have already landed.
+  - Reconciles each broadcast transfer on-chain via `confirmPayoutSubmission`/`confirmTokenTransfer`. Matching transfers call `finalize_payout_confirmation()`, which validates that the confirmation payload is a JSON object that positively reports `confirmed: true`, carries no `uncertain`/`incident` claim, and names a transaction signature equal to the immutable operation's stored hash. It then atomically transitions the operation to immutable `confirmed`, updates the exact referenced reward to `distributed`, preserves the transaction identity, and marks the period `distributed` only when every active reward has a confirmed payout. It additionally refuses to overwrite a reward whose recorded `distribution_tx_hash` already conflicts with the operation signature. Calling the RPC for an already-confirmed operation (with a null payload, asserting no new on-chain outcome) repairs a legacy partial commit where the reward update was missed. Inconclusive outcomes remain `uncertain`. Verified on-chain failures return to `failed` (retryable only when non-execution is established). **Confirmed on-chain mismatches** — where the transaction landed but the recipient, amount, source, mint, or authority does not match — are moved to a separate non-retryable `incident` status so they cannot trigger an automatic replacement payment.
+  - Uses the treasury wallet's exact `tokenRaw` bigint for sufficiency checks and sends BIGINT RPC arguments as decimal strings, avoiding JavaScript `Number` precision loss.
+  - The reward period is never marked distributed by a separate application write; completion is decided inside `finalize_payout_confirmation()` from the committed operation and active-reward state.
+- `sendTestAirdrop()` is now disabled unless `ENABLE_TEST_AIRDROP=true`, preventing accidental production outflows. Before broadcast it creates a `payout_operations` record with `is_test=true`, persists the signed transaction identity, and verifies that exactly one pending row transitioned to `submitted` so a zero-row update cannot silently proceed. It confirms the test transfer on-chain before reporting success.
+- The manual "Mark Distributed" form and `distributeRewards()`/`distributeRewardsWithTx()` have been removed from `lib/actions.ts` and `app/admin/rewards/page.tsx`.
+
+### Acceptance test
+
+An administrator cannot mark rewards distributed without an on-chain transfer. A reward cannot be paid twice for the same period because the deterministic `operation_id` is guarded by `create_or_claim_payout_operation()`: only one process can create or claim an operation from `pending`/`failed` to `submitting`, and `submitted` operations are reconciled rather than re-submitted. A member whose wallet is unverified cannot receive a payout. A transfer that reaches the blockchain but cannot be confirmed (network partition, dropped response) moves to `uncertain` and is never automatically retried as a new payment. A confirmed on-chain transfer that does not match the expected recipient, amount, source, mint, or authority is moved to the non-retryable `incident` status and cannot trigger an automatic replacement payment. These behaviours were exercised against an actual non-production Supabase deployment with devnet USDC and simulated Solana RPC/broadcast/confirmation interruptions.
+
+## Task 5 — Strengthen database security
+
+### Confirmed source finding
+
+Public API routes exposed some internal fields (`source_url` on activity, user IDs in referrer resolution), several routes accepted unbounded query parameters, and no consistent rate limiting or security headers were applied across the API surface.
+
+### Implemented fixes
+
+- Added `lib/rate-limit.ts` with a per-IP sliding-window rate limiter and `429 Too Many Requests` responses.
+  - `getClientIdentifier()` prefers the Netlify-trusted `x-nf-client-connection-ip` header; falls back to `x-forwarded-for` only when `TRUST_PROXY=true` or `RATE_LIMIT_TRUST_PROXY=true`; otherwise uses the runtime-provided `request.ip`. This prevents clients from spoofing their IP to bypass rate limiting.
+  - `checkRateLimit()` now delegates to a pluggable `RateLimitStore`. The default is an in-memory store suitable for local development and single-instance deployments.
+  - When `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set, the shared `UpstashRedisRateLimitStore` is used automatically, giving consistent limits across all serverless function instances. The Redis store uses an atomic Lua script (`INCR` + `PTTL`) so concurrent functions cannot over-allocate requests.
+- Applied rate limiting to every public API route (`/api/public/*`), `/api/token-stats`, and the authenticated `/api/wallet/rewards` route.
+- Added referral-code length validation (`≤ 64` characters) to `/api/public/resolve-referral` and UUID validation for the OAuth callback `ref` parameter.
+- Ensured public routes return generic error messages; internal Supabase/RPC errors are logged server-side only.
+- Added security headers via `middleware.ts` (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) and mirrored them in `netlify.toml` for static-file responses.
+
+## Task 6 — Dependency and application security
+
+### Confirmed source finding
+
+`npm audit` reports inherited vulnerabilities, primarily in the Solana wallet-adapter transitive tree and build tooling. No direct application dependency is abandoned, but `npm audit fix --force` would install a breaking downgrade of `@solana/spl-token`.
+
+### Implemented fixes
+
+- Captured the full audit output to `docs/security/dependency-audit.md` with severity summary, risk categories, and explicit recommendation **not** to run `npm audit fix --force`.
+- Documented a controlled upgrade plan for the Solana stack and a pruning strategy for unused React Native transitive dependencies.
+- Hardened callback referrer validation and API input boundaries.
+
+## Task 7 — Automated security testing
+
+### Implemented tests
+
+- `lib/authz-decision.test.ts` — active/suspended/deactivated account access, admin access, capability checks, AAL requirements.
+- `lib/security-mutations.test.ts` — promotion/demotion classification, UUID/enum validation, bulk-id bounds, self-removal prevention, last-security-admin protection, trusted-click dedupe.
+- `lib/wallet-crypto.test.ts` — SIWS message construction, valid signatures, attacker keypairs, message tampering.
+- `lib/payout.test.ts` — exact token-unit conversion and round-trips.
+- `lib/rate-limit.test.ts` — allow/block/reset behavior, per-client isolation, shared-store delegation, `MemoryRateLimitStore` unit tests, and trusted-proxy client-identifier selection.
+- `scripts/test-phase1-migration-replay.sh` — replay-safe migration verification for `001` through `024`, including idempotent fresh-database setup, incident-state non-retryability, immutability, delete prohibition for finalised records, test-operation constraints, recalculation preserving superseded reward history, empty-recalculation retirement of active rewards, atomic reward approval, atomic payout finalization and legacy partial-commit repair, `create_or_claim_payout_operation()` validation with period-status and verified-wallet re-checks, removal of both obsolete RPC overloads, and concurrent correction-vs-claim, correction-vs-creation, and approval-vs-correction race tests using two psql sessions.
+- `scripts/staging-smoke-test.ts` — non-production Supabase smoke test verifying atomic reward approval, wallet verification lifecycle, trusted offer click deduplication, `create_or_claim_payout_operation()` create/claim/reject paths, atomic payout finalization, and confirmed-payout immutability. Every fixture mutation is checked for a resolved Supabase error; immutable confirmed financial fixtures are reported and intentionally retained rather than silently claiming cleanup succeeded.
+- `scripts/staging-solana-fault-test.ts` — Solana fault-injection tests require an explicit RPC URL, verify its genesis hash is Solana devnet before preparing or broadcasting any transaction, inject a deterministic failing broadcast transport, verify unknown transaction confirmation returns `uncertain`, and verify an on-chain transfer that does not match the expected amount is reported as a non-retryable `incident`. Real broadcasts and confirmations use the already verified devnet connection.
+
+### Test results
+
+- `npm test` — 39/39 pass.
+- `npm run test:migration` — pass.
+- `npm run build` (dummy env) — pass.
+
+## Task 8 — One Good Turn readiness
+
+A separate architecture report, `docs/security/one-good-turn-readiness.md`, identifies reusable systems, proposed new tables (`membership_plans`, `member_subscriptions`, `merchant_offers`, `offer_redemptions`, and a future `promotional_draws` table), service boundaries, and the legal/regulatory prerequisites for any draw module.
+
+## Deliverables
+
+1. **Security Audit Report** — this document.
+2. **Implemented Fixes** — working code on `security/phase-1-hardening`.
+3. **Supabase Security Migrations** — `001_initial_schema.sql` through `026_harden_payout_confirmation_evidence.sql`. Migrations `002` and `003` were made idempotent so they apply cleanly to fresh databases (adding missing `referred_by`/`referral_code` columns and only renaming `bxb_amount` when it exists). Migration `022` accepts `p_token_decimals` so the payout amount verification works for tokens with any decimal count (e.g. devnet USDC with 6 decimals). Migration `023` removes the obsolete six-parameter `create_or_claim_payout_operation()` overload so only the hardened seven-parameter entry point remains callable. Migration `024` makes reward approval and confirmed payout finalization atomic under the shared period lock. Migration `025` adds exact raw-token reads so amounts cross the PostgREST boundary as canonical decimal text. Migration `026` hardens payout finalization evidence validation.
+4. **Wallet Authentication Upgrade** — `lib/wallet-crypto.ts`, `lib/wallet-verification.ts`, `app/dashboard/wallet/page.tsx`.
+5. **Token Distribution Improvements** — `lib/payout.ts`, hardened `airdropRewards()`, `payout_operations`.
+6. **Automated Test Results** — 42 unit tests + migration replay test passing (including concurrent race coverage and confirmation-evidence rejection cases).
+7. **Continuous Integration** — `.github/workflows/dashboard-ci.yml` runs `npm test`, `npm run test:migration`, and `npm run build` on every push to `main`/`security/phase-1-hardening` and every PR to `main`.
+8. **Staging Smoke Test** — `scripts/staging-smoke-test.ts` and `docs/security/staging-smoke-test.md` for non-production verification of wallet verification, payout safeguards, trusted clicks, and audit logging.
+9. **Deployment and Recovery Guide** — `docs/security/database-migration-and-recovery.md`.
+10. **Dependency Audit** — `docs/security/dependency-audit.md`.
+11. **One Good Turn Integration Readiness Report** — `docs/security/one-good-turn-readiness.md`.
+
+## Remaining work
+
+- Apply and verify migrations `010` through `024` in a non-production Supabase environment before production rollout. The repository replay test uses an isolated local PostgreSQL compatibility fixture; it is not production verification. Migration `017` will refuse to run if active duplicate `(reward_period_id, user_id)` pairs exist; resolve any such duplicates before applying it to an existing database. Migration `019` makes `reward_period_id` and `reward_id` nullable for `is_test=true` operations only; regenerate Supabase TypeScript types after applying it. Migration `024` must be present before deploying the application code that calls `approve_reward_period()` and `finalize_payout_confirmation()`.
+- Regenerate Supabase TypeScript database types after the migrations are applied to a linked project.
+- Migrate admin user-management reads and UI filtering from compatibility `users.role/status` to an authorized server-side join/view when convenient.
+- Add an explicit capability-management UI/action if delegated capability editing is required; any such action must use `manage_security` plus AAL2 and must retain the last-security-admin safeguards.
+- Review every remaining Server Action for a named capability rather than relying only on protected admin RLS.
+- Decide whether deactivated accounts should be retained indefinitely or mapped to an Auth ban/delete lifecycle; no deletion policy is introduced here.
+- Validate legacy rows and mark the remaining `NOT VALID` constraints valid in a later forward migration.
+- Application audit writes for user/profile/storage/wallet operations are currently separate from their underlying service-role mutation or external side effect. A process failure between mutation and audit can leave an unaudited success; use transactional database RPCs/outbox records for full atomicity in a later phase. Trusted click ingestion itself is transactionally deduplicated in the database.
+- Bulk last-security-admin checks are enforced immediately before mutation but are not serialized across concurrent admin requests; move these mutations into a locking database RPC if concurrent security administration becomes common.
+- Execute the controlled dependency upgrade plan in `docs/security/dependency-audit.md`; do not use `npm audit fix --force`.
+- Configure `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to enable the shared `UpstashRedisRateLimitStore` if the app is deployed across multiple Netlify serverless functions.
+- Conduct a staging end-to-end smoke test of wallet verification, airdrop idempotency, and admin capability enforcement before production.
+- Obtain legal/regulatory sign-off before designing or enabling any One Good Turn promotional draw module.

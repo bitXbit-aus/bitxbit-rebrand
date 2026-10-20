@@ -1,0 +1,76 @@
+name: Dashboard CI
+
+on:
+  push:
+    branches:
+      - main
+      - security/phase-1-hardening
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  dashboard-ci:
+    name: Tests, migration replay, and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard-app
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard-app/package-lock.json
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run migration replay test
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: npm run test:migration
+
+      - name: Build dashboard
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://dummy.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy
+          SUPABASE_SERVICE_ROLE_KEY: dummy
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          BITXBIT_TOKEN_MINT: DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5
+          BITXBIT_TOKEN_DECIMALS: 9
+          AIRDROP_WALLET_PRIVATE_KEY: dummy
+          BIRDEYE_API_KEY: dummy
+          RESEND_API_KEY: dummy
+          ANTHROPIC_API_KEY: dummy
+        run: npm run build
