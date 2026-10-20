@@ -57,11 +57,11 @@ export async function middleware(request: NextRequest) {
     );
   }
 
-  // Capture the client address here — the edge is the last point where Netlify's
-  // trusted `x-nf-client-connection-ip` still holds the real client. The
-  // edge -> origin hop replaces it with the hop's own address, which is why the
-  // rate limiter was keying on an infrastructure IP rather than the client's.
-  // See lib/client-ip.ts — R-004.
+  // Forward whatever client address the edge can resolve. NOTE: this was
+  // deployed on 2026-10-20 and did NOT fix R-004 — the header already carries an
+  // edge-node address at the edge, not the client's, so re-forwarding it changes
+  // nothing. Retained as inert validation hardening only; the identifier defect
+  // is still open. See lib/client-ip.ts — R-004.
   const clientIp = resolveClientIp(request.headers);
   // Built fresh at each use so cookies refreshed below are still forwarded.
   const forwardHeaders = () => withClientIp(new Headers(request.headers), clientIp);

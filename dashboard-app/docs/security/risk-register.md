@@ -154,7 +154,7 @@ Verified. Full evidence: `docs/security/evidence/phase-1-controls-verification-2
 | Control | Verified state |
 |---|---|
 | Server-side access controls | ✅ **Strong.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; 30 Server Actions guarded; admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
-| Shared rate limiting | ❌ **Still not satisfied.** The store is deployed and correct (migration `027` applied, PR #5 merged, deploy `6ad71dde`), but post-deploy verification found the limiter keying on an **infrastructure address rather than the client's** — limits were per-edge-node, so the intended per-client control was not in force. Identifier fix in `security/client-ip-forwarding`. See R-004. |
+| Shared rate limiting | ❌ **Still not satisfied.** The store is deployed and correct (migration `027` applied, PR #5 merged, deploy `6ad71dde`), but the limiter keys on an **edge-node address rather than the client's** — limits are per-edge-node, so the intended per-client control is not in force. A first fix was deployed and **falsified** (deploy `6ad721ea`). See R-004 / NA-13. |
 | Client identity for rate limiting | ✅ Uses Netlify's trusted `x-nf-client-connection-ip`; XFF trusted only behind an explicit `TRUST_PROXY` flag. |
 | Request limits | ⚠️ **Default only** — Next's 1 MB default. See R-006. |
 | Host-header validation | ✅ **Satisfied** — implemented and released 2026-10-20 (PR #4, deploy `6ad70e11`); refusal path proven, control live in production. The application-layer check is defence-in-depth behind the Netlify edge, which is a property of the hosting configuration. See R-003. |
@@ -232,10 +232,10 @@ no application-layer defence if the edge is misconfigured or the app is moved.
 
 **Status:** **DEPLOYED, BUT NOT EFFECTIVE AS DESIGNED** — **not closed.**
 Remediated 2026-10-19 (PR #5); migration `027` applied and released 2026-10-20 (deploy
-`6ad71dde`). **Post-deploy verification then found the limiter keying on an infrastructure
-address rather than the client's**, so limits were per-edge-node, not per-client. Identifier
-fix in `security/client-ip-forwarding`. See
-`evidence/rate-limit-client-identifier-2026-10-20.md`.
+`6ad71dde`). Post-deploy verification found the limiter keying on an **edge-node address
+rather than the client's**, so limits are per-edge-node, not per-client. A first identifier
+fix (deploy `6ad721ea`) was **deployed and falsified** — it changed nothing. The identifier
+defect remains OPEN. See `evidence/rate-limit-client-identifier-2026-10-20.md` §7.
 **Severity: HIGH** (raised from medium). **Owner:** Shri — interim accountable owner.
 **Confirmed:** 2026-10-19 (Netlify environment audit). **Remediated:** 2026-10-19.
 
@@ -621,7 +621,7 @@ deployment component — configuration assertions are not runtime proof.
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
 | **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
 | **NA-12** | Re-link the local Netlify CLI to `bitxbit-dashboard` | R-013 | ✅ **DONE 2026-10-20** — `dashboard-app/.netlify/state.json` now points at `9617719a-…` (`bitxbit-dashboard`); it previously held `cadeb6c3-…` (`dazzling-vacherin-66d29b`). The file is gitignored, so this is a workstation fix with no repository change. |
-| **NA-13** | Resolve the client address at the edge and forward it explicitly, so the rate limiter keys on the **client**, not an infrastructure address | **R-004** | **IN FLIGHT** — `security/client-ip-forwarding`. Unit-verified (103/103; 4/4 mutations detected). **Not verified until a deployed request is observed keying on the client's own address** — the unit tests cannot prove the platform assumption. |
+| **NA-13** | Resolve the client address at the edge and forward it explicitly, so the rate limiter keys on the **client**, not an edge-node address | **R-004** | ❌ **ATTEMPTED AND FALSIFIED 2026-10-20.** Deployed as `6ad721ea`; counters still keyed on the edge address (5 client requests moved the edge key 2 → 7). `x-nf-client-connection-ip` does not carry the client inside **Edge Functions** — which is what Next.js middleware is on Netlify. **Open.** Next step is a diagnostic that observes the headers the origin actually receives, not another change reasoned from documented platform behaviour. |
 
 ### NA-6 detail
 
@@ -660,7 +660,7 @@ Options, in order of preference:
 | R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 still unmet — host validation now satisfied, shared rate limiting still not live). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
-| R-004 | Rate limiting per-instance in production | **DEPLOYED BUT NOT EFFECTIVE AS DESIGNED** — store correct and released (`027` applied, deploy `6ad71dde`), but the limiter keyed on an **infrastructure IP, not the client's** (limits per-edge-node). Identifier fix in `security/client-ip-forwarding` | Shri (interim) | NA-13 |
+| R-004 | Rate limiting per-instance in production | **DEPLOYED BUT NOT EFFECTIVE AS DESIGNED** — store correct and released (`027` applied, deploy `6ad71dde`), but the limiter keys on an **edge-node IP, not the client's** (limits per-edge-node). First identifier fix (deploy `6ad721ea`) **falsified**; defect OPEN | Shri (interim) | NA-13 |
 | R-005 | Server Actions not rate limited | **OPEN** — no longer blocked behind R-004 | Shri (interim) | NA-3 |
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |

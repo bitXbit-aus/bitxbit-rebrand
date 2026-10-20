@@ -16,11 +16,27 @@
  * the same edge node therefore shared one rate-limit bucket — limits were
  * per-edge-node, not per-client, which is not what a per-IP limiter is for.
  *
- * The fix
- * -------
- * Resolve the client address in the middleware — the last point where the
- * trusted value is still present — and forward it in a header we control.
- * `getClientIdentifier()` prefers that header.
+ * What was tried, and why it did NOT work
+ * ---------------------------------------
+ * Resolving the address in the middleware and re-forwarding it in a header we
+ * control was deployed on 2026-10-20 (deploy `6ad721ea`) and **changed nothing**:
+ * counters were still keyed `…:13.236.191.253` afterwards, and 5 requests from a
+ * client at 206.83.119.2 moved that key from 2 to 7 — so the requests did reach
+ * the handler and did key on the edge address.
+ *
+ * That falsifies the original explanation. `x-nf-client-connection-ip` does not
+ * hold the real client at the edge either. Netlify's own guidance is that this
+ * header is not reliably populated inside **Edge Functions** — which is what
+ * Next.js middleware is on Netlify — and that `Context.ip` supersedes it; a
+ * separate production postmortem reports Netlify setting `x-forwarded-for` to
+ * the edge network's address. `13.236.191.253` is an AWS Sydney edge-node
+ * address, consistent with both.
+ *
+ * The forwarding mechanism below is therefore **not** a fix for R-004. It is
+ * retained only because it hardens validation (every source must now be a bare
+ * IP literal) and because it is inert — it forwards whatever the edge sees. The
+ * identifier defect remains OPEN. See
+ * `docs/security/evidence/rate-limit-client-identifier-2026-10-20.md`.
  *
  * Trust boundary
  * --------------
