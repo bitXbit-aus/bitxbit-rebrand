@@ -154,13 +154,16 @@ Verified. Full evidence: `docs/security/evidence/phase-1-controls-verification-2
 | Control | Verified state |
 |---|---|
 | Server-side access controls | ✅ **Strong.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; 30 Server Actions guarded; admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
-| Shared rate limiting | ⚠️ **Conditional — NOT satisfied.** Shared only when Upstash credentials are present; otherwise a **silent per-instance in-memory fallback**. See R-004. |
+| Shared rate limiting | ❌ **NOT satisfied in production.** A Supabase-backed shared store is implemented (migration `027`, PR #5) and proven on local and staging — but **`027` is unmerged and unapplied**: production's ledger is at `026`, so the silent per-instance in-memory fallback is still what runs. See R-004. |
 | Client identity for rate limiting | ✅ Uses Netlify's trusted `x-nf-client-connection-ip`; XFF trusted only behind an explicit `TRUST_PROXY` flag. |
 | Request limits | ⚠️ **Default only** — Next's 1 MB default. See R-006. |
-| Host-header validation | ❌ **Absent.** See R-003. |
+| Host-header validation | ✅ **Satisfied** — implemented and released 2026-10-20 (PR #4, deploy `6ad70e11`); refusal path proven, control live in production. The application-layer check is defence-in-depth behind the Netlify edge, which is a property of the hosting configuration. See R-003. |
 
-**Two of the four controls named in Condition 3 are unsatisfied**, so this condition
-is **not met** and R-001's exception is contingent on closing R-003 and R-004.
+**Condition 3 is still not met.** As of 2026-10-20, one of the two outstanding controls is
+now satisfied — host-header validation is implemented and released (R-003) — but shared rate
+limiting is **still not live in production** (R-004; migration `027` unmerged and unapplied). The
+condition remains contingent on closing R-003 and R-004; R-003 is *released* but *not closed*
+(independent review still waived, not met).
 
 ### Condition 4 — recorded in the risk register with an accountable owner
 
@@ -602,7 +605,7 @@ deployment component — configuration assertions are not runtime proof.
 | ID | Action | Risk | Status |
 |---|---|---|---|
 | **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | ✅ **RELEASED 2026-10-20** — PR #4 merged (deploy `6ad70e11`); harness mutation-verified (5/5 mutations detected); refusal path proven by a local integration run at the deployed commit. Not closed: independent review still waived. See `evidence/phase-1-host-origin-validation-released-2026-10-20.md` |
-| **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ✅ **DONE** — migration 027 + Supabase store (PR #5). Atomicity proven on local **and** staging. Closure still needs the deployed D4 test. |
+| **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ⚠️ **IMPLEMENTED AND PROVEN LOCALLY/STAGING — NOT LIVE.** Migration `027` + Supabase store (PR #5); atomicity proven on local and staging. But **PR #5 is unmerged and `027` is unapplied** — production's ledger is at `026`, so the per-instance fallback still runs. "DONE" here means implemented, not deployed. |
 | **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **UNBLOCKED** — limits are now genuinely shared, so they would be real rather than cosmetic. Still open. |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | **OPEN — doc done, migration step pending** |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
@@ -648,7 +651,7 @@ Options, in order of preference:
 
 | ID | Risk | Status | Owner | Review |
 |---|---|---|---|---|
-| R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 unmet) | Shri (interim) | **2026-11-18 (expires)** |
+| R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 still unmet — host validation now satisfied, shared rate limiting still not live). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | **FIXED + PROVEN** (code, DB) — not closed pending D4 | Shri (interim) | NA-2 done |
