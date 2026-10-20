@@ -44,9 +44,15 @@ afterwards with `git merge-base --is-ancestor` that the branch head is now an an
    the provider accepted it and closed PR #1 against it (`merged: true`, `merge_commit_sha`
    matching the pushed commit).
 
-   Left open rather than guessed: worth retrying the merge endpoint on PR #2 to see whether the
-   404 reproduces, which would distinguish a credential problem from an endpoint-specific one.
-   A `Pull requests: write` grant is the obvious thing to confirm first.
+   **Narrowed further, same day.** The credential then performed two *more* pull-request writes:
+   `PATCH /pulls/{n}` retargeted PRs #2-#5 (four x HTTP 200), and `POST /pulls` created PR #6
+   (HTTP 201). So the credential can read, create and modify pull requests, but cannot use the
+   **merge endpoint specifically** - 404 twice, on two different PRs, with two different tokens.
+
+   That rules out a general write-scope gap and points at the merge endpoint itself: a
+   fine-grained PAT lacking a merge-specific grant, or an endpoint restriction. Retrying the
+   merge endpoint on a current PR remains the cleanest discriminator; it was not retried here
+   because the merge in question was already complete by other means.
 
 2. **The push to `main` bypassed branch protection.** A direct push to a protected branch
    succeeded because `enforce_admins: false` lets an admin bypass the guard. The substantive
