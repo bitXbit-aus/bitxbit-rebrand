@@ -124,6 +124,33 @@ describe("MemoryRateLimitStore", () => {
 });
 
 describe("client identifier", () => {
+  it("prefers the middleware-forwarded address over Netlify's hop-rewritten header", () => {
+    // The regression this guards: the edge -> origin hop replaces
+    // x-nf-client-connection-ip with the hop's own address, so keying on it made
+    // every client behind an edge node share one bucket.
+    const req = makeRequest(
+      {
+        "x-bitxbit-client-ip": "206.83.119.2",
+        "x-nf-client-connection-ip": "13.236.191.253",
+      },
+      "7.7.7.7"
+    );
+    assert.equal(getClientIdentifier(req as any), "206.83.119.2");
+  });
+
+  it("ignores an invalid middleware header and falls through", () => {
+    const req = makeRequest(
+      { "x-bitxbit-client-ip": "evil.com", "x-nf-client-connection-ip": "1.2.3.4" },
+      "7.7.7.7"
+    );
+    assert.equal(getClientIdentifier(req as any), "1.2.3.4");
+  });
+
+  it("rejects a non-IP Netlify header rather than keying on it", () => {
+    const req = makeRequest({ "x-nf-client-connection-ip": "not-an-ip" }, "7.7.7.7");
+    assert.equal(getClientIdentifier(req as any), "7.7.7.7");
+  });
+
   it("prefers the Netlify trusted client IP header", () => {
     const req = makeRequest(
       {

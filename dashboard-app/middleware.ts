@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { parseHostPolicy, validateRequestHost } from "@/lib/host-validation";
+import { resolveClientIp, withClientIp } from "@/lib/client-ip";
 
 interface MiddlewareAuthorization {
   role: "member" | "admin";
@@ -56,9 +57,18 @@ export async function middleware(request: NextRequest) {
     );
   }
 
+  // Capture the client address here — the edge is the last point where Netlify's
+  // trusted `x-nf-client-connection-ip` still holds the real client. The
+  // edge -> origin hop replaces it with the hop's own address, which is why the
+  // rate limiter was keying on an infrastructure IP rather than the client's.
+  // See lib/client-ip.ts — R-004.
+  const clientIp = resolveClientIp(request.headers);
+  // Built fresh at each use so cookies refreshed below are still forwarded.
+  const forwardHeaders = () => withClientIp(new Headers(request.headers), clientIp);
+
   let response = NextResponse.next({
     request: {
-      headers: request.headers,
+      headers: forwardHeaders(),
     },
   });
 
@@ -73,14 +83,14 @@ export async function middleware(request: NextRequest) {
         set(name: string, value: string, options: CookieOptions) {
           request.cookies.set({ name, value, ...options });
           response = NextResponse.next({
-            request: { headers: request.headers },
+            request: { headers: forwardHeaders() },
           });
           response.cookies.set({ name, value, ...options });
         },
         remove(name: string, options: CookieOptions) {
           request.cookies.set({ name, value: "", ...options });
           response = NextResponse.next({
-            request: { headers: request.headers },
+            request: { headers: forwardHeaders() },
           });
           response.cookies.set({ name, value: "", ...options });
         },
