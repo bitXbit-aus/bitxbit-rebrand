@@ -154,7 +154,7 @@ Verified. Full evidence: `docs/security/evidence/phase-1-controls-verification-2
 | Control | Verified state |
 |---|---|
 | Server-side access controls | ✅ **Strong.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; 30 Server Actions guarded; admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
-| Shared rate limiting | ❌ **Still not satisfied.** The store is deployed and correct (migration `027` applied, PR #5 merged, deploy `6ad71dde`), but the limiter keys on an **edge-node address rather than the client's** — limits are per-edge-node, so the intended per-client control is not in force. A first fix was deployed and **falsified** (deploy `6ad721ea`). See R-004 / NA-13. |
+| Shared rate limiting | ✅ **Satisfied.** The shared atomic store is deployed and the limiter keys on the **real client** — verified live: keys carry `206.83.119.2`, a forged forwarded chain creates no new key, and enforcement returns 429 from the 31st request against a 30/60 s limit. See R-004. |
 | Client identity for rate limiting | ✅ Uses Netlify's trusted `x-nf-client-connection-ip`; XFF trusted only behind an explicit `TRUST_PROXY` flag. |
 | Request limits | ⚠️ **Default only** — Next's 1 MB default. See R-006. |
 | Host-header validation | ✅ **Satisfied** — implemented and released 2026-10-20 (PR #4, deploy `6ad70e11`); refusal path proven, control live in production. The application-layer check is defence-in-depth behind the Netlify edge, which is a property of the hosting configuration. See R-003. |
@@ -230,12 +230,13 @@ no application-layer defence if the edge is misconfigured or the app is moved.
 
 ## R-004 — Rate limiting is per-instance in production (CONFIRMED)
 
-**Status:** **DEPLOYED, BUT NOT EFFECTIVE AS DESIGNED** — **not closed.**
-Remediated 2026-10-19 (PR #5); migration `027` applied and released 2026-10-20 (deploy
-`6ad71dde`). Post-deploy verification found the limiter keying on an **edge-node address
-rather than the client's**, so limits are per-edge-node, not per-client. A first identifier
-fix (deploy `6ad721ea`) was **deployed and falsified** — it changed nothing. The identifier
-defect remains OPEN. See `evidence/rate-limit-client-identifier-2026-10-20.md` §7.
+**Status:** **FIXED AND VERIFIED IN PRODUCTION** — 2026-10-21.
+The store was already correct and released (migration `027`, deploy `6ad71dde`). The
+identifier defect found on 2026-10-20 is fixed: the limiter keys on the **real client**, not
+an edge-node address, the key cannot be chosen by the caller, and enforcement blocks at the
+configured limit (30/60 s → 429 from request #31). Code `00c174ba` → deploy
+`6ad9387263ab3f63dccf8edd`. See
+`evidence/rate-limit-client-identifier-fixed-2026-10-21.md`.
 **Severity: HIGH** (raised from medium). **Owner:** Shri — interim accountable owner.
 **Confirmed:** 2026-10-19 (Netlify environment audit). **Remediated:** 2026-10-19.
 
@@ -621,7 +622,8 @@ deployment component — configuration assertions are not runtime proof.
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
 | **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
 | **NA-12** | Re-link the local Netlify CLI to `bitxbit-dashboard` | R-013 | ✅ **DONE 2026-10-20** — `dashboard-app/.netlify/state.json` now points at `9617719a-…` (`bitxbit-dashboard`); it previously held `cadeb6c3-…` (`dazzling-vacherin-66d29b`). The file is gitignored, so this is a workstation fix with no repository change. |
-| **NA-13** | Resolve the client address at the edge and forward it explicitly, so the rate limiter keys on the **client**, not an edge-node address | **R-004** | ❌ **ATTEMPTED AND FALSIFIED 2026-10-20.** Deployed as `6ad721ea`; counters still keyed on the edge address (5 client requests moved the edge key 2 → 7). `x-nf-client-connection-ip` does not carry the client inside **Edge Functions** — which is what Next.js middleware is on Netlify. **Open.** Next step is a diagnostic that observes the headers the origin actually receives, not another change reasoned from documented platform behaviour. |
+| **NA-13** | Resolve the client address at the edge and forward it explicitly, so the rate limiter keys on the **client**, not an edge-node address | **R-004** | ✅ **DONE 2026-10-21.** Edge-forwarding was falsified — the header does not survive to a serverless function — so resolution moved to the **origin**: the client is the hop immediately left of Netlify's anchor, located from the right so a forged chain cannot displace it. Verified live. Deploy `6ad93872`. |
+| **NA-14** | Cache bypasses rate-limit accounting on some routes | new | **OPEN** — `/api/public/resolve-referral` caches responses despite `export const dynamic = "force-dynamic"`: 36 requests with varied `_rsc` produced **no counter change and no 429s**, while `/api/token-stats` incremented 1:1 on the same technique. A cached response bypasses both the limiter and any per-request accounting. Found while verifying R-004; **not** part of it. Needs its own risk entry and a fix. |
 
 ### NA-6 detail
 
@@ -660,7 +662,7 @@ Options, in order of preference:
 | R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 still unmet — host validation now satisfied, shared rate limiting still not live). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
-| R-004 | Rate limiting per-instance in production | **DEPLOYED BUT NOT EFFECTIVE AS DESIGNED** — store correct and released (`027` applied, deploy `6ad71dde`), but the limiter keys on an **edge-node IP, not the client's** (limits per-edge-node). First identifier fix (deploy `6ad721ea`) **falsified**; defect OPEN | Shri (interim) | NA-13 |
+| R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 open |
 | R-005 | Server Actions not rate limited | **OPEN** — no longer blocked behind R-004 | Shri (interim) | NA-3 |
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
