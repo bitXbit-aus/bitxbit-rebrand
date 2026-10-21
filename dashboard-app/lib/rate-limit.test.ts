@@ -124,48 +124,61 @@ describe("MemoryRateLimitStore", () => {
 });
 
 describe("client identifier", () => {
-  it("prefers the middleware-forwarded address over Netlify's hop-rewritten header", () => {
-    // The regression this guards: the edge -> origin hop replaces
-    // x-nf-client-connection-ip with the hop's own address, so keying on it made
-    // every client behind an edge node share one bucket.
+  // Measured production chain: real client 206.83.119.2, Netlify's anchor
+  // holding an edge-node address.
+  const ANCHOR = "3.107.102.194";
+  const CLIENT = "206.83.119.2";
+  const CHAIN = `${CLIENT}, ${ANCHOR}, 13.55.15.16`;
+
+  it("keys on the real client, not on Netlify's edge address", () => {
+    // The regression this guards: the anchor holds an edge-node address, so
+    // keying on it made every client behind an edge node share one bucket.
+    const req = makeRequest(
+      { "x-nf-client-connection-ip": ANCHOR, "x-forwarded-for": CHAIN },
+      "7.7.7.7"
+    );
+    assert.equal(getClientIdentifier(req as any), CLIENT);
+  });
+
+  it("is NOT fooled by a forged forwarded chain", () => {
+    // Netlify preserves and PREPENDS a client-supplied chain, so the leftmost
+    // entry is attacker-chosen. Using it would hand callers their own bucket.
     const req = makeRequest(
       {
-        "x-bitxbit-client-ip": "206.83.119.2",
-        "x-nf-client-connection-ip": "13.236.191.253",
+        "x-nf-client-connection-ip": ANCHOR,
+        "x-forwarded-for": `1.2.3.4, ${CLIENT}, ${ANCHOR}, 16.176.74.16`,
       },
       "7.7.7.7"
     );
-    assert.equal(getClientIdentifier(req as any), "206.83.119.2");
+    assert.equal(getClientIdentifier(req as any), CLIENT);
+    assert.notEqual(getClientIdentifier(req as any), "1.2.3.4");
   });
 
-  it("ignores an invalid middleware header and falls through", () => {
+  it("ignores a client-supplied x-bitxbit-client-ip — no bucket selection", () => {
+    // This header was meant to carry the middleware's value, but it is absent at
+    // the origin (measured), so nothing may be read from it: a forged copy must
+    // not become the rate-limit key.
     const req = makeRequest(
-      { "x-bitxbit-client-ip": "evil.com", "x-nf-client-connection-ip": "1.2.3.4" },
+      {
+        "x-bitxbit-client-ip": "9.9.9.9",
+        "x-nf-client-connection-ip": ANCHOR,
+        "x-forwarded-for": CHAIN,
+      },
       "7.7.7.7"
     );
-    assert.equal(getClientIdentifier(req as any), "1.2.3.4");
+    assert.equal(getClientIdentifier(req as any), CLIENT);
+    assert.notEqual(getClientIdentifier(req as any), "9.9.9.9");
   });
 
-  it("rejects a non-IP Netlify header rather than keying on it", () => {
+  it("rejects a non-IP anchor rather than keying on it", () => {
     const req = makeRequest({ "x-nf-client-connection-ip": "not-an-ip" }, "7.7.7.7");
     assert.equal(getClientIdentifier(req as any), "7.7.7.7");
   });
 
-  it("prefers the Netlify trusted client IP header", () => {
-    const req = makeRequest(
-      {
-        "x-nf-client-connection-ip": "1.2.3.4",
-        "x-forwarded-for": "9.9.9.9",
-      },
-      "7.7.7.7"
-    );
-    assert.equal(getClientIdentifier(req as any), "1.2.3.4");
-  });
-
-  it("uses X-Forwarded-For only when TRUST_PROXY is enabled", () => {
+  it("uses X-Forwarded-For only when TRUST_PROXY is enabled, and the rightmost entry", () => {
     process.env.TRUST_PROXY = "true";
     const req = makeRequest({ "x-forwarded-for": "5.5.5.5, 6.6.6.6" }, "7.7.7.7");
-    assert.equal(getClientIdentifier(req as any), "5.5.5.5");
+    assert.equal(getClientIdentifier(req as any), "6.6.6.6");
     delete process.env.TRUST_PROXY;
   });
 

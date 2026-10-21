@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MemoryRateLimitStore, RateLimitResult, RateLimitStore } from "./rate-limit-store";
-import { CLIENT_IP_HEADER, isValidIp } from "./client-ip";
+import { resolveClientIp } from "./client-ip";
 
 let sharedStore: RateLimitStore | undefined;
 
@@ -89,42 +89,19 @@ export interface RateLimitOptions {
 }
 
 export function getClientIdentifier(request: NextRequest): string {
-  // The middleware forwards the address it can resolve at the edge. NOTE: that
-  // did NOT fix R-004 (deployed 2026-10-20, no change in behaviour) — the edge
-  // already reports an edge-node address, so the limiter still keys per edge
-  // node rather than per client. Identifier defect remains OPEN.
-  // See lib/client-ip.ts — R-004.
-  //
-  // Trustworthy only because the middleware overwrites this header
-  // unconditionally before any route runs; a client-supplied value cannot
-  // survive. Every source below is validated as a bare IP so a malformed or
-  // forged value can never become a rate-limit key.
-  const fromMiddleware = request.headers.get(CLIENT_IP_HEADER);
-  if (isValidIp(fromMiddleware)) {
-    return (fromMiddleware as string).trim();
-  }
+  // Resolution happens HERE, at the origin, from the raw forwarding chain — not
+  // via a header supplied by the middleware. Measured 2026-10-21: a custom
+  // request header set by the middleware is absent at the origin (as is a
+  // client-forged copy of it), so the middleware cannot deliver the address and
+  // must not be relied upon. The client is the hop immediately left of Netlify's
+  // edge anchor; the leftmost `x-forwarded-for` entry is attacker-controlled and
+  // must never be used. See lib/client-ip.ts — R-004.
+  const resolved = resolveClientIp(request.headers);
+  if (resolved) return resolved;
 
-  // Fallback for a request that somehow bypassed the middleware. Correct only
-  // when the route is reached without the extra edge hop.
-  const netlifyClientIp = request.headers.get("x-nf-client-connection-ip");
-  if (isValidIp(netlifyClientIp)) {
-    return (netlifyClientIp as string).trim();
-  }
-
-  // Only trust X-Forwarded-For when the deployment explicitly runs behind a
-  // trusted proxy. Without this guard a client can bypass per-IP rate limiting
-  // by sending an arbitrary forwarded header.
-  const trustProxy =
-    process.env.TRUST_PROXY === "true" ||
-    process.env.RATE_LIMIT_TRUST_PROXY === "true";
-  if (trustProxy) {
-    const forwarded = request.headers.get("x-forwarded-for");
-    const ip = forwarded?.split(",")[0]?.trim();
-    if (isValidIp(ip)) {
-      return ip as string;
-    }
-  }
-
+  // Last resort. `request.ip` is not populated on Netlify, so this is normally
+  // "anonymous": one shared bucket. Coarse, but safe — it never lets a caller
+  // choose its own key.
   return request.ip ?? "anonymous";
 }
 
