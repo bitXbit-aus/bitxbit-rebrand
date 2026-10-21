@@ -57,11 +57,14 @@ export async function middleware(request: NextRequest) {
     );
   }
 
-  // Forward whatever client address the edge can resolve. NOTE: this was
-  // deployed on 2026-10-20 and did NOT fix R-004 — the header already carries an
-  // edge-node address at the edge, not the client's, so re-forwarding it changes
-  // nothing. Retained as inert validation hardening only; the identifier defect
-  // is still open. See lib/client-ip.ts — R-004.
+  // Forward whatever client address the edge can resolve. NOTE: this does NOT
+  // deliver it to route handlers. Measured 2026-10-21: the header is absent at
+  // the origin, as is a client-forged copy of it — custom request headers set
+  // here do not survive to a serverless function. Rate limiting therefore
+  // resolves the client at the origin from the raw forwarding chain; see
+  // lib/client-ip.ts and lib/rate-limit.ts — R-004. The header is harmless and
+  // may still reach downstream code that can see it, but do NOT key the limiter
+  // on it.
   const clientIp = resolveClientIp(request.headers);
   // Built fresh at each use so cookies refreshed below are still forwarded.
   const forwardHeaders = () => withClientIp(new Headers(request.headers), clientIp);

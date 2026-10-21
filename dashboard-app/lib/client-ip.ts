@@ -1,57 +1,56 @@
 /**
- * Trusted client-IP forwarding (R-004).
+ * Trusted client-IP resolution (R-004).
  *
- * Why this module exists
- * ----------------------
- * `getClientIdentifier()` reads `x-nf-client-connection-ip`, which Netlify sets
- * to the client's address. That is correct at the *edge*, but the request is
- * passed through the middleware, which runs as a Netlify edge function and
- * forwards to the origin serverless function. That edge -> origin hop replaces
- * `x-nf-client-connection-ip` with the hop's own address, so the route handler
- * was keying its rate limits on an infrastructure address rather than the
- * client's.
+ * The rule, and how it was established
+ * ------------------------------------
+ * Measured on production 2026-10-21 from an origin serverless function (a route
+ * behind the middleware), for a request whose real client is `206.83.119.2`:
  *
- * Observed in production 2026-10-20: requests from a client at 206.83.119.2
- * produced counters keyed `api:token-stats:13.236.191.253`. Every client behind
- * the same edge node therefore shared one rate-limit bucket — limits were
- * per-edge-node, not per-client, which is not what a per-IP limiter is for.
+ *     x-forwarded-for:            206.83.119.2, 3.107.102.194, 13.55.15.16
+ *     x-nf-client-connection-ip:  3.107.102.194
  *
- * What was tried, and why it did NOT work
- * ---------------------------------------
- * Resolving the address in the middleware and re-forwarding it in a header we
- * control was deployed on 2026-10-20 (deploy `6ad721ea`) and **changed nothing**:
- * counters were still keyed `…:13.236.191.253` afterwards, and 5 requests from a
- * client at 206.83.119.2 moved that key from 2 to 7 — so the requests did reach
- * the handler and did key on the edge address.
+ * Two of those values are traps, and each was tested rather than assumed:
  *
- * That falsifies the original explanation. `x-nf-client-connection-ip` does not
- * hold the real client at the edge either. Netlify's own guidance is that this
- * header is not reliably populated inside **Edge Functions** — which is what
- * Next.js middleware is on Netlify — and that `Context.ip` supersedes it; a
- * separate production postmortem reports Netlify setting `x-forwarded-for` to
- * the edge network's address. `13.236.191.253` is an AWS Sydney edge-node
- * address, consistent with both.
+ *   - `x-nf-client-connection-ip` is Netlify-set and **not** client-controllable
+ *     (a forged value is overwritten), but it holds an **edge-node** address —
+ *     not the client's. It varies per edge node, which is exactly why the limiter
+ *     keyed per edge node.
+ *   - The **leftmost** `x-forwarded-for` entry is the client only when the client
+ *     sent no forwarded header. Netlify *preserves and prepends* a client-supplied
+ *     value: sending `X-Forwarded-For: 1.2.3.4` produced
+ *     `1.2.3.4, 206.83.119.2, 3.107.102.194, 16.176.74.16`. Taking the leftmost
+ *     entry would let any caller choose its own rate-limit bucket.
  *
- * The forwarding mechanism below is therefore **not** a fix for R-004. It is
- * retained only because it hardens validation (every source must now be a bare
- * IP literal) and because it is inert — it forwards whatever the edge sees. The
- * identifier defect remains OPEN. See
- * `docs/security/evidence/rate-limit-client-identifier-2026-10-20.md`.
+ * The client is therefore the hop **immediately to the left of the Netlify
+ * anchor** in the forwarded chain. That holds under forgery because a client's
+ * injected entries are always to the *left* of the chain Netlify appends, so the
+ * anchor is located from the right. Verified across repeated requests and with
+ * forged chains.
  *
- * Trust boundary
- * --------------
- * `CLIENT_IP_HEADER` is only trustworthy because the middleware **overwrites it
- * unconditionally** (see `withClientIp`) before the request reaches any route.
- * A client-supplied value never survives, and if no address can be resolved the
- * header is *deleted* rather than set to an empty or placeholder value, so
- * downstream falls back instead of trusting a forged one.
+ * Independent confirmation that the resolved address is the real client: the
+ * `x-nf-geo` header for those requests decodes to the client's actual city
+ * (Quirindi, NSW), which is only derivable from `206.83.119.2` — not from the
+ * Sydney edge address.
  *
- * Anything that reads this header must be behind the middleware matcher. The
- * matcher excludes only static assets and images, which are not rate limited.
+ * Why resolution happens at the origin
+ * ------------------------------------
+ * An earlier attempt resolved the address in the middleware and re-forwarded it
+ * in a header we control. Deployed 2026-10-20 (deploy `6ad721ea`) it changed
+ * nothing, and the instrumented request showed why: the forwarded header was
+ * **absent at the origin**, as was a client-forged copy of it. Custom request
+ * headers set by the middleware do not reach a serverless function here. So the
+ * address is resolved at the origin, from the raw chain, where it demonstrably
+ * survives.
+ *
+ * See `docs/security/evidence/rate-limit-client-identifier-2026-10-20.md` (§7) and
+ * `docs/security/evidence/rate-limit-client-identifier-instrument-2026-10-21.md`.
  */
 
-/** Header the middleware sets; carries the trusted client address. */
+/** Header the middleware sets; carries the resolved address when it survives. */
 export const CLIENT_IP_HEADER = "x-bitxbit-client-ip";
+
+/** Netlify's edge-set anchor. Not client-controllable, but an edge address. */
+export const NETLIFY_ANCHOR_HEADER = "x-nf-client-connection-ip";
 
 /** A minimal headers view, so this is usable from both edge and node runtimes. */
 export interface HeaderReader {
@@ -76,31 +75,57 @@ export function isValidIp(value: string | null | undefined): boolean {
   return IPV4.test(v) || IPV6.test(v);
 }
 
+/** Split a forwarded-for chain into trimmed, non-empty entries, left to right. */
+export function parseForwardedFor(value: string | null | undefined): string[] {
+  if (typeof value !== "string") return [];
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 /**
- * Resolve the client address from the headers visible **at the edge**.
+ * Resolve the client address from the forwarding chain.
  *
- * Order:
- *   1. `x-nf-client-connection-ip` — Netlify's trusted, edge-controlled header.
- *   2. `x-forwarded-for` first entry — only when a trusted proxy is declared
- *      explicitly, because without that guard a client can pick its own bucket
- *      by sending an arbitrary forwarded header.
- *
- * Returns null when nothing trustworthy is available; the caller then forwards
- * no address at all rather than a guess.
+ * Works at the origin, where the full chain is visible. Returns null when
+ * nothing trustworthy is available — the caller then treats the request as
+ * anonymous rather than inventing a key.
  */
 export function resolveClientIp(
   headers: HeaderReader,
   env: Record<string, string | undefined> = process.env
 ): string | null {
-  const netlifyIp = headers.get("x-nf-client-connection-ip");
-  if (isValidIp(netlifyIp)) return (netlifyIp as string).trim();
+  const anchorRaw = headers.get(NETLIFY_ANCHOR_HEADER);
+  const chain = parseForwardedFor(headers.get("x-forwarded-for"));
 
+  if (isValidIp(anchorRaw)) {
+    const anchor = (anchorRaw as string).trim();
+
+    // Search from the RIGHT: a client may inject entries, but they always sit to
+    // the left of the chain Netlify appends, so the last occurrence is the real
+    // anchor. An injected copy of the anchor value cannot displace it.
+    for (let i = chain.length - 1; i >= 0; i--) {
+      if (chain[i] !== anchor) continue;
+      // The anchor is the leftmost entry, so it is the first hop: it is the client.
+      if (i === 0) return anchor;
+      const candidate = chain[i - 1];
+      return isValidIp(candidate) ? candidate : anchor;
+    }
+
+    // Anchor absent from the chain: still Netlify-set and unspoofable, so prefer
+    // it over nothing. This degrades to per-edge-node limiting, which is coarser
+    // but safe.
+    return anchor;
+  }
+
+  // No Netlify anchor (local development, or a different host). Only consult the
+  // forwarded chain when a trusted proxy is declared, and then take the RIGHTMOST
+  // entry — the immediate peer — because anything a client injects is prepended.
   const trustProxy =
     env.TRUST_PROXY === "true" || env.RATE_LIMIT_TRUST_PROXY === "true";
-  if (trustProxy) {
-    const forwarded = headers.get("x-forwarded-for");
-    const first = forwarded?.split(",")[0]?.trim();
-    if (isValidIp(first)) return first as string;
+  if (trustProxy && chain.length > 0) {
+    const immediatePeer = chain[chain.length - 1];
+    if (isValidIp(immediatePeer)) return immediatePeer;
   }
 
   return null;

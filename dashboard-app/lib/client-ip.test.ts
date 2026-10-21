@@ -51,14 +51,84 @@ describe("isValidIp", () => {
 });
 
 describe("resolveClientIp", () => {
-  it("prefers Netlify's trusted client-connection header", () => {
+  // The production chain measured on 2026-10-21, with the real client at
+  // 206.83.119.2 and Netlify's anchor holding an edge-node address.
+  const ANCHOR = "3.107.102.194";
+  const CLIENT = "206.83.119.2";
+
+  it("takes the hop immediately left of Netlify's anchor", () => {
     assert.equal(
-      resolveClientIp(headers({ "x-nf-client-connection-ip": "206.83.119.2" })),
-      "206.83.119.2"
+      resolveClientIp(
+        headers({
+          "x-nf-client-connection-ip": ANCHOR,
+          "x-forwarded-for": `${CLIENT}, ${ANCHOR}, 13.55.15.16`,
+        })
+      ),
+      CLIENT
     );
   });
 
-  it("ignores an invalid Netlify header rather than forwarding it", () => {
+  it("is NOT fooled by a forged forwarded chain — the load-bearing property", () => {
+    // Measured: Netlify preserves and PREPENDS a client-supplied chain. Taking
+    // the leftmost entry would let any caller choose its own rate-limit bucket.
+    assert.equal(
+      resolveClientIp(
+        headers({
+          "x-nf-client-connection-ip": ANCHOR,
+          "x-forwarded-for": `1.2.3.4, ${CLIENT}, ${ANCHOR}, 16.176.74.16`,
+        })
+      ),
+      CLIENT
+    );
+  });
+
+  it("is not fooled by a forged entry that copies the anchor value", () => {
+    // A caller who guesses the anchor still cannot displace it: the real one is
+    // found from the right, and their copy sits to its left.
+    assert.equal(
+      resolveClientIp(
+        headers({
+          "x-nf-client-connection-ip": ANCHOR,
+          "x-forwarded-for": `${ANCHOR}, ${CLIENT}, ${ANCHOR}, 16.176.74.16`,
+        })
+      ),
+      CLIENT
+    );
+  });
+
+  it("treats the anchor as the client when it is the leftmost hop", () => {
+    assert.equal(
+      resolveClientIp(
+        headers({
+          "x-nf-client-connection-ip": ANCHOR,
+          "x-forwarded-for": `${ANCHOR}, 16.176.74.16`,
+        })
+      ),
+      ANCHOR
+    );
+  });
+
+  it("falls back to the anchor when it is absent from the chain", () => {
+    // Degrades to per-edge-node limiting: coarser, but never spoofable.
+    assert.equal(
+      resolveClientIp(
+        headers({
+          "x-nf-client-connection-ip": ANCHOR,
+          "x-forwarded-for": "1.2.3.4",
+        })
+      ),
+      ANCHOR
+    );
+  });
+
+  it("uses the anchor alone when there is no forwarded chain", () => {
+    assert.equal(
+      resolveClientIp(headers({ "x-nf-client-connection-ip": ANCHOR })),
+      ANCHOR
+    );
+  });
+
+  it("ignores an invalid Netlify anchor rather than forwarding it", () => {
     assert.equal(
       resolveClientIp(headers({ "x-nf-client-connection-ip": "not-an-ip" })),
       null
@@ -68,10 +138,25 @@ describe("resolveClientIp", () => {
   it("ignores x-forwarded-for unless a trusted proxy is declared", () => {
     const h = headers({ "x-forwarded-for": "9.9.9.9, 10.0.0.1" });
     assert.equal(resolveClientIp(h, {}), null);
-    assert.equal(resolveClientIp(h, { TRUST_PROXY: "true" }), "9.9.9.9");
+    // Behind a declared proxy, the immediate peer is the RIGHTMOST entry —
+    // anything a client injects is prepended, so the first entry is not theirs.
+    assert.equal(resolveClientIp(h, { TRUST_PROXY: "true" }), "10.0.0.1");
     assert.equal(
       resolveClientIp(h, { RATE_LIMIT_TRUST_PROXY: "true" }),
-      "9.9.9.9"
+      "10.0.0.1"
+    );
+  });
+
+  it("rejects a forwarded chain whose entries are not addresses", () => {
+    assert.equal(
+      resolveClientIp(
+        headers({
+          "x-nf-client-connection-ip": ANCHOR,
+          "x-forwarded-for": `evil.com, ${ANCHOR}`,
+        })
+      ),
+      ANCHOR,
+      "a non-address hop must not be returned; the anchor is the safe fallback"
     );
   });
 
