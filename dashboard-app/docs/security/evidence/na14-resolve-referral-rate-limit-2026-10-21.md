@@ -76,9 +76,59 @@ a `LogText` filter returns nothing. So a degraded rate-limit store is **undetect
 A control that cannot report its own degradation is indistinguishable from a working one. That is
 worth fixing independently of this route.
 
-## 5. Next step
+## 5. ROOT CAUSE (2026-10-21) — the rate-limit result is served STALE
 
-Root cause needs in-app visibility, which external probing cannot supply. The cheapest instrument is
-a **temporary response header** on this one route carrying the resolved identifier, the
-`RateLimitResult`, and the selected backend — one deploy, one request, then removed. Do not fix by
-inference: the caching explanation was already wrong once.
+An instrumented deploy (PR #18, gated on `?na14=1`, since removed) reported the backend, the
+identifier, the store's own result, and a **direct** `check_rate_limit` call. Its first reading:
+
+```
+backend:      "supabase"                              <- correct backend, not memory
+identifier:   "206.83.119.2"                          <- correct client
+storeResult:  { allowed: true, remaining: 29, resetAt: 1792626523386 }
+directRpc:    { data: { allowed: true, remaining: 2 }, error: null }   <- the RPC works
+```
+
+So nothing is degrading silently: the backend is right, the identifier is right, and the RPC
+succeeds. But every subsequent request returned **byte-identical** values — the same `resetAt` to the
+millisecond — and so did the direct RPC probe.
+
+**The decisive measurement.** After letting the 60 s window expire:
+
+```
+store: resetAt=1792626523386   delta vs now = -82.5 s   remaining=29
+rpc:   resetAt=1792626525277   delta vs now = -80.6 s   remaining=2
+```
+
+A fresh execution would report `resetAt` roughly **+60 s** ahead. Reporting it **82.5 s in the past**
+means the body was produced 140 s earlier and is being **replayed**. Confirmed in the database: both
+keys were written **once** and never advanced —
+
+```
+api:resolve-referral:206.83.119.2   count=1   window_started_at 23:47:43
+probe:na14:direct                   count=1   window_started_at 23:47:45
+db_now 23:48:46      (~10 further requests in between, none of which incremented)
+```
+
+**Mechanism:** the first call executed and wrote the row; every later call returned the first call's
+result without touching the database. The counter therefore never advances, so the limit can never
+trip — which is exactly the observed behaviour.
+
+**Ruled out, each by measurement:** caching at the edge (request records show
+`has_function_invocation: true` with `edge_cache_result` and `durable_cache_result` both `miss`, and
+the *function* produced the stale body); a silent store failure (the RPC returns `error: null`); the
+wrong backend (`supabase`); a wrong identifier (`206.83.119.2`); a stale or altered RPC (the deployed
+function is byte-identical to migration `027`, single 3-arg signature, `SECURITY DEFINER`).
+
+## 6. What is still not established
+
+1. **Which cache layer replays the result.** The app's Supabase client
+   (`lib/supabase/service.ts`) passes no custom `fetch`, so it inherits Next.js's patched `fetch` —
+   the leading candidate, but not proven.
+2. **Why only this route.** `/api/token-stats`, `/api/wallet/rewards` and `/api/public/*` all
+   enforced at their exact limits in the same minute. The discriminator is not `force-dynamic`
+   (`/api/public/*` has it and enforces) and not the key shape
+   (`api:token-stats:206.83.119.2` is structurally identical to this route's key).
+
+Until (1) is pinned, any fix is a guess — and guessing is what produced the disproven caching
+explanation earlier. **A fix must be validated by outcome:** the counter advancing *and* a `429` at
+the limit on this specific route.
