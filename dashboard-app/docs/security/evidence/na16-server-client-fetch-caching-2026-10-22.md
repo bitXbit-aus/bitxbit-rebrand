@@ -57,8 +57,21 @@ Inspecting what each library passes to `fetch` shows that **neither** `@supabase
 `@supabase/ssr` passes a `cache` or `next` option for a read. And NA-16's measurement shows the same
 Next.js runtime does **not** cache a Supabase client request — GET *or* POST.
 
-So "Next.js's patched `fetch` caches the Supabase client's requests" is **not a general mechanism**,
-and NA-14's row has been corrected accordingly.
+So "Next.js's patched `fetch` caches the Supabase client's requests" is **not a general mechanism**, and NA-14's row has been corrected accordingly.
+
+**Correction (2026-10-22) — this conclusion is wrong, and the negative result is
+explained by this measurement's own setup.** Next.js's patched `fetch` *does* cache
+a non-GET request by default, with `revalidate = false`, unless the route is
+*already* dynamic (`staticGenerationStore.revalidate === 0`) at the moment of the
+fetch. The client measured here, `lib/supabase/server.ts`, reads `cookies()` when it
+is constructed — which marks the route dynamic and switches on the `autoNoCache`
+escape. Its POSTs were therefore never cacheable, so 1:1 was the *expected* result
+and says nothing about the mechanism in general.
+
+The operational conclusion in §3 below — that `lib/supabase/server.ts` is not
+affected — **still holds**, now for a demonstrable reason rather than by absence of
+evidence. NA-14's recorded *layer* (the patched `fetch`) was correct; only its
+wording was too narrow. Evidence: `na14-mechanism-pinned-2026-10-22.md`.
 
 What remains true about NA-14: the freeze was **real**, not an artifact. Only **2** upstream
 `check_rate_limit` requests reached Supabase across ~10 app requests in the failing window, so the
