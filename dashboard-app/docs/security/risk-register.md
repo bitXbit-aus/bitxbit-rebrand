@@ -321,7 +321,13 @@ See `evidence/d4-deployed-staging-verification-2026-10-22.md`.
 
 ## R-005 — Server Actions are not rate limited
 
-**Status:** **IMPLEMENTED AND TESTED 2026-10-22** — not yet verified in a deployment.
+**Status:** ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22.** Five costly actions are bounded per
+authenticated user, and the boundary was **observed enforcing on a deployed preview**:
+`calculateRewards` (6/60 s) allowed 6 calls and **refused the 7th** with **HTTP 200** carrying
+`{"error":"Too many requests. This action is rate limited — please wait 48s and try again."}`.
+The refusal is **returned, not thrown** — the allowed calls returned 500, so the 200/500
+transition is the discriminator. The shared counter was observed in staging keyed on the
+**user id**: `action:reward-calculate:user:<uid>`. See §"Deployed verification" below.
 **Severity:** medium. **Owner:** Shri — interim accountable owner.
 
 `checkRateLimit` is applied to API routes only; it appears **zero times** in
@@ -368,7 +374,13 @@ See `evidence/r005-server-action-rate-limiting-2026-10-22.md`.
 
 ## R-006 — No explicit request-size limits
 
-**Status:** **IMPLEMENTED AND TESTED 2026-10-22** — not yet verified in a deployment.
+**Status:** ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22.** On a deployed preview the boundary was
+**observed refusing a genuine 4 MB file** with **HTTP 200** carrying
+`{"error":"File must be smaller than 3 MB. This file is 4 MB."}` — a returned `{error}`
+rendered as a legible toast, **not** an opaque 500. The type check returned
+`{"error":"File type not allowed: application/pdf"}` on the same path. The deployed page also
+renders the shared policy (`accept` list and the "up to 3 MB" hint). A valid 2 KB PNG
+completed end to end as the positive control. See §"Deployed verification" below.
 **Severity:** low. **Owner:** Shri — interim accountable owner.
 
 No `experimental.serverActions.bodySizeLimit` is set, so Next's **1 MB default**
@@ -774,8 +786,8 @@ limiting) or R-006 (request-size) controls — those are behind authentication a
 |---|---|---|---|
 | **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | ✅ **RELEASED 2026-10-20** — PR #4 merged (deploy `6ad70e11`); harness mutation-verified (5/5 mutations detected); refusal path proven by a local integration run at the deployed commit. Not closed: independent review still waived. See `evidence/phase-1-host-origin-validation-released-2026-10-20.md` |
 | **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ✅ **DEPLOYED 2026-10-20** — migration `027` applied to production (ledger row recorded) and PR #5 merged (deploy `6ad71dde`). Atomicity proven by a 30-session concurrency test; the harness is mutation-verified (4/4 mutations detected). **Not closed** — post-deploy verification found the limiter keying on an infrastructure address; see NA-13. |
-| **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | ✅ **DONE 2026-10-22** — five costly actions bounded per user (`lib/action-rate-limit.ts`); refusals returned, not thrown; 146/146 tests, **8/8 mutations detected**. **Not verified in a deployment.** See `evidence/r005-server-action-rate-limiting-2026-10-22.md`. |
-| **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | ✅ **DONE 2026-10-22** — boundary made explicit in `next.config.mjs` and in a tested policy module; upload refusals now legible. 158/158 tests, **7/7 mutations detected**. **Not verified in a deployment.** See `evidence/r006-request-size-limits-2026-10-22.md`. |
+| **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | ✅ **DONE AND VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per user (`lib/action-rate-limit.ts`); refusals returned, not thrown; 146/146 tests, **8/8 mutations detected**. **Enforcement observed on a deployed preview**: 6 allowed, #7 refused with HTTP 200 and a legible countdown; counter seen in the shared store keyed on the user id. See `evidence/r005-server-action-rate-limiting-2026-10-22.md` and `evidence/r005-r006-deployed-verification-2026-10-22.md`. |
+| **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | ✅ **DONE AND VERIFIED IN A DEPLOYMENT 2026-10-22** — boundary explicit in `next.config.mjs` and a tested policy module; upload refusals legible. 158/158 tests, **7/7 mutations detected**. **Verified on a deployed preview**: a 4 MB file refused with HTTP 200 and a legible message naming limit and actual size; type check refused likewise; valid upload completed as a control. See `evidence/r006-request-size-limits-2026-10-22.md` and `evidence/r005-r006-deployed-verification-2026-10-22.md`. |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
@@ -827,8 +839,8 @@ Options, in order of preference:
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
-| R-005 | Server Actions not rate limited | **IMPLEMENTED AND TESTED 2026-10-22** — five costly actions bounded per authenticated user; **not verified in a deployment** | Shri (interim) | NA-3 done |
-| R-006 | No explicit request-size limits | **IMPLEMENTED AND TESTED 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; **not verified in a deployment** | Shri (interim) | NA-4 done |
+| R-005 | Server Actions not rate limited | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per authenticated user; enforcement observed on a deployed preview (6 allowed, #7 refused with a returned, legible `{error}`); counter seen in the shared store keyed on the user id | Shri (interim) | NA-3 done |
+| R-006 | No explicit request-size limits | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; a deployed preview refused a genuine 4 MB file with a returned, legible `{error}` (HTTP 200, not 500) | Shri (interim) | NA-4 done |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19** — forward path closed, preview rebuilt staging-scoped, **all 7 production-wired deploys deleted and verified 404** | Shri (interim) | **NA-8** ✅ |
