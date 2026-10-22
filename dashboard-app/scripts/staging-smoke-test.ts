@@ -549,6 +549,11 @@ async function main() {
       console.log("  (skipped: STAGING_APP_URL not set)");
       return;
     }
+    // The three public read endpoints are NOT rate limited, so asserting a
+    // rate-limit header on them would test nothing — and until 2026-10-22 this
+    // block was an empty branch that silently passed on a missing header, while
+    // the section name promised a rate-limit assertion. Assert HTTP health here,
+    // and put the rate-limit assertion where a rate-limit signal actually exists.
     const endpoints = [
       `${appUrl}/api/public/offers`,
       `${appUrl}/api/public/transparency`,
@@ -559,10 +564,29 @@ async function main() {
       if (res.status !== 200) {
         throw new Error(`${endpoint} returned ${res.status}`);
       }
-      if (!res.headers.get("x-ratelimit-limit")) {
-        // Not a failure; headers are optional depending on implementation.
-      }
     }
+
+    // D4 / NA-15: the rate-limit store must be healthy, must not be cached, and
+    // must say so in both the header and the body. This is the assertion the
+    // section name always implied.
+    const health = await fetch(`${appUrl}/api/health/rate-limit`);
+    if (health.status !== 200) {
+      throw new Error(
+        `/api/health/rate-limit returned ${health.status} — the shared rate-limit store is degraded`
+      );
+    }
+    const degraded = health.headers.get("x-ratelimit-degraded");
+    if (degraded !== "false") {
+      throw new Error(`rate-limit store degraded (x-ratelimit-degraded=${degraded})`);
+    }
+    if (!(health.headers.get("cache-control") || "").includes("no-store")) {
+      throw new Error("rate-limit health response must not be cached");
+    }
+    const healthBody = (await health.json()) as { degraded?: boolean; backend?: string };
+    if (healthBody.degraded !== false) {
+      throw new Error(`rate-limit health body reports degraded=${healthBody.degraded}`);
+    }
+    console.log(`  rate-limit store healthy (backend: ${healthBody.backend})`);
   });
 }
 

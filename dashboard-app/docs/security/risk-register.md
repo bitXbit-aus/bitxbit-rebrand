@@ -67,8 +67,11 @@ approval-related:**
    `verify_wallet_challenge` (`011`), `apply_reward_calculation` (`016`) and
    `approve_reward_period` (`024`). Production is pre-`010`. Merging to `main` auto-deploys,
    so merging without applying the range first is an outage.
-2. **D4's deployed-app HTTP test** has no staging-scoped deployment to run against.
-3. **The R-009 residue** on the existing preview deploys, which still run production credentials.
+2. ~~**D4's deployed-app HTTP test** has no staging-scoped deployment to run against.~~
+   **RESOLVED 2026-10-19, re-verified 2026-10-22** — see §D4 status.
+3. ~~**The R-009 residue** on the existing preview deploys, which still run production credentials.~~
+   **RESOLVED 2026-10-19** — the seven production-wired previews were deleted, and all 34
+   deploys created since were verified staging-scoped on 2026-10-22.
 
 Removing the approval requirement therefore does not open the production window. It removes a
 review control; it does not satisfy a single one of the three blockers above.
@@ -296,9 +299,16 @@ concurrency.
 
 Evidence: `docs/security/evidence/rate-limit-atomicity-2026-10-19.md`.
 
-**Why this is not closed.** Environment variables resolve at deploy time, so the
-change is inert until a deployment is built. The database proof shows the *store* is
-correct, not that the *wiring* is. Closure requires the deployed staging test (D4).
+**Why this was not closed (superseded 2026-10-22).** Environment variables resolve at
+deploy time, so the change was inert until a deployment was built. The database proof
+showed the *store* is correct, not that the *wiring* was. Closure required the deployed
+staging test (D4).
+
+**D4 satisfied 2026-10-22 — the deployed wiring is now observed, not merely configured.**
+On the deployed preview the health route reports `backend: supabase` (the shared store, not
+the in-memory fallback), and driving `/api/public/resolve-referral` past its limit produced
+the **first 429 at request #31**, with `retry-after: 22` and `x-ratelimit-degraded: false`.
+See `evidence/d4-deployed-staging-verification-2026-10-22.md`.
 
 **Tracked as NA-2.**
 
@@ -453,8 +463,14 @@ hardening step.
 ## R-009 — Production credentials exposed to deploy previews and branch deploys
 
 **Status:** OPEN — **CRITICAL** (identified 2026-10-19). **Preview exposure path CLOSED
-2026-10-19** by re-scoping preview/branch-deploy to staging + devnet. Still open pending
-**deploy-time verification** under D4 — nothing was deployed.
+2026-10-19** by re-scoping preview/branch-deploy to staging + devnet. **The deploy-time
+verification that was outstanding under D4 was completed 2026-10-22:** all **34** preview
+deploys — every one created since the re-scoping — are staging-scoped (devnet mint; staging
+Supabase ref in the client bundle with a production positive control; staging data), with
+**zero** production-wired and none inconclusive. See §D4 status.
+**What remains open is the owner's decision on the `is_secret` flagging (NA-9/R-010), not
+an unverified exposure path** — closure is recommended for the owner's sign-off, not taken
+unilaterally.
 **Owner:** Shri — interim accountable owner.
 
 Every variable present in the `production` context is **also present in
@@ -650,21 +666,51 @@ the wrong project. Every remediation command passed `--site` explicitly for this
 
 ## D4 status
 
-**D4 is now satisfiable in configuration, but NOT yet proven in a deployment.**
-Preview and branch-deploy contexts now resolve to staging Supabase and Solana devnet.
-Verification still requires an actual deployed probe — configuration is not evidence.
+**D4 is SATISFIED — verified in deployments on 2026-10-19, re-verified 2026-10-22.**
+
+**Correction (2026-10-22):** this section previously read *"satisfiable in configuration,
+but NOT yet proven in a deployment"* and marked every row *"(unverified in a deploy)"*.
+That was **stale** — the test had already run on 2026-10-19 against preview `6ad6a1fd`
+(commit `bdbdf003`), as recorded in `evidence/phase-1-staging-rehearsal-2026-10-19.md`
+§"D4 — deployed-app HTTP test — SATISFIED". The table below is now aligned with the
+evidence. Same defect class as the R-009/R-013 summary contradictions.
 
 | D4 requirement | Status |
 |---|---|
-| Staging uses the staging Supabase project | ✅ configured 2026-10-19 (unverified in a deploy) |
-| Staging uses Solana devnet | ✅ `SOLANA_RPC_URL` → devnet (unverified in a deploy) |
-| No production service-role key reachable | ✅ re-scoped to staging (unverified in a deploy) |
-| No production treasury wallet reachable | ✅ re-scoped to a new devnet key (unverified in a deploy) |
+| Staging uses the staging Supabase project | ✅ **verified 2026-10-22** — the preview client bundle contains `luqrwhgjtiyfmeawbtmp` and **zero** occurrences of `flasgvendiiasuixeqzu`; the production bundle (positive control) contains the reverse, proving the scan can detect a leak |
+| Staging uses Solana devnet | ✅ **verified 2026-10-22** — all **34** preview deploys report devnet mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`; production reports mainnet `DK6PWMyu…UH5` |
+| No production service-role key reachable | ✅ **verified by use** — **zero** preview deploys leak a production reference; the seven production-wired previews were deleted 2026-10-19 |
+| No production treasury wallet reachable | ✅ re-scoped to a funded devnet key (NA-11) |
 
-D4's configuration prerequisite is met. What remains is the **deployed** test itself:
-bring up a preview or branch deploy, confirm it resolves staging/production separation, and
-capture the HTTP probe as evidence. Until that exists, R-003 closure still lacks its
-deployment component — configuration assertions are not runtime proof.
+**2026-10-22 re-verification.** All **34** preview deployments — from `security/phase-1-hardening`
+(2026-10-19, the original D4 deploy) through `security/r006-request-size-limits` (2026-10-22)
+— are staging-scoped: **34 devnet, 0 production-wired, 0 inconclusive**. Immutable per-deploy
+URLs were sampled at both ends and were also staging-scoped. This mattered because 33 of
+those deploys were created *after* the 2026-10-19 run and were covered by nothing.
+
+Isolation was proven on three independent levels — client bundle (with a positive control),
+runtime config (devnet mint), and runtime data. On data: the preview returns
+`{"offers":[]}`, which **matches** staging's directly-queried empty `affiliate_offers` table,
+where production returns `KAST` — a positive match, not an absence of evidence.
+
+`npm run test:staging` against the preview passes every section.
+
+**Harness defect fixed 2026-10-22.** The section named *"public API health and rate-limit
+headers"* contained an **empty branch** — `if (!res.headers.get("x-ratelimit-limit")) { /* comment only */ }`
+— which could never fail, and inspected three endpoints that are not rate limited, so the
+header was never present. The section name promised a control the code did not check. The
+assertion now targets `/api/health/rate-limit` (200, `x-ratelimit-degraded: false` in header
+**and** body, not cached) and is **mutation-verified 3/3**.
+
+**Bonus, recorded separately from D4's own claim:** driving `/api/public/resolve-referral`
+past its limit **on the preview** produced the **first 429 at request #31**, with
+`retry-after: 22` and `x-ratelimit-degraded: false` — R-004/NA-14 enforcement observed in a
+deployment rather than locally.
+
+**D4 proves staging isolation only.** It does **not** verify the R-005 (Server Action rate
+limiting) or R-006 (request-size) controls — those are behind authentication and remain
+*implemented and tested, not verified in a deployment*. See
+`evidence/d4-deployed-staging-verification-2026-10-22.md`.
 
 ---
 
@@ -680,7 +726,7 @@ deployment component — configuration assertions are not runtime proof.
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
 | **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19.** Re-scoping 20/20. Treasury rotated, verified on-chain, then proven end-to-end by a real production airdrop. Service key rotated, verified **by use** (200 vs production / 401 vs staging), proven by the same airdrop. Legacy `service_role` key deactivated; legacy `anon` retained so nobody was signed out. |
-| **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. |
+| **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. **That precondition is now MET (D4 satisfied 2026-10-22)** — a deployment can be observed, so this is actionable and awaiting owner authorisation, not blocked. |
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
 | **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
 | **NA-12** | Re-link the local Netlify CLI to `bitxbit-dashboard` | R-013 | ✅ **DONE 2026-10-20** — `dashboard-app/.netlify/state.json` now points at `9617719a-…` (`bitxbit-dashboard`); it previously held `cadeb6c3-…` (`dazzling-vacherin-66d29b`). The file is gitignored, so this is a workstation fix with no repository change. |
