@@ -4,10 +4,12 @@ import {
   checkRateLimit,
   getClientIdentifier,
   getRateLimitStore,
+  rateLimitResponse,
   resolveRateLimitBackend,
   setRateLimitStore,
 } from "./rate-limit";
 import { MemoryRateLimitStore, RateLimitResult, RateLimitStore } from "./rate-limit-store";
+import { rateLimitHealthSnapshot, resetRateLimitHealth } from "./rate-limit-health";
 
 function makeRequest(headers: Record<string, string>, ip?: string): any {
   return {
@@ -283,6 +285,67 @@ describe("rate-limit store selection (R-004 fallback visibility)", () => {
       assert.equal(calls.length, 1);
       assert.match(calls[0], /DEGRADED/);
     } finally {
+      restore();
+    }
+  });
+
+  it("records the degradation so it is visible without reading logs (NA-15)", () => {
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    env.NODE_ENV = "production";
+    captureErrors();
+    resetRateLimitHealth();
+    try {
+      setRateLimitStore(undefined); // force store re-selection
+      getRateLimitStore();
+
+      // The log is not evidence: production retained none of it. The registry
+      // is, because it is queryable from outside the process.
+      const snap = rateLimitHealthSnapshot();
+      assert.equal(snap.degradedCount, 1, "selecting the memory store is a degradation");
+      assert.equal(snap.lastReason, "no-shared-store");
+    } finally {
+      resetRateLimitHealth();
+      restore();
+    }
+  });
+
+  it("marks the rejection path degraded when no shared store is configured (NA-15)", () => {
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    resetRateLimitHealth();
+    try {
+      const response = rateLimitResponse(Date.now() + 30_000);
+
+      assert.equal(response.status, 429);
+      assert.ok(response.headers.get("retry-after"), "the existing contract must be intact");
+      // Keying on runtime events alone reported "false" here — a 429 from a
+      // per-instance limiter claiming to be healthy. Executing the real route is
+      // what exposed it.
+      assert.equal(
+        response.headers.get("x-ratelimit-degraded"),
+        "true",
+        "a per-instance limiter must not report itself healthy"
+      );
+    } finally {
+      resetRateLimitHealth();
+      restore();
+    }
+  });
+
+  it("marks the rejection path healthy when a shared store is configured (NA-15)", () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
+    resetRateLimitHealth();
+    try {
+      const response = rateLimitResponse(Date.now() + 30_000);
+      assert.equal(response.headers.get("x-ratelimit-degraded"), "false");
+    } finally {
+      resetRateLimitHealth();
       restore();
     }
   });

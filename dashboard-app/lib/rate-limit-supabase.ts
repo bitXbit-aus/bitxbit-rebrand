@@ -1,4 +1,18 @@
 import { MemoryRateLimitStore, RateLimitResult, RateLimitStore } from "./rate-limit-store";
+import { recordRateLimitDegradation } from "./rate-limit-health";
+
+/**
+ * Raised when the RPC answered but the payload cannot be trusted. Distinct from
+ * a transport failure so the degradation registry can report which happened
+ * (NA-15) — "the store is unreachable" and "the store is returning nonsense"
+ * call for different responses.
+ */
+export class RateLimitPayloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RateLimitPayloadError";
+  }
+}
 
 /**
  * Shared rate-limit store backed by the `check_rate_limit` RPC (migration 027).
@@ -79,6 +93,12 @@ export class SupabaseRateLimitStore implements RateLimitStore {
 
       return parseRateLimitResult(data);
     } catch (error) {
+      // NA-15: record before falling back. The log below is not enough — it is
+      // throttled, and production request logs did not retain it, so this is the
+      // only durable evidence that the shared store stopped being used.
+      recordRateLimitDegradation(
+        error instanceof RateLimitPayloadError ? "invalid-payload" : "store-unavailable"
+      );
       this.reportThrottled(error);
       return this.fallback.increment(key, windowMs, maxRequests);
     }
@@ -104,7 +124,7 @@ export class SupabaseRateLimitStore implements RateLimitStore {
  */
 export function parseRateLimitResult(data: unknown): RateLimitResult {
   if (typeof data !== "object" || data === null) {
-    throw new Error("check_rate_limit returned no result");
+    throw new RateLimitPayloadError("check_rate_limit returned no result");
   }
 
   const { allowed, remaining, resetAt } = data as Record<string, unknown>;
@@ -116,7 +136,7 @@ export function parseRateLimitResult(data: unknown): RateLimitResult {
     !Number.isFinite(remaining) ||
     !Number.isFinite(resetAt)
   ) {
-    throw new Error("check_rate_limit returned an unexpected payload");
+    throw new RateLimitPayloadError("check_rate_limit returned an unexpected payload");
   }
 
   return {
