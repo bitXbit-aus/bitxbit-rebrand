@@ -20,6 +20,7 @@ import {
 } from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
 import { requireActiveUser, requireCapability, type AuthorizationContext } from "@/lib/authz";
+import { checkActionRateLimit, rateLimitRefusal } from "@/lib/action-rate-limit";
 import { writeSecurityAudit } from "@/lib/audit";
 import {
   assertSecurityAdminRemovalSafe,
@@ -637,6 +638,9 @@ async function executeRewardCalculation(
 export async function calculateRewards(periodId: string) {
   if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
   const context = await requireCapability("manage_rewards");
+  // R-005: bound the work before the O(users) recalculation runs.
+  const limit = await checkActionRateLimit(context.user.id, "reward.calculate");
+  if (!limit.allowed) return rateLimitRefusal(limit);
   const supabase = createServiceClient();
 
   await auditedAdminMutation(
@@ -690,6 +694,9 @@ export async function correctRewards(periodId: string, reason: string) {
   }
 
   const context = await requireCapability("manage_rewards");
+  // R-005: bound the work before the correction recomputes the period.
+  const limit = await checkActionRateLimit(context.user.id, "reward.correct");
+  if (!limit.allowed) return rateLimitRefusal(limit);
   const supabase = createServiceClient();
 
   await auditedAdminMutation(
@@ -761,6 +768,9 @@ export async function correctRewards(periodId: string, reason: string) {
 export async function approveRewards(periodId: string) {
   if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
   const context = await requireCapability("manage_rewards");
+  // R-005: bound the work before the approval transition runs.
+  const limit = await checkActionRateLimit(context.user.id, "reward.approve");
+  if (!limit.allowed) return rateLimitRefusal(limit);
   const supabase = createServiceClient();
   await auditedAdminMutation(
     context,
@@ -1075,6 +1085,12 @@ export async function sendTestAirdrop(formData: FormData) {
     };
   }
 
+  // R-005: bound the chain work. Placed after the cheap refusals above (missing
+  // or malformed address, feature disabled) so an expected refusal does not
+  // consume the caller's budget — only work that reaches the treasury does.
+  const limit = await checkActionRateLimit(context.user.id, "reward.testAirdrop");
+  if (!limit.allowed) return rateLimitRefusal(limit);
+
   const TEST_AMOUNT = 0.001;
   const amountRaw = amountToRaw(TEST_AMOUNT);
   const sourceWalletAddress = getAirdropWalletAddress();
@@ -1231,6 +1247,11 @@ const TOKEN_DECIMALS = parseInt(process.env.BITXBIT_TOKEN_DECIMALS || "9", 10);
 export async function airdropRewards(periodId: string) {
   if (!isUuid(periodId)) throw new Error("Invalid reward period ID.");
   const context = await requireCapability("manage_rewards");
+  // R-005: bound the work before the on-chain distribution signs one
+  // transaction per recipient. Tightest budget in the set — it is the most
+  // expensive and the least reversible action in the codebase.
+  const limit = await checkActionRateLimit(context.user.id, "reward.airdrop");
+  if (!limit.allowed) return rateLimitRefusal(limit);
   const supabase = createServiceClient();
   const sourceWalletAddress = getAirdropWalletAddress();
 
