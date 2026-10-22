@@ -66,6 +66,19 @@ export async function GET(request: NextRequest) {
   const first = await supabase.from("users").select("id").limit(1);
   const second = await supabase.from("users").select("id").limit(1);
 
+  // --- the POST case: `lib/actions.ts` drives mutating RPCs through THIS client ---
+  // Reward approval, payout finalization and reward calculation all go out as
+  // POSTs through the server client. A cached POST there would mean a mutation
+  // silently not happening — the same shape as NA-14's anomaly, which was also a
+  // POST. Reads alone do not cover it.
+  //
+  // `is_admin(user_id)` is anon-executable, returns 200 and mutates nothing, so
+  // it is a safe stand-in. What matters is whether the request is ISSUED, which
+  // the edge logs count; the response body is irrelevant.
+  const PROBE_UUID = "00000000-0000-0000-0000-000000000000";
+  const post1 = await supabase.rpc("is_admin", { user_id: PROBE_UUID });
+  const post2 = await supabase.rpc("is_admin", { user_id: PROBE_UUID });
+
   // --- positive control: a fetch that is explicitly expected to be cached ---
   const url =
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/users?select=id&limit=2`;
@@ -81,6 +94,9 @@ export async function GET(request: NextRequest) {
       serverClientReads: 2,
       first: first.error ? "error" : "ok",
       second: second.error ? "error" : "ok",
+      serverClientRpcPosts: 2,
+      post1: post1.error ? "error" : "ok",
+      post2: post2.error ? "error" : "ok",
       control: {
         status: control.status,
         // A cached response keeps the ORIGINAL date; a fresh one advances.
