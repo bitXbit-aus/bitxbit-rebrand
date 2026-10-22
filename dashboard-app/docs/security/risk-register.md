@@ -194,19 +194,50 @@ when the Next.js 15 migration lands. **Do not renew by default.**
 **Version:** `bigint-buffer@1.1.5` — the **latest published release**. There is **no
 patched version**; `npm audit` reports no fix path.
 
-**Reachability — constrained:** reachable only when decoding a token account's
-`amount` field from chain data, via `@solana/spl-token`. Untrusted-data paths are
-constrained because:
+**Reachability — re-assessed by measurement 2026-10-22.** The justification previously
+recorded here argued the **wrong axis** and has been replaced. See
+`evidence/r002-bigint-buffer-reassessed-2026-10-22.md`.
 
-- the treasury mint is **operator-controlled**, not user-supplied;
-- payout amounts are computed server-side and, from migration 025 onward, carried
-  as exact decimal strings with `parseRawTokenAmount()` rejecting non-canonical
-  input (numbers, leading zeros, negatives, decimals);
-- users cannot select the mint or the account layout being decoded.
+*What the vulnerability actually is.* Measured against the installed tree, the abort comes
+from the **native C addon** (`bigint_buffer.node`; `Assertion failed: (status == napi_ok),
+function toBigInt, file bigint-buffer.c, line 49`) and fires on **non-Buffer input only** —
+`null`, `undefined`, a string or a number each SIGABRT the process, while **every** Buffer
+length is handled correctly. The trigger is therefore input *type*, not buffer length. The
+package's **pure-JS fallback is safe**: the same inputs raise a catchable `TypeError`.
 
-**Monitoring:** transitive dependency of `@solana/spl-token`. Track for a patched
-`bigint-buffer`, a `spl-token` major that drops it, or a maintained replacement.
-Re-check on every advisory refresh.
+*Why the previous reasoning did not apply.* It cited operator-controlled mints, canonical
+payout amounts and the user's inability to choose the account layout — all controls on data
+**content**. None of them bears on whether a **non-Buffer** reaches `toBigIntLE`.
+
+*The correct argument — one caller, and it converts first.*
+
+- **Exactly one** package in the installed tree depends on `bigint-buffer`:
+  `@solana/buffer-layout-utils`. The app's own source never requires it.
+- Its call site is `toBigIntLE(Buffer.from(src))` — the argument is **wrapped in
+  `Buffer.from(...)` before the call**, and `src` is Buffer-backed from
+  `blob(length).decode(buffer, offset)`.
+- So the vulnerable function always receives a Buffer and the trigger is **unreachable by
+  argument** through the only path in this tree.
+
+**Structural backstop.** `next.config.mjs` now sets
+`experimental.outputFileTracingExcludes` to keep `node_modules/bigint-buffer/build/**` out
+of the traced server bundle, so the native addon is **absent** from the deployment and the
+safe fallback is what runs. Measured after the change: `.next` contains **0** `.node` files
+and no `bigint-buffer` directory. Four guard tests assert the single-caller set, the
+`Buffer.from` wrap, the absence of direct app imports, and the exclusion — **mutation-verified
+5/5**.
+
+**Not adopted, deliberately:** replacing the dependency with a community pure-JS fork
+(`bigint-buffer-safe` / `bigint-buffer-fixed`, which now exist). That would remove the CVE
+outright, but it means adopting unvetted third-party code to mitigate a **DoS-only**
+advisory whose trigger is already unreachable and whose vulnerable code is already absent
+from the deployed bundle.
+
+**Monitoring:** transitive dependency of `@solana/spl-token`; upstream
+`@solana/buffer-layout-utils` was **archived January 2025**, so no fix is coming from there.
+Track a patched `bigint-buffer`, a `spl-token` major that drops it, or a maintained
+replacement. The guard tests fail if the caller set or the conversion changes — re-read this
+entry then.
 
 ---
 
@@ -836,7 +867,7 @@ Options, in order of preference:
 | ID | Risk | Status | Owner | Review |
 |---|---|---|---|---|
 | R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** — Condition 3 now satisfied in fact (host validation released; rate limiting live and verified; request limits explicit). Formally contingent only on **R-003's closure** (independent review waived). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`) | Shri (interim) | **2026-11-18 (expires)** |
-| R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
+| R-002 | `bigint-buffer`, no fix | Accepted, conditional — **re-assessed by measurement 2026-10-22**: the trigger is **non-Buffer input** to the native addon, and the tree's **only** caller wraps in `Buffer.from`; the native build is additionally excluded from the deployed bundle. Guarded by 4 mutation-verified tests. *(Prior justification argued the wrong axis and was replaced.)* | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
 | R-005 | Server Actions not rate limited | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per authenticated user; enforcement observed on a deployed preview (6 allowed, #7 refused with a returned, legible `{error}`); counter seen in the shared store keyed on the user id | Shri (interim) | NA-3 done |
