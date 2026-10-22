@@ -353,8 +353,8 @@ See `evidence/r005-server-action-rate-limiting-2026-10-22.md`.
 
 ## R-006 — No explicit request-size limits
 
-**Status:** OPEN — **not accepted, not closed.** **Severity:** low.
-**Owner:** Shri — interim accountable owner.
+**Status:** **IMPLEMENTED AND TESTED 2026-10-22** — not yet verified in a deployment.
+**Severity:** low. **Owner:** Shri — interim accountable owner.
 
 No `experimental.serverActions.bodySizeLimit` is set, so Next's **1 MB default**
 applies. The existing boundary is documented here rather than being changed now.
@@ -363,6 +363,31 @@ applies. The existing boundary is documented here rather than being changed now.
 Next.js 15 migration rather than inheriting it silently.
 
 **Tracked as NA-4.** Owner instruction: document and carry into the migration.
+
+**Outcome (2026-10-22) — the boundary was implicit *and incoherent*.** Measuring it
+(production build + probe action) showed the limits in play disagreed, and the
+stricter one failed opaquely:
+
+- `bodySizeLimit` **does not bound file uploads at all.** It is passed to busboy as
+  `fieldSize` (non-file fields only), and the plain-form multipart path applies no
+  check. **A 5 MB file was received intact** with the 1 MB default in force.
+- Only the non-multipart (JSON) path enforces it — with an internal **413** that the
+  browser sees as an opaque **500**.
+- The declared 5 MB app limit sat **above** the platform's ~4.5 MB effective binary
+  ceiling, so its legible refusal could never fire.
+- The refusal was **thrown**, so it became a redacted 500 regardless.
+
+**Fixed:** `bodySizeLimit` set explicitly (`'1mb'`) with its scope documented;
+`lib/asset-policy.ts` holds one pure, unit-tested size/type policy with
+`MAX_ASSET_BYTES` = **3 MB** (below the platform ceiling, with headroom);
+`lib/storage.ts` uses it; `resolveImageUrl` and its four call sites now **return**
+the refusal instead of throwing; the upload field applies the same rule client-side.
+
+**Verification:** 158/158 tests (12 new); `tsc` clean; migration replay + races pass;
+dummy-env build compiles; **7/7 mutations detected with 0 compile errors**. The
+harness found a real validator hole (`NaN` passed as a size) — fixed. **The platform
+ceiling is documented, not measured; not verified in a deployment.** See
+`evidence/r006-request-size-limits-2026-10-22.md`.
 
 ---
 
@@ -650,7 +675,7 @@ deployment component — configuration assertions are not runtime proof.
 | **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | ✅ **RELEASED 2026-10-20** — PR #4 merged (deploy `6ad70e11`); harness mutation-verified (5/5 mutations detected); refusal path proven by a local integration run at the deployed commit. Not closed: independent review still waived. See `evidence/phase-1-host-origin-validation-released-2026-10-20.md` |
 | **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ✅ **DEPLOYED 2026-10-20** — migration `027` applied to production (ledger row recorded) and PR #5 merged (deploy `6ad71dde`). Atomicity proven by a 30-session concurrency test; the harness is mutation-verified (4/4 mutations detected). **Not closed** — post-deploy verification found the limiter keying on an infrastructure address; see NA-13. |
 | **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | ✅ **DONE 2026-10-22** — five costly actions bounded per user (`lib/action-rate-limit.ts`); refusals returned, not thrown; 146/146 tests, **8/8 mutations detected**. **Not verified in a deployment.** See `evidence/r005-server-action-rate-limiting-2026-10-22.md`. |
-| **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | **OPEN — doc done, migration step pending** |
+| **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | ✅ **DONE 2026-10-22** — boundary made explicit in `next.config.mjs` and in a tested policy module; upload refusals now legible. 158/158 tests, **7/7 mutations detected**. **Not verified in a deployment.** See `evidence/r006-request-size-limits-2026-10-22.md`. |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
@@ -703,7 +728,7 @@ Options, in order of preference:
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 open |
 | R-005 | Server Actions not rate limited | **IMPLEMENTED AND TESTED 2026-10-22** — five costly actions bounded per authenticated user; **not verified in a deployment** | Shri (interim) | NA-3 done |
-| R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
+| R-006 | No explicit request-size limits | **IMPLEMENTED AND TESTED 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; **not verified in a deployment** | Shri (interim) | NA-4 done |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19** — forward path closed, preview rebuilt staging-scoped, **all 7 production-wired deploys deleted and verified 404** | Shri (interim) | **NA-8** ✅ |
