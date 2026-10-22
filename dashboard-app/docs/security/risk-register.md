@@ -306,8 +306,8 @@ correct, not that the *wiring* is. Closure requires the deployed staging test (D
 
 ## R-005 — Server Actions are not rate limited
 
-**Status:** OPEN — **not accepted, not closed.** **Severity:** medium.
-**Owner:** Shri — interim accountable owner.
+**Status:** **IMPLEMENTED AND TESTED 2026-10-22** — not yet verified in a deployment.
+**Severity:** medium. **Owner:** Shri — interim accountable owner.
 
 `checkRateLimit` is applied to API routes only; it appears **zero times** in
 `lib/actions.ts` across **30 Server Actions**. Every action is
@@ -320,6 +320,34 @@ calculation, airdrop preparation) without a request ceiling.
 rate limiting is only meaningful once the store is genuinely shared.
 
 **Tracked as NA-3.**
+
+**Outcome (2026-10-22).** `lib/action-rate-limit.ts` adds a per-user ceiling for the
+costly actions; five are bounded — `reward.airdrop` and `reward.testAirdrop` at
+**3/60 s**, `reward.calculate`, `reward.correct` and `reward.approve` at **6/60 s**.
+
+- The subject is the **authenticated user id**, not a client address: a Server
+  Action has no `NextRequest`, and substituting a header would reintroduce the
+  spoofing hole R-004 closed. Every limited action is authorization-guarded.
+- Refusals are **returned**, not thrown, so the message survives a production build
+  (a thrown error is redacted to an opaque 500). All five call sites are already
+  `FormWithToast`-wired, so no UI change was needed.
+- Denials are **not** written to the audit log — a limited caller could otherwise
+  use the audit trail as an amplification target.
+- Keys are `action:<action>:user:<id>`, so budgets are independent per action and
+  per user.
+
+**Deliberately excluded:** `getAirdropWalletBalanceAction` and `getTokenBalanceAction`
+are called on render paths whose callers expect a balance, so a refusal object would
+break the page — bounding those needs its own design. **Separate observation
+recorded, not fixed here:** `getTokenBalanceAction` has **no authorization guard at
+all**, unlike every other action in the file; assess on its own. Bulk user mutations
+are left to a follow-up.
+
+**Verification:** 146/146 tests (13 new); `tsc` clean; migration replay + races pass;
+dummy-env build compiles; **8/8 mutations detected with 0 compile errors**, including
+two wiring tests that fail if a guard is dropped or stops returning the refusal.
+**Not verified in a deployment** — no live request has been observed being refused.
+See `evidence/r005-server-action-rate-limiting-2026-10-22.md`.
 
 ---
 
@@ -621,7 +649,7 @@ deployment component — configuration assertions are not runtime proof.
 |---|---|---|---|
 | **NA-1** | Add and test host/origin validation, including legitimate Netlify preview domains | R-003 | ✅ **RELEASED 2026-10-20** — PR #4 merged (deploy `6ad70e11`); harness mutation-verified (5/5 mutations detected); refusal path proven by a local integration run at the deployed commit. Not closed: independent review still waived. See `evidence/phase-1-host-origin-validation-released-2026-10-20.md` |
 | **NA-2** | Shared rate-limit store; prove limits shared; remove silent fallback | R-004 | ✅ **DEPLOYED 2026-10-20** — migration `027` applied to production (ledger row recorded) and PR #5 merged (deploy `6ad71dde`). Atomicity proven by a 30-session concurrency test; the harness is mutation-verified (4/4 mutations detected). **Not closed** — post-deploy verification found the limiter keying on an infrastructure address; see NA-13. |
-| **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | **UNBLOCKED** — limits are now genuinely shared, so they would be real rather than cosmetic. Still open. |
+| **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | ✅ **DONE 2026-10-22** — five costly actions bounded per user (`lib/action-rate-limit.ts`); refusals returned, not thrown; 146/146 tests, **8/8 mutations detected**. **Not verified in a deployment.** See `evidence/r005-server-action-rate-limiting-2026-10-22.md`. |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | **OPEN — doc done, migration step pending** |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
@@ -674,7 +702,7 @@ Options, in order of preference:
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 open |
-| R-005 | Server Actions not rate limited | **OPEN** — no longer blocked behind R-004 | Shri (interim) | NA-3 |
+| R-005 | Server Actions not rate limited | **IMPLEMENTED AND TESTED 2026-10-22** — five costly actions bounded per authenticated user; **not verified in a deployment** | Shri (interim) | NA-3 done |
 | R-006 | No explicit request-size limits | **OPEN** | Shri (interim) | NA-4 |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
