@@ -132,28 +132,39 @@ export async function updateProfile(formData: FormData) {
   revalidatePath("/dashboard/profile");
 }
 
+/**
+ * Resolve the image for a form: an uploaded file wins over a URL field.
+ *
+ * R-006: a refused upload is RETURNED, not thrown. It used to `throw`, which in a
+ * production build becomes an opaque HTTP 500 with the message redacted — so an
+ * operator whose file was too large saw "something went wrong" instead of the
+ * reason. Returning `{ error }` reaches the UI through the `lib/action-result.ts`
+ * contract that `FormWithToast` renders.
+ */
 async function resolveImageUrl(
   formData: FormData,
   fileFieldName: string,
   urlFieldName: string,
   folder: string
-): Promise<string | null> {
+): Promise<{ url: string | null; error: string | null }> {
   const file = formData.get(fileFieldName) as File | null;
   const url = (formData.get(urlFieldName) as string) || null;
 
   if (file && file.size > 0) {
     const { url: uploadedUrl, error } = await uploadAsset(file, folder);
-    if (error) throw new Error(error);
-    return uploadedUrl;
+    if (error) return { url: null, error };
+    return { url: uploadedUrl, error: null };
   }
 
-  return url;
+  return { url, error: null };
 }
 
 export async function createOffer(formData: FormData) {
   const context = await requireCapability("manage_content");
   const supabase = createServiceClient();
-  const logoUrl = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
+  const upload = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
+  if (upload.error) return { error: upload.error };
+  const logoUrl = upload.url;
 
   await auditedAdminMutation(context, "offer.create", "public.affiliate_offers", null, async () => {
     const { error } = await supabase.from("affiliate_offers").insert({
@@ -176,6 +187,13 @@ export async function updateOffer(id: string, formData: FormData) {
   const context = await requireCapability("manage_content");
   const supabase = createServiceClient();
 
+  // R-006: resolve the upload BEFORE the audited mutation, so a refused upload
+  // returns a legible error rather than throwing out of the mutation wrapper
+  // (which would surface as an opaque 500 and be recorded as a mutation failure).
+  const upload = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
+  if (upload.error) return { error: upload.error };
+  const logoUrl = upload.url;
+
   await auditedAdminMutation(context, "offer.update", "public.affiliate_offers", id, async () => {
     // Fetch current logo URL to decide whether to delete old asset.
     const { data: current } = await supabase
@@ -183,8 +201,6 @@ export async function updateOffer(id: string, formData: FormData) {
       .select("logo_url")
       .eq("id", id)
       .single();
-
-    const logoUrl = await resolveImageUrl(formData, "logoFile", "logoUrl", "offers");
 
     // If a new file was uploaded and the old logo was in storage, delete it.
     const newFile = formData.get("logoFile") as File | null;
@@ -832,7 +848,9 @@ export async function unpublishTransparencyReport(id: string) {
 export async function createProject(formData: FormData) {
   const context = await requireCapability("manage_content");
   const supabase = createServiceClient();
-  const imageUrl = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
+  const upload = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
+  if (upload.error) return { error: upload.error };
+  const imageUrl = upload.url;
 
   await auditedAdminMutation(context, "project.create", "public.projects", null, async () => {
     const { error } = await supabase.from("projects").insert({
@@ -852,6 +870,11 @@ export async function updateProject(id: string, formData: FormData) {
   const context = await requireCapability("manage_content");
   const supabase = createServiceClient();
 
+  // R-006: resolve the upload before the audited mutation — see updateOffer.
+  const upload = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
+  if (upload.error) return { error: upload.error };
+  const imageUrl = upload.url;
+
   await auditedAdminMutation(context, "project.update", "public.projects", id, async () => {
     // Fetch current image URL to decide whether to delete old asset.
     const { data: current } = await supabase
@@ -859,8 +882,6 @@ export async function updateProject(id: string, formData: FormData) {
       .select("image_url")
       .eq("id", id)
       .single();
-
-    const imageUrl = await resolveImageUrl(formData, "imageFile", "imageUrl", "projects");
 
     // If a new file was uploaded and the old image was in storage, delete it.
     const newFile = formData.get("imageFile") as File | null;

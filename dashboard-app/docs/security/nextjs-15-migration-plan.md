@@ -181,7 +181,7 @@ Each milestone ends with a green gate; do not proceed on a red one.
 | **M3** | Async request APIs | `await cookies()`; async `createClient()` and all call sites; awaited `searchParams` in `app/admin/users/page.tsx`; types updated | `tsc --noEmit` passes with no `UnsafeUnwrapped*` escape hatches |
 | **M4** | Supabase cookie adapter | `getAll`/`setAll` rewrite in `lib/supabase/server.ts` and `middleware.ts` | Login, session refresh, logout, and protected-route access verified in staging |
 | **M5** | Caching intent | Explicit `cache`/`revalidate` on the 4 `fetch` sites and each Route Handler | Each decision documented; no accidental uncached public endpoint |
-| **M6** | Findings closed | Host-header validation (R-003); Server Action rate limiting (R-005) — **already implemented 2026-10-22, verify rather than re-implement**; explicit `bodySizeLimit` (R-006) | Implemented **and** covered by tests |
+| **M6** | Findings closed | Host-header validation (R-003); Server Action rate limiting (R-005) and explicit request-size limits (R-006) — **both already implemented 2026-10-22, verify rather than re-implement** | Implemented **and** covered by tests |
 | **M7** | Staging regression | Full suite (section 5) on staging + Solana devnet | All gates green; evidence attached |
 | **M8** | Review & handoff | PR with attached evidence; independent human approval; production preflight re-run | Approved; R-001 closed as remediated |
 

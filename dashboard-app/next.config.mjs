@@ -23,6 +23,27 @@ function allowedServerActionOrigins() {
   return origins;
 }
 
+// Server Action body limit (R-006). Set explicitly rather than inheriting Next's
+// 1 MB default silently.
+//
+// What this DOES cover: the non-multipart (JSON / fetch) action path, checked in
+// next/dist/server/app-render/action-handler.js and rejected with an internal 413
+// — the browser sees an opaque 500, not the 413.
+//
+// What this does NOT cover: FILE UPLOADS. Measured 2026-10-22 on a production
+// build — Next passes this value to busboy as `fieldSize`, which limits non-file
+// fields only, and the plain-form multipart path does not apply it at all. A 5 MB
+// file was received intact with this default in force. Upload size is enforced by
+// the application instead (lib/asset-policy.ts, unit-tested), which is why that
+// limit sits below the platform's own ceiling. Do not rely on this setting to
+// bound an upload.
+//
+// 1 MB is generous for the fields these actions carry (names, descriptions, URLs)
+// and keeps the pre-authentication parse bounded: this check runs BEFORE any
+// authorization, so raising it would also enlarge what an unauthenticated caller
+// can make the server buffer.
+const SERVER_ACTION_BODY_SIZE_LIMIT = '1mb';
+
 const nextConfig = {
   reactStrictMode: true,
   images: {
@@ -32,6 +53,7 @@ const nextConfig = {
   experimental: {
     serverActions: {
       allowedOrigins: allowedServerActionOrigins(),
+      bodySizeLimit: SERVER_ACTION_BODY_SIZE_LIMIT,
     },
   },
 };

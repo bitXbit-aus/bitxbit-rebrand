@@ -3,22 +3,9 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { requireCapability } from "@/lib/authz";
 import { writeSecurityAudit } from "@/lib/audit";
+import { validateAsset } from "@/lib/asset-policy";
 
 const ASSETS_BUCKET = "assets";
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
-
-const ALLOWED_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-  "image/gif",
-  "image/svg+xml",
-];
-
-function isAllowedType(type: string): boolean {
-  return ALLOWED_TYPES.includes(type);
-}
 
 function sanitizeFilename(name: string): string {
   return name
@@ -36,16 +23,12 @@ export interface UploadResult {
 export async function uploadAsset(file: File, folder: string): Promise<UploadResult> {
   const context = await requireCapability("manage_content");
 
-  if (!file || file.size === 0) {
-    return { url: null, error: "No file provided" };
-  }
-
-  if (file.size > MAX_FILE_SIZE) {
-    return { url: null, error: "File must be smaller than 5 MB" };
-  }
-
-  if (!isAllowedType(file.type)) {
-    return { url: null, error: `File type not allowed: ${file.type}` };
+  // R-006: one policy for size and type, shared with the client component and
+  // unit-tested in lib/asset-policy.test.ts. This check is the ONLY guard on
+  // upload size — Next's Server Action bodySizeLimit does not bound file uploads.
+  const validation = validateAsset(file);
+  if (!validation.ok) {
+    return { url: null, error: validation.error };
   }
 
   const supabase = createServiceClient();
