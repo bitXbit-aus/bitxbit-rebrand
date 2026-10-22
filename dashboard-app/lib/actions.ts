@@ -1047,11 +1047,11 @@ export async function sendTestAirdrop(formData: FormData) {
   const context = await requireCapability("manage_rewards");
   const walletAddress = formData.get("walletAddress") as string;
   if (!walletAddress) {
-    throw new Error("Wallet address is required");
+    return { error: "Wallet address is required." };
   }
 
   if (!isValidSolanaAddress(walletAddress)) {
-    throw new Error("Invalid Solana wallet address.");
+    return { error: "Invalid Solana wallet address." };
   }
 
   // Disable production test airdrops unless explicitly enabled. This prevents
@@ -1059,8 +1059,20 @@ export async function sendTestAirdrop(formData: FormData) {
   // Even when enabled, this path uses the same durable payout-operation workflow
   // as the main airdrop so the signed transaction identity is persisted before
   // broadcast and the final record is immutable.
+  //
+  // The refusal is RETURNED rather than thrown on purpose. A thrown Server Action
+  // error surfaces to the browser as HTTP 500 with the message redacted by Next.js
+  // in production builds, so the operator saw a generic failure with no explanation
+  // of why a deliberate safety gate had stopped them. Returning the reason lets the
+  // admin UI show exactly what happened.
   if (process.env.ENABLE_TEST_AIRDROP !== "true") {
-    throw new Error("Test airdrops are disabled. Set ENABLE_TEST_AIRDROP=true to enable in a safe environment.");
+    return {
+      error:
+        "Test airdrops are disabled in this environment by the Phase 1 safety guard. " +
+        "Enabling them requires setting ENABLE_TEST_AIRDROP=true and redeploying. " +
+        "To exercise the payout path safely, run the test in staging, where the same " +
+        "code path runs against devnet.",
+    };
   }
 
   const TEST_AMOUNT = 0.001;
