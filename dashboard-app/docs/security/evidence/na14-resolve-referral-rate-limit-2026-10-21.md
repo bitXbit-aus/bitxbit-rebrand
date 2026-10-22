@@ -141,6 +141,14 @@ rather than a dead store.
 
 **Fix:** `createServiceClient()` now passes a fetch forcing `cache: "no-store"` (PR #21).
 
+**Correction (2026-10-22).** This section is right about the *layer* — it is the
+patched `fetch` — but its wording is too narrow. The freeze is **not** specific to
+this client: a raw `fetch` with no `cache` option freezes identically. Next.js
+caches a non-GET fetch with `revalidate = false` unless the route is *already*
+dynamic at the moment of the fetch. NA-16's contrary result is explained by its
+client reading `cookies()`. Mechanism, evidence and reproduction:
+`na14-mechanism-pinned-2026-10-22.md`.
+
 **Verified by outcome, not by inspection.** After the fix:
 
 ```
@@ -163,6 +171,12 @@ diagnoses during this investigation. Recorded as NA-16.
 ## 8. Why the sibling routes were unaffected
 
 Still unexplained, and left explicitly open. `/api/token-stats`, `/api/wallet/rewards` and
-`/api/public/*` enforced at their exact limits throughout. The discriminator is not `force-dynamic`
+`/api/public/*` enforced at their exact limits throughout.
+
+**Update (2026-10-22):** still open. The now-pinned mechanism (a non-GET fetch is
+cached unless the route is already dynamic at fetch time) does **not** by itself
+explain these routes — none of them obviously reads `cookies()` before its
+limiter. Recorded as measured-and-unexplained rather than folded into the
+mechanism: `na14-mechanism-pinned-2026-10-22.md` §7. The discriminator is not `force-dynamic`
 (`/api/public/*` has it and enforced) and not the key shape. The fix does not depend on this: the
 store path is now uncached for every caller, and the affected route is verified working.
