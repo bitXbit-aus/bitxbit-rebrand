@@ -12,7 +12,13 @@ dashboard-app/dist/
 .env
 .env.local
 .env.*.local
+# Backups of env files may contain live credentials — never commit these.
+.env*.bak*
+.env.*.bak*
 !dashboard-app/.env.local.example
+
+# TypeScript incremental build info
+*.tsbuildinfo
 
 # Logs
 npm-debug.log*

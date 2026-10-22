@@ -1,5 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { parseHostPolicy, validateRequestHost } from "@/lib/host-validation";
+import { resolveClientIp, withClientIp } from "@/lib/client-ip";
 
 interface MiddlewareAuthorization {
   role: "member" | "admin";
@@ -27,10 +29,49 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
+/**
+ * Host policy, built once per runtime from the environment.
+ * See lib/host-validation.ts — R-003.
+ */
+const HOST_POLICY = parseHostPolicy();
+
 export async function middleware(request: NextRequest) {
+  // Validate Host / X-Forwarded-Host first. Everything downstream — redirect
+  // targets, absolute URLs, cache keys — can be influenced by these headers, so
+  // a disallowed value must not reach it. Only present headers are checked.
+  const hostCheck = validateRequestHost(request.headers, HOST_POLICY);
+  if (!hostCheck.ok && hostCheck.rejected) {
+    console.error(
+      `Rejected request: disallowed "${hostCheck.rejected.header}" header "${hostCheck.rejected.host}". ` +
+        `Allowed: ${HOST_POLICY.exactHosts.join(", ")}` +
+        (HOST_POLICY.netlifySite ? `, <deploy>--${HOST_POLICY.netlifySite}.netlify.app` : "")
+    );
+    return applySecurityHeaders(
+      new NextResponse("Bad Request: unrecognised host.", {
+        status: 400,
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      })
+    );
+  }
+
+  // Forward whatever client address the edge can resolve. NOTE: this does NOT
+  // deliver it to route handlers. Measured 2026-10-21: the header is absent at
+  // the origin, as is a client-forged copy of it — custom request headers set
+  // here do not survive to a serverless function. Rate limiting therefore
+  // resolves the client at the origin from the raw forwarding chain; see
+  // lib/client-ip.ts and lib/rate-limit.ts — R-004. The header is harmless and
+  // may still reach downstream code that can see it, but do NOT key the limiter
+  // on it.
+  const clientIp = resolveClientIp(request.headers);
+  // Built fresh at each use so cookies refreshed below are still forwarded.
+  const forwardHeaders = () => withClientIp(new Headers(request.headers), clientIp);
+
   let response = NextResponse.next({
     request: {
-      headers: request.headers,
+      headers: forwardHeaders(),
     },
   });
 
@@ -45,14 +86,14 @@ export async function middleware(request: NextRequest) {
         set(name: string, value: string, options: CookieOptions) {
           request.cookies.set({ name, value, ...options });
           response = NextResponse.next({
-            request: { headers: request.headers },
+            request: { headers: forwardHeaders() },
           });
           response.cookies.set({ name, value, ...options });
         },
         remove(name: string, options: CookieOptions) {
           request.cookies.set({ name, value: "", ...options });
           response = NextResponse.next({
-            request: { headers: request.headers },
+            request: { headers: forwardHeaders() },
           });
           response.cookies.set({ name, value: "", ...options });
         },
