@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MemoryRateLimitStore, RateLimitResult, RateLimitStore } from "./rate-limit-store";
 import { resolveClientIp } from "./client-ip";
+import {
+  buildRateLimitHealth,
+  rateLimitHealthSnapshot,
+  recordRateLimitDegradation,
+} from "./rate-limit-health";
 
 let sharedStore: RateLimitStore | undefined;
 
@@ -61,8 +66,14 @@ function createStore(backend: RateLimitBackend): RateLimitStore {
   // the intended allowance. This used to happen silently, which made a degraded
   // control indistinguishable from a working one. Log it loudly.
   //
+  // NA-15: the log alone was not enough — Netlify's request logs return nothing
+  // even for requests that invoked the function, so this degradation was
+  // invisible in production. Record it so it is also queryable from outside.
+  //
   // Deliberately does NOT throw: refusing every rate-limited request because the
   // store is missing would take the site down — worse than a degraded limit.
+  recordRateLimitDegradation("no-shared-store");
+
   if (process.env.NODE_ENV === "production") {
     console.error(
       "[rate-limit] DEGRADED: no shared store is configured (neither Supabase nor Upstash). " +
@@ -119,12 +130,26 @@ export function rateLimitResponse(
 ): NextResponse<{
   error: string;
 }> {
+  // NA-15: state the store's health on the rejection itself, so a limiter that
+  // is quietly per-instance is visible from the response and not only from a log
+  // line that production does not keep.
+  //
+  // Composed through buildRateLimitHealth rather than reading degradedCount
+  // directly: keying on runtime events alone reported `false` on a deployment
+  // with NO shared store configured, i.e. the exact deployment the header exists
+  // to warn about. Caught by executing the real route, not by a unit test.
+  const degraded = buildRateLimitHealth(
+    resolveRateLimitBackend(),
+    rateLimitHealthSnapshot()
+  ).degraded;
+
   return NextResponse.json(
     { error: "Too many requests. Please try again later." },
     {
       status: 429,
       headers: {
         "Retry-After": String(Math.ceil((resetAt - Date.now()) / 1000)),
+        "x-ratelimit-degraded": String(degraded),
       },
     }
   );

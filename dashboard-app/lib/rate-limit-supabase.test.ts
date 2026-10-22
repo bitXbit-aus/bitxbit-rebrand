@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   SupabaseRateLimitStore,
@@ -6,6 +6,7 @@ import {
   type RateLimitRpcClient,
 } from "./rate-limit-supabase";
 import { MemoryRateLimitStore, type RateLimitStore } from "./rate-limit-store";
+import { rateLimitHealthSnapshot, resetRateLimitHealth } from "./rate-limit-health";
 
 interface RecordedCall {
   fn: string;
@@ -179,5 +180,82 @@ describe("SupabaseRateLimitStore", () => {
 
     assert.equal(result.allowed, true);
     assert.equal(fallbackCalls, 0);
+  });
+});
+
+describe("SupabaseRateLimitStore degradation reporting (NA-15)", () => {
+  beforeEach(() => {
+    resetRateLimitHealth();
+  });
+
+  it("records nothing on the success path", async () => {
+    const client = fakeClient({ data: { allowed: true, remaining: 2, resetAt: 9 } });
+    const store = new SupabaseRateLimitStore({ client });
+
+    await store.increment("k", 60_000, 3);
+
+    // A non-zero count must always mean something went wrong, so a healthy
+    // request must leave the registry untouched.
+    assert.equal(rateLimitHealthSnapshot().degradedCount, 0);
+  });
+
+  it("records 'store-unavailable' when the RPC errors", async () => {
+    const client = fakeClient({ error: { message: "connection refused" } });
+    const store = new SupabaseRateLimitStore({
+      client,
+      fallback: new MemoryRateLimitStore(),
+      onError: () => {},
+    });
+
+    await store.increment("k", 60_000, 3);
+
+    const snap = rateLimitHealthSnapshot();
+    assert.equal(snap.degradedCount, 1);
+    assert.equal(snap.lastReason, "store-unavailable");
+    assert.equal(typeof snap.lastDegradedAt, "number");
+  });
+
+  it("records 'invalid-payload' when the payload cannot be trusted", async () => {
+    const client = fakeClient({ data: { unexpected: true } });
+    const store = new SupabaseRateLimitStore({
+      client,
+      fallback: new MemoryRateLimitStore(),
+      onError: () => {},
+    });
+
+    await store.increment("k", 60_000, 3);
+
+    // Distinct from a transport failure: the store answered, with nonsense.
+    assert.equal(rateLimitHealthSnapshot().lastReason, "invalid-payload");
+  });
+
+  it("records 'invalid-payload' when the RPC returns no data", async () => {
+    const client = fakeClient({ data: null });
+    const store = new SupabaseRateLimitStore({
+      client,
+      fallback: new MemoryRateLimitStore(),
+      onError: () => {},
+    });
+
+    await store.increment("k", 60_000, 3);
+    assert.equal(rateLimitHealthSnapshot().lastReason, "invalid-payload");
+  });
+
+  it("counts every failure, not just the first", async () => {
+    const client = fakeClient({ error: { message: "db down" } });
+    const store = new SupabaseRateLimitStore({
+      client,
+      fallback: new MemoryRateLimitStore(),
+      onError: () => {},
+      now: () => 1_000_000,
+    });
+
+    // The LOG is throttled to once per interval; the COUNT must not be, or the
+    // registry would understate how much traffic ran on the fallback.
+    await store.increment("k", 60_000, 100);
+    await store.increment("k", 60_000, 100);
+    await store.increment("k", 60_000, 100);
+
+    assert.equal(rateLimitHealthSnapshot().degradedCount, 3);
   });
 });
