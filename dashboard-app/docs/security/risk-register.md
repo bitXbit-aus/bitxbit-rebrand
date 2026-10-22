@@ -159,14 +159,19 @@ Verified. Full evidence: `docs/security/evidence/phase-1-controls-verification-2
 | Server-side access controls | ✅ **Strong.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; 30 Server Actions guarded; admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
 | Shared rate limiting | ✅ **Satisfied.** The shared atomic store is deployed and the limiter keys on the **real client** — verified live: keys carry `206.83.119.2`, a forged forwarded chain creates no new key, and enforcement returns 429 from the 31st request against a 30/60 s limit. See R-004. |
 | Client identity for rate limiting | ✅ Uses Netlify's trusted `x-nf-client-connection-ip`; XFF trusted only behind an explicit `TRUST_PROXY` flag. |
-| Request limits | ⚠️ **Default only** — Next's 1 MB default. See R-006. |
+| Request limits | ✅ **Satisfied 2026-10-22** — `bodySizeLimit` set explicitly; the upload boundary is enforced by a tested policy below the platform ceiling (R-006). The `1mb` JSON limit is unchanged in effect but is now explicit. |
 | Host-header validation | ✅ **Satisfied** — implemented and released 2026-10-20 (PR #4, deploy `6ad70e11`); refusal path proven, control live in production. The application-layer check is defence-in-depth behind the Netlify edge, which is a property of the hosting configuration. See R-003. |
 
-**Condition 3 is still not met.** As of 2026-10-20, one of the two outstanding controls is
-now satisfied — host-header validation is implemented and released (R-003) — but shared rate
-limiting is **still not live in production** (R-004; migration `027` unmerged and unapplied). The
-condition remains contingent on closing R-003 and R-004; R-003 is *released* but *not closed*
-(independent review still waived, not met).
+**Condition 3 — both controls are now satisfied in fact (updated 2026-10-22).** Host-header
+validation is implemented and released (R-003, deploy `6ad70e11`), and shared rate limiting is
+live in production (R-004 — migration `027` was applied 2026-10-19, and the limiter was verified
+live keying on the real client, `206.83.119.2`, enforcing 429 from request #31). Request limits
+are no longer "default only" (R-006, 2026-10-22).
+
+The condition remains formally contingent on **R-003's closure**, which is *released* but *not
+closed* because independent review is still waived. The two other controls named in this
+condition no longer gate it. *(The previous text here said rate limiting was "still not live in
+production"; that was stale — `027` had been applied and R-004 verified.)*
 
 ### Condition 4 — recorded in the risk register with an accountable owner
 
@@ -664,6 +669,55 @@ the wrong project. Every remediation command passed `--site` explicitly for this
 
 ---
 
+## R-014 — Legacy Supabase API keys are being retired; production still depends on one
+
+**Status:** OPEN — **HIGH** (availability). Identified 2026-10-22 while attempting the
+deployed R-005/R-006 verification.
+**Owner:** Shri — interim accountable owner.
+
+### What was found
+
+Supabase is retiring legacy `anon` / `service_role` JWT keys in favour of publishable and
+secret keys. On this account the retirement **has already happened once**, in staging, and
+nothing detected it for three days.
+
+| Project | Legacy anon key | Consequence |
+|---|---|---|
+| `bitXbit-Staging` (`luqrwhgjtiyfmeawbtmp`) | **`disabled: true`** — disabled `2026-10-19T06:18:33Z` | **Authentication was broken on every preview deploy** |
+| Production (`flasgvendiiasuixeqzu`) | still enabled | Works today; **would fail identically if disabled** |
+
+**How it presented:** `/admin/*` and `/dashboard/*` returned `307 → /auth/login` for every
+request, including authenticated ones. `supabase.auth.getUser()` in the middleware fails when
+the anon key is rejected, so `user` is null and the route guard redirects. The app otherwise
+looked entirely healthy — pages served, and every public endpoint returned 200.
+
+**Why nothing caught it.** D4's deployed test asserts three *public* endpoints, and those use
+the **service-role** key server-side, so they pass regardless of the anon key. Nothing in the
+D4 harness exercises an authenticated path. This is a **blind spot in the D4 harness**, now
+recorded — 34/34 previews were correctly "staging-scoped" while none of them could log anyone in.
+
+### Remediation
+
+**Staging — APPLIED 2026-10-22.** `NEXT_PUBLIC_SUPABASE_ANON_KEY` was re-pointed to the
+staging project's live publishable key (`sb_publishable_CbgASUIR3MTwfSIohir2Kg_CYEGGi6o`) for
+the `deploy-preview` and `branch-deploy` contexts **only**. The `production` context was not
+written to: verified by sha256 before and after (`52bad0d3306368c4`, unchanged). Environment
+variables resolve at deploy time, so this takes effect on the next preview build.
+
+**Production — NOT applied. Requires a separate owner decision.** Production still runs a
+legacy anon key. Migrating means replacing `NEXT_PUBLIC_SUPABASE_ANON_KEY` in the `production`
+context with the production project's publishable key, then redeploying. The value is
+client-visible, so the change is low-risk in itself, but it is a production release and should
+be done deliberately rather than opportunistically.
+
+### Why this is recorded as a risk, not an incident
+
+The retirement is not theoretical: it has already occurred in this account and went undetected
+for three days. Production depends on the same key type, and the failure mode is a total
+authentication outage for every user with no degraded state in between.
+
+---
+
 ## D4 status
 
 **D4 is SATISFIED — verified in deployments on 2026-10-19, re-verified 2026-10-22.**
@@ -769,10 +823,10 @@ Options, in order of preference:
 
 | ID | Risk | Status | Owner | Review |
 |---|---|---|---|---|
-| R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** (Condition 3 still unmet — host validation now satisfied, shared rate limiting still not live). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`) | Shri (interim) | **2026-11-18 (expires)** |
+| R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** — Condition 3 now satisfied in fact (host validation released; rate limiting live and verified; request limits explicit). Formally contingent only on **R-003's closure** (independent review waived). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
-| R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 open |
+| R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
 | R-005 | Server Actions not rate limited | **IMPLEMENTED AND TESTED 2026-10-22** — five costly actions bounded per authenticated user; **not verified in a deployment** | Shri (interim) | NA-3 done |
 | R-006 | No explicit request-size limits | **IMPLEMENTED AND TESTED 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; **not verified in a deployment** | Shri (interim) | NA-4 done |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
@@ -782,5 +836,6 @@ Options, in order of preference:
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
+| **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **OPEN — HIGH (availability).** Staging's legacy anon key was disabled 2026-10-19, breaking auth on all previews (fixed 2026-10-22); **production still runs a legacy anon key** | Shri (interim) | New |
 
 **Nothing in this register is closed by the ownership assignment.**
