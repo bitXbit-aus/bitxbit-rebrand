@@ -119,16 +119,50 @@ the *function* produced the stale body); a silent store failure (the RPC returns
 wrong backend (`supabase`); a wrong identifier (`206.83.119.2`); a stale or altered RPC (the deployed
 function is byte-identical to migration `027`, single 3-arg signature, `SECURITY DEFINER`).
 
-## 6. What is still not established
+## 6. The layer, pinned — and the fix
 
-1. **Which cache layer replays the result.** The app's Supabase client
-   (`lib/supabase/service.ts`) passes no custom `fetch`, so it inherits Next.js's patched `fetch` —
-   the leading candidate, but not proven.
-2. **Why only this route.** `/api/token-stats`, `/api/wallet/rewards` and `/api/public/*` all
-   enforced at their exact limits in the same minute. The discriminator is not `force-dynamic`
-   (`/api/public/*` has it and enforces) and not the key shape
-   (`api:token-stats:206.83.119.2` is structurally identical to this route's key).
+A second probe (PR #20, `?na14=2`) compared three channels, each on its own probe key and each
+called twice, so within-request memoisation and cross-request caching were distinguishable. Two
+readings, seconds apart:
 
-Until (1) is pinned, any fix is a guess — and guessing is what produced the disproven caching
-explanation earlier. **A fix must be validated by outcome:** the counter advancing *and* a `429` at
-the limit on this specific route.
+| Channel | Request 1 | Request 2 | Behaviour |
+|---|---|---|---|
+| `store1` — supabase-js → patched fetch | remaining=2 | remaining=2 | **frozen** |
+| `store2` — same, same request | remaining=2 | remaining=2 | **frozen**, identical to store1 |
+| `rawNoStore1` — raw fetch, `cache: "no-store"` | remaining=2 | remaining=**0** | advances |
+| `rawNoStore2` — raw fetch, `cache: "no-store"` | remaining=**1** | remaining=0, **allowed=false** | advances, **trips the limit** |
+| `rawDefault1` — raw fetch, no cache option | remaining=2 | remaining=**1** | advances |
+
+The store path returned **byte-identical** results within a request *and* across requests, while a
+raw `fetch` to the **same RPC** incremented correctly and tripped the limit. So the cache is the
+Supabase client's `fetch` — Next.js patches the global `fetch` and requests through this client are
+served from it. Both frozen values sat at a fresh `+60.2 s` when first cached, confirming a replay
+rather than a dead store.
+
+**Fix:** `createServiceClient()` now passes a fetch forcing `cache: "no-store"` (PR #21).
+
+**Verified by outcome, not by inspection.** After the fix:
+
+```
+probe req1: store1=remaining 2   store2=remaining 1              <- increments WITHIN a request
+probe req2: store1=remaining 0   store2=remaining 0 allowed=false <- trips the limit
+real route: non-429=28   429s=10   first 429 at request #29
+```
+
+The counter advances and the limit rejects. (The first `429` lands at #29 rather than #31 because the
+route's own `checkRateLimit` call at the top of the handler had already counted twice in that
+window.)
+
+## 7. Related, and deliberately NOT changed
+
+`lib/supabase/server.ts` builds a server-side client the same way and may share the flaw — if it
+does, every server-side read through it can serve stale data. It is **not** patched here because its
+staleness has not been **measured**, and acting on an unmeasured mechanism produced two wrong
+diagnoses during this investigation. Recorded as NA-16.
+
+## 8. Why the sibling routes were unaffected
+
+Still unexplained, and left explicitly open. `/api/token-stats`, `/api/wallet/rewards` and
+`/api/public/*` enforced at their exact limits throughout. The discriminator is not `force-dynamic`
+(`/api/public/*` has it and enforced) and not the key shape. The fix does not depend on this: the
+store path is now uncached for every caller, and the affected route is verified working.
