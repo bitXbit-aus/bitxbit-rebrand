@@ -1,8 +1,9 @@
 # R-014 (production half) — retired legacy anon key, preventative replacement (2026-10-22)
 
 **Severity:** HIGH (availability). **Status:** production re-pointed to the publishable key and
-deployed. **Verified in a deployment** for the client bundle and the auth endpoint; **not yet
-verified end-to-end with a real authenticated session** (§6).
+deployed. **Verified in a deployment** for the client bundle and the auth endpoint, and
+**operator-confirmed end to end** — the operator signed in and the dashboard loaded with their
+own data (§6).
 
 Continues `r014-legacy-anon-key-staging-auth-2026-10-22.md`, which fixed the
 `deploy-preview` and `branch-deploy` contexts and left production exposed.
@@ -96,26 +97,35 @@ enabled. Once Supabase disables it, rollback is not available and the publishabl
 the only viable configuration — which is the reason for making this change before that
 happens rather than after.
 
-## 6. Limitation — the end-to-end proof is outstanding
+## 6. End-to-end verification — operator-confirmed 2026-10-22
 
-**A real authenticated sign-in has not been exercised against production.**
+**The operator signed in through the UI on production and the dashboard loaded with their own
+data.**
 
-What is proven: the publishable key is valid and accepted by production's auth endpoints for
-the exact password-grant operation the login form performs, the deployed bundle carries it,
-and the same application code already authenticates with a publishable key on staging.
+**Basis — stated precisely, because the distinction matters.** This is an **operator
+observation**, not an instrumented measurement by the agent. What the agent measured
+independently:
 
-What is **not** proven: that a production user can complete a sign-in and reach a protected
-route after this change.
+| Check | Result |
+|---|---|
+| `/dashboard` without a session | **307 → `/auth/login`** — the route is auth-gated |
+| `middleware.ts:138` | an authenticated user is redirected **to** `/dashboard` |
+| Deployed bundle | carries the publishable key; legacy JWT in 0 of 15 chunks |
 
-This gap is inherent to the control, not an oversight in the test: R-014's failure mode
-presents as an **authorisation redirect**, so an anonymous request and an
-authentication-broken request are indistinguishable from outside. There is no unauthenticated
-probe that can discriminate them — which is precisely why the original breakage went
-unnoticed for three days.
+Those establish that reaching `/dashboard` requires a valid session, which **corroborates** the
+operator's observation. They are not a substitute for it.
 
-Closing it requires a genuine session, i.e. one of: the operator signing in through the UI,
-or an authorisation to mint a session via a temporary production test account (created and
-deleted) as was done for the staging R-005/R-006 verification.
+**Instrumented verification was not possible from outside, by the nature of the control.**
+R-014's failure mode presents as an **authorisation redirect**, so an anonymous request and an
+authentication-broken request are **indistinguishable** — which is exactly why the original
+staging breakage went unnoticed for three days. The intermediate evidence (key valid for the
+app's auth operations; key present in the deployed bundle) was necessary but **not sufficient**
+on its own, and was not written up as verification before the operator confirmed the sign-in.
+
+**Note on the `/dashboard` link:** pasting that URL into a chat or link-preview tool returns no
+content. That is expected — the route requires a session, so an unauthenticated fetcher receives
+a redirect and extracts nothing. An empty extraction from that URL is **not** evidence about
+whether authentication works.
 
 ## 7. What this does not fix
 
