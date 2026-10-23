@@ -627,11 +627,13 @@ intact. Readback now masks the value (`****************a2t2`).
 secrets "can be masked inside functions on branch deploys" does not apply to this site. This also
 narrows R-009: the "arbitrary branch code" path is **PR previews**, not branch deploys.
 
-**Outstanding — deployed verification.** The flag resolves at **deploy time**, so nothing currently
-deployed is affected yet. It must be confirmed that (a) the masked value still reaches the
-**function runtime** and (b) service-role routes still work (`/api/public/offers`,
-`/api/public/transparency`, `/api/token-stats` — all use `createServiceClient()`, and all asserted
-by D4). Preview first, then production. Until then this is *applied*, **not verified**.
+**Deployed verification — PASSED**, preview first then production. `deploy-preview-39`: all four
+service-role routes **200** and **D4 all 6 checks pass**. Production `6d8ea981`: `/auth/login` 200,
+`/api/public/offers` **200 with 786 bytes of real data**, `/api/public/transparency` 200,
+`/api/token-stats` 200, `/api/health/rate-limit` **200 — `shared: true, backend: supabase`**. That
+last one reads Postgres via `createServiceClient()`, so a healthy response **proves the masked
+secret reaches the function runtime and authenticates**. The masking concern did not materialise: the
+flag controls read-back through the API/UI, not delivery to the runtime.
 
 **Incident recorded here.** `netlify env:list --json` prints **unflagged** values in full, so the
 service-role key value entered this session's transcript before the flag was applied. **Rotation is
@@ -991,7 +993,7 @@ Options, in order of preference:
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). | Shri (interim) | **NA-8** ✅ |
-| R-010 | Secrets not marked secret | **APPLIED 2026-10-22** — both high-value secrets flagged; values masked. The CLI path silently no-ops (422 on `post_processing`); fixed via the API. **Deployed verification outstanding.** | Shri (interim) | NA-9 |
+| R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Remaining: rotate the exposed service-role key. | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
