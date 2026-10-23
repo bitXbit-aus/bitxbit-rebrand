@@ -1,8 +1,8 @@
 # R-010 — `is_secret` flagging applied, and why the CLI silently failed (2026-10-22)
 
-**Status:** both high-value secrets flagged secret; values now masked. **Deployed verification is
-outstanding** (§5) — the flag takes effect at deploy time, and R-010 itself warns that a secret
-can be masked inside functions, so the next build must be checked before this is called verified.
+**Status:** both high-value secrets flagged secret; values now masked. **Verified in deployment** —
+the masked value reaches the function runtime and service-role routes work, in a preview first and
+then in production (§5).
 
 ---
 
@@ -64,17 +64,39 @@ Pushing a branch does not produce a branch-deploy build on this site. R-010's wa
 contexts are `production` and `deploy-preview`. This also narrows R-009's exposure surface: the
 "arbitrary branch code" path is **PR previews**, not branch deploys.
 
-## 5. Outstanding — deployed verification
+## 5. Deployed verification — PASSED (preview, then production)
 
-The flag resolves at **deploy time**, so no existing deployment is affected yet. It must be
-confirmed that:
+The flag resolves at **deploy time**, so nothing already deployed was affected. Verified in the
+intended order — preview first, so a masking failure would break a preview rather than production.
 
-1. the masked value still reaches the **function runtime** (R-010's warning), and
-2. service-role-dependent routes still work — `/api/public/offers`, `/api/public/transparency` and
-   `/api/token-stats` all use `createServiceClient()`, and D4 asserts them.
+**Preview — `deploy-preview-39`:**
 
-Verification order: a **preview** build first (not user-facing, and carries its own staging key),
-then production. Until that passes, this is *applied* and **not verified**.
+| Check | Result |
+|---|---|
+| `/api/public/offers` | **200** |
+| `/api/public/transparency` | **200** |
+| `/api/token-stats` | **200** |
+| `/api/health/rate-limit` | **200** — `shared: true, backend: supabase` |
+| D4 harness | **all 6 checks pass** |
+
+**Production — deploy `6d8ea981`:**
+
+| Check | Result |
+|---|---|
+| `/auth/login` | **200** (15,241 bytes) |
+| `/api/public/offers` | **200** — **786 bytes of real data** |
+| `/api/public/transparency` | **200** |
+| `/api/token-stats` | **200** |
+| `/api/health/rate-limit` | **200** — `shared: true, backend: supabase` |
+
+**The decisive signal is `/api/health/rate-limit` reporting `backend: supabase, shared: true`.**
+That route reads a Postgres table through `createServiceClient()`, so a healthy response proves the
+**masked** service-role secret reaches the function runtime and authenticates. `/api/public/offers`
+returning 786 bytes of real data independently confirms a service-role query succeeded.
+
+**R-010's masking concern did not materialise.** A secret being masked at rest does not prevent it
+from being injected into functions at runtime — the flag controls read-back through the API/UI, not
+delivery to the runtime. That distinction is why the change is safe.
 
 ## 6. Incident — the service-role key entered the session transcript
 
