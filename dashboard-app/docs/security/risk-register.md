@@ -714,10 +714,8 @@ the wrong project. Every remediation command passed `--site` explicitly for this
 
 ## R-014 — Legacy Supabase API keys are being retired; production still depends on one
 
-**Status:** **REMEDIATION APPLIED IN BOTH CONTEXTS** — staging 2026-10-22, production
-2026-10-22. Retained as OPEN pending the end-to-end authenticated proof in production (§
-"Verification"), because an unauthenticated probe cannot discriminate this failure mode.
-Identified 2026-10-22 while attempting the deployed R-005/R-006 verification.
+**Status:** **CLOSED 2026-10-22** — remediated in both contexts and operator-confirmed end to
+end on production. Identified 2026-10-22 while attempting the deployed R-005/R-006 verification.
 **Owner:** Shri — interim accountable owner.
 
 ### What was found
@@ -780,15 +778,24 @@ it in `page-85467fe212e3974c.js` and found no publishable key. `/auth/login`,
 *Rollback exists but is time-limited:* restoring the legacy key works only while Supabase
 keeps it enabled — which is the reason for acting before it is disabled rather than after.
 
-**Verification gap (why this stays OPEN).** No real authenticated sign-in has been exercised
-against production. The publishable key is proven valid for the auth operations the app
-performs and is proven present in the deployed bundle, but that a production user can complete
-a sign-in and reach a protected route is **not yet observed**. This gap is inherent to the
-control: R-014's failure mode presents as an *authorisation redirect*, so an anonymous request
-and an authentication-broken request are **indistinguishable from outside** — there is no
-unauthenticated probe that can discriminate them, which is exactly why the original breakage
-went unnoticed for three days. Closing it needs a genuine session: the operator signing in
-through the UI, or authorisation to mint one via a temporary production test account.
+**End-to-end verification — operator-confirmed 2026-10-22.** The operator signed in through the
+UI on production and **the dashboard loaded with their own data**. Recorded as an **operator
+observation**, not an instrumented measurement: what the agent measured independently is that
+`/dashboard` returns **307 → `/auth/login`** without a session (so reaching it requires a valid
+session) and that `middleware.ts:138` sends authenticated users *to* `/dashboard`. Those
+corroborate the observation; they are not a substitute for it.
+
+*Why it could not be verified instrumentally.* R-014's failure mode presents as an
+**authorisation redirect**, so an anonymous request and an authentication-broken request are
+**indistinguishable from outside** — there is no unauthenticated probe that can discriminate
+them, which is exactly why the original staging breakage went unnoticed for three days. The
+intermediate evidence (key valid for the app's auth operations; key present in the deployed
+bundle) was necessary but **not sufficient**, and was not written up as verification before the
+sign-in was confirmed. **R-014 is closed.**
+
+*Note:* pasting `https://app.bitxbit.com.au/dashboard` into a chat or link-preview tool returns
+no content, because the route requires a session. An empty extraction there is **not** evidence
+about whether authentication works.
 
 ### Why this is recorded as a risk, not an incident
 
@@ -916,6 +923,6 @@ Options, in order of preference:
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
-| **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **REMEDIATION APPLIED IN BOTH CONTEXTS** (staging + production, 2026-10-22) — production re-pointed to the publishable key while its legacy key was still enabled, and the deployed bundle verified to carry it (legacy JWT now in 0 of 15 chunks). **Retained OPEN pending an end-to-end authenticated sign-in**, which no unauthenticated probe can substitute for. | Shri (interim) | New |
+| **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
 
 **Nothing in this register is closed by the ownership assignment.**
