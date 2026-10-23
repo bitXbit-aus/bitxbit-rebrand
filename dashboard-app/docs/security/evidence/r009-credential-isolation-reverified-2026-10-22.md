@@ -61,6 +61,33 @@ in `stats.errors` and falls through to the keyless Dexscreener fallback at `rout
 D4 harness asserts only that `/api/token-stats` returns **200** (`staging-smoke-test.ts:560-567`)
 and does not assert `stats.errors` is empty, so the change does not weaken D4.
 
+## 2b. Deployed verification of the `BIRDEYE_API_KEY` removal
+
+Measured on real preview deploys, not inferred from the code:
+
+| Check | dp37 *(key present)* | dp38 *(key removed)* |
+|---|---|---|
+| `/api/token-stats` status | **200** | **200** |
+| `errors` | `[]` | `["BIRDEYE_API_KEY not configured", "RPC holder count failed"]` |
+| `holders` | `0` | `null` |
+| `price` / `liquidity` | `null` / `null` | `null` / `null` |
+| D4 harness | — | **all 6 checks pass**, incl. `public API health and rate-limit headers` |
+
+**A finding worth recording.** The preview endpoint was already returning **meaningless** data: for
+the devnet mint (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, the standard devnet USDC mint),
+`price` and `liquidity` were `null` and `holders` was **`0`** — a Birdeye mainnet lookup against a
+devnet mint. `0` reads like real data; `null` plus an explicit reason is more honest. The removal
+therefore improves legibility rather than removing working functionality.
+
+**`RPC holder count failed` is pre-existing, not introduced here.** `route.ts:139-146` counts
+holders via Solana RPC whenever `stats.holders` is still `null` — independent of Birdeye. On dp37
+that path was skipped only because Birdeye had supplied the (meaningless) `0`.
+
+**Harness-invocation note:** the D4 wrapper reads `D4_APP_URL`, *not* `STAGING_APP_URL`; passing the
+latter silently ran the suite against the default `deploy-preview-31`. The first run was therefore
+invalid and was re-run with the correct variable. Recorded because a harness that reports green
+against the wrong target is the same class of defect as a harness that asserts nothing.
+
 ## 3. `NEXT_PUBLIC_APP_URL` — reclassified, not a credential exposure
 
 The register lists it as scoped `all`. It is **identical** across contexts, and that is

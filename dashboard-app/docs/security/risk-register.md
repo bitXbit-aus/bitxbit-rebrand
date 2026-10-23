@@ -534,6 +534,9 @@ from `deploy-preview` and `branch-deploy` only (production unchanged). Removal r
 staging value because previews are devnet-scoped and Birdeye serves **mainnet** data — the key
 was useless there as well as exposed; the route records `"BIRDEYE_API_KEY not configured"` and
 falls through to the keyless Dexscreener fallback, and D4 asserts only a 200 on that endpoint.
+**Verified on real deploys:** `deploy-preview-38` returns **200** with the key absent and **all 6
+D4 checks pass**; the prior preview returned `holders: 0` for a devnet mint, which reads like real
+data and is not — so the change improves legibility rather than removing working functionality.
 
 **RECLASSIFIED — `NEXT_PUBLIC_APP_URL`.** It is identical across contexts, but it is a
 `NEXT_PUBLIC_*` value compiled into the client bundle and therefore **public by design**, and the
