@@ -591,19 +591,54 @@ branch-deploy contexts staging values or none. Evidence:
 
 ## R-010 — Secret values are not marked secret
 
-**Status:** OPEN. **Severity:** medium-high. **Owner:** Shri — interim accountable owner.
+**Status:** **APPLIED 2026-10-22** — both high-value secrets flagged; deployed verification
+outstanding (§ below). **Severity:** medium-high. **Owner:** Shri — interim accountable owner.
 
-`is_secret` is **false on every variable**, including `AIRDROP_WALLET_PRIVATE_KEY`
-and `SUPABASE_SERVICE_ROLE_KEY`. Values marked secret are masked in the Netlify UI
-and withheld from API reads; these are not — the audit read the treasury private
-key over the API with no privilege beyond site read access, and it appears in
-plaintext in the dashboard.
+**Both high-value secrets are now `is_secret: true` and read back masked:**
 
-**Required action:** mark all credential variables `is_secret: true`. Note this is
-adjacent to R-009: marking secrets is necessary but does **not** fix the
-preview-context exposure, which is a scoping problem.
+| Variable | Before | After |
+|---|---|---|
+| `AIRDROP_WALLET_PRIVATE_KEY` | `is_secret=True`, no `post_processing` | **already correct — unchanged** |
+| `SUPABASE_SERVICE_ROLE_KEY` | `is_secret=False`, `post_processing` present | **`is_secret=True`**, `post_processing` dropped |
 
-**Tracked as NA-9.**
+Every other variable remains `is_secret=False`, which is correct — `NEXT_PUBLIC_*` values are
+compiled into the client bundle by design and must never be flagged.
+
+**The original entry was outdated.** It recorded "`is_secret` is false on **every** variable";
+`AIRDROP_WALLET_PRIVATE_KEY` had already been flagged, with `post_processing` already removed. Only
+the service-role key actually needed work.
+
+**Why the CLI silently no-ops — root cause found.** `netlify env:set KEY --secret` printed
+`Set environment variable … as a secret` **twice** while `getEnvVars` kept reporting
+`is_secret=False` and the value stayed readable. Driving the same update through the API surfaced
+what the CLI hides:
+
+```
+HTTP 422 — {"code":422,"message":"Secrets are not allowed to run in 'post_processing' scopes."}
+```
+
+That is the constraint this entry predicted. **The working path** is
+`PUT /accounts/{account_id}/env/{key}?site_id={site_id}` with the full body and
+**`post_processing` removed from `scopes`**. All four contexts were preserved with their values
+intact. Readback now masks the value (`****************a2t2`).
+
+**Branch deploys never build here, so part of this entry's rationale is moot.** Across the last
+**100** deploys: `production` 58, `deploy-preview` 42, **`branch-deploy` 0**. The warning that
+secrets "can be masked inside functions on branch deploys" does not apply to this site. This also
+narrows R-009: the "arbitrary branch code" path is **PR previews**, not branch deploys.
+
+**Outstanding — deployed verification.** The flag resolves at **deploy time**, so nothing currently
+deployed is affected yet. It must be confirmed that (a) the masked value still reaches the
+**function runtime** and (b) service-role routes still work (`/api/public/offers`,
+`/api/public/transparency`, `/api/token-stats` — all use `createServiceClient()`, and all asserted
+by D4). Preview first, then production. Until then this is *applied*, **not verified**.
+
+**Incident recorded here.** `netlify env:list --json` prints **unflagged** values in full, so the
+service-role key value entered this session's transcript before the flag was applied. **Rotation is
+approved.** Note the ordering consequence: the replacement value must be written with the secret
+flag **retained**, or the exposure is simply recreated.
+
+Evidence: `evidence/r010-is-secret-flagging-2026-10-22.md`.
 
 ---
 
@@ -956,7 +991,7 @@ Options, in order of preference:
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). | Shri (interim) | **NA-8** ✅ |
-| R-010 | Secrets not marked secret | **OPEN** — deliberately withheld (see NA-9) | Shri (interim) | NA-9 |
+| R-010 | Secrets not marked secret | **APPLIED 2026-10-22** — both high-value secrets flagged; values masked. The CLI path silently no-ops (422 on `post_processing`); fixed via the API. **Deployed verification outstanding.** | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
