@@ -938,7 +938,7 @@ limiting) or R-006 (request-size) controls — those are behind authentication a
 | **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | ✅ **DONE AND VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per user (`lib/action-rate-limit.ts`); refusals returned, not thrown; 146/146 tests, **8/8 mutations detected**. **Enforcement observed on a deployed preview**: 6 allowed, #7 refused with HTTP 200 and a legible countdown; counter seen in the shared store keyed on the user id. See `evidence/r005-server-action-rate-limiting-2026-10-22.md` and `evidence/r005-r006-deployed-verification-2026-10-22.md`. |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | ✅ **DONE AND VERIFIED IN A DEPLOYMENT 2026-10-22** — boundary explicit in `next.config.mjs` and a tested policy module; upload refusals legible. 158/158 tests, **7/7 mutations detected**. **Verified on a deployed preview**: a 4 MB file refused with HTTP 200 and a legible message naming limit and actual size; type check refused likewise; valid upload completed as a control. See `evidence/r006-request-size-limits-2026-10-22.md` and `evidence/r005-r006-deployed-verification-2026-10-22.md`. |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
-| **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
+| **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | ✅ **CLOSED 2026-10-23 — already satisfied, no change made.** Verified: **all 41 PRs** (every one → `main`) carry the required "Tests, migration replay, and build" check on their head sha, and `main` requires it (`strict: true`). The recorded diagnosis was wrong — `pull_request.branches` filters on the **base**, so `branches: [main]` already covered every PR; the original gap was the workflow file existing only on PR #1's branch, fixed when PR #1 merged it to `main` (2026-10-20). The proposed diff is a no-op for `pull_request` and would **add** duplicate `push` runs. Detail below; see `evidence/na6-ci-trigger-resolution-2026-10-23.md`. |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
 | **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19**, re-verified 2026-10-22. Re-scoping 20/20; treasury rotated, verified on-chain and by a real production airdrop; service key rotated, verified **by use**. **2026-10-22:** all six credentials re-confirmed isolated by per-context hash; a **missed seventh variable (`BIRDEYE_API_KEY`)** was found still shared and closed. **Not independently verified:** the legacy `service_role` deactivation claim (no secret-key listing in the available API surface) — carried as a claim. |
 | **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. **That precondition is now MET (D4 satisfied 2026-10-22)** — a deployment can be observed, so this is actionable and awaiting owner authorisation, not blocked. |
@@ -950,33 +950,33 @@ limiting) or R-006 (request-size) controls — those are behind authentication a
 | **NA-15** | A degraded rate-limit store is undetectable in production | **R-004** | ✅ **FIXED AND VERIFIED 2026-10-21.** The fallback paths called `console.error`, but Netlify's request logs return `logs: []` even for requests with `has_function_invocation: true`, so a degraded store could not report its own degradation. **Fix:** a degradation registry (`lib/rate-limit-health.ts`, typed reasons + running count + timestamp) exposed on **`GET /api/health/rate-limit`** — **503 when degraded**, `cache-control: no-store`, `x-ratelimit-degraded` header, no credentials and no raw error text — plus the same header on the 429 path. **Verified:** the degraded branch was **executed against the real route file** (503, `backend: memory`, `lastReason: no-shared-store`) since production is healthy and cannot show it; live production reports `200 / degraded: false / backend: supabase` and is not cached (distinct `checkedAt` across calls); driving real traffic produced **no false positive**. 125/125 tests, **8/8 mutations detected**. **Limitation recorded:** the registry is per-process, so a probe observes one instance — adequate because the dominant failure modes are global, but not a substitute for watching counter rows advance. See `evidence/na15-degradation-visibility-2026-10-21.md`. |
 | **NA-16** | `lib/supabase/server.ts` may share NA-14's fetch-caching flaw | **NA-14** | ✅ **MEASURED 2026-10-22 — NOT AFFECTED. No fix needed.** Measured in production with a temporary instrument (PR #24/#27) that read through the **real** server client while a raw `fetch` with `cache: "force-cache"` acted as a **positive control**; upstream requests were counted in Supabase's own edge logs, where the SSR client identifies itself as `supabase-ssr/0.1.0`. Over 5 app calls: `GET /rest/v1/users?select=id&limit=1` → **10 upstream (1:1, not cached)**; `POST /rest/v1/rpc/is_admin` → **10 (1:1, not cached)** — covering the mutating RPCs `lib/actions.ts` drives through this client (reward approval, payout finalization); control → **1 (cached)**, so the method demonstrably detects caching and the negative result is meaningful. Instrument removed. **Side finding:** this falsifies the general mechanism recorded for NA-14 — see that row. See `evidence/na16-server-client-fetch-caching-2026-10-22.md`. |
 
-### NA-6 detail
+### NA-6 detail — CLOSED 2026-10-23 (already satisfied; the recorded diagnosis was wrong)
 
-The workflow triggers only on `main` and `security/phase-1-hardening`, so PR #2 and
-PR #3 get **no CI**. The fix is a two-line change to `.github/workflows/`, but the
-automation token **lacks `workflow` scope** and the push is rejected.
+**Resolution: no change made, no credential expansion needed.** The register recorded that "the
+workflow triggers only on `main` and `security/phase-1-hardening`, so PR #2 and PR #3 get no CI",
+and proposed adding `security/**` to the trigger. Measured against the live repo and GitHub
+Actions on 2026-10-23: **every PR to `main` already runs CI on its merge candidate** — including
+PR #2 and PR #3 — and `main` **requires** the check (`strict: true`).
 
-Options, in order of preference:
+- **All 41 PRs** carry the `Tests, migration replay, and build` check on their head sha (queried
+  per-PR via `/commits/{sha}/check-runs`). PR #2 has 2 `pull_request` runs, PR #3 has 2, PR #41
+  has 1 — all `success`.
+- **`pull_request.branches` filters on the BASE branch**, so `branches: [main]` already covered
+  every PR (40+ `pull_request` runs have `security/*` head branches). The proposed `pull_request`
+  addition is a **no-op**; the proposed `push` addition (`security/**`) would **add** duplicate
+  runs — the opposite of "without unnecessarily expanding".
+- The real cause of the original gap was **not the trigger**: the workflow file existed only on
+  PR #1's branch. For `pull_request`, GitHub runs the workflow in the PR's merge ref, so PR #1
+  (whose head held the file) ran from creation, while PR #2/#3 (neither head nor base held it) did
+  not — until **PR #1 merged the file to `main` at `2026-10-20T06:10:53Z`**. PR #2's first run is
+  five minutes later (`06:16:02Z`), and every PR to `main` has run CI since. **The proposed diff
+  would not have fixed the original symptom.**
 
-1. **The owner applies the two-line diff via the GitHub web UI.** No credential
-   expansion at all; ~30 seconds.
-2. A **fine-grained PAT scoped to this single repository** with only
-   `Workflows: write`, used once and revoked.
-3. Broadening the existing token's scopes — **not recommended**; this is the
-   "unnecessary expansion" the instruction excludes.
-
-```diff
- on:
-   push:
-     branches:
-       - main
--      - security/phase-1-hardening
-+      - "security/**"
-   pull_request:
-     branches:
-       - main
-+      - "security/**"
-```
+**Residual (not a gap today):** PRs targeting a non-`main` base (stacked PRs) would be uncovered;
+**none exist** — all 41 target `main`. If stacked PRs are ever used, add the base branch to
+`pull_request.branches` (one line, no credential expansion).
+**Also stale:** the token "lacks `workflow` scope" — as of 2026-10-23 it carries `repo` **and**
+`workflow`. See `evidence/na6-ci-trigger-resolution-2026-10-23.md`.
 
 ---
 
