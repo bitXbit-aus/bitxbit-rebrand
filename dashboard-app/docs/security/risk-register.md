@@ -714,8 +714,10 @@ the wrong project. Every remediation command passed `--site` explicitly for this
 
 ## R-014 — Legacy Supabase API keys are being retired; production still depends on one
 
-**Status:** OPEN — **HIGH** (availability). Identified 2026-10-22 while attempting the
-deployed R-005/R-006 verification.
+**Status:** **REMEDIATION APPLIED IN BOTH CONTEXTS** — staging 2026-10-22, production
+2026-10-22. Retained as OPEN pending the end-to-end authenticated proof in production (§
+"Verification"), because an unauthenticated probe cannot discriminate this failure mode.
+Identified 2026-10-22 while attempting the deployed R-005/R-006 verification.
 **Owner:** Shri — interim accountable owner.
 
 ### What was found
@@ -727,7 +729,7 @@ nothing detected it for three days.
 | Project | Legacy anon key | Consequence |
 |---|---|---|
 | `bitXbit-Staging` (`luqrwhgjtiyfmeawbtmp`) | **`disabled: true`** — disabled `2026-10-19T06:18:33Z` | **Authentication was broken on every preview deploy** |
-| Production (`flasgvendiiasuixeqzu`) | still enabled | Works today; **would fail identically if disabled** |
+| Production (`flasgvendiiasuixeqzu`) | was still enabled | Worked until 2026-10-22; **re-pointed to the publishable key before it could fail** |
 
 **How it presented:** `/admin/*` and `/dashboard/*` returned `307 → /auth/login` for every
 request, including authenticated ones. `supabase.auth.getUser()` in the middleware fails when
@@ -747,11 +749,46 @@ the `deploy-preview` and `branch-deploy` contexts **only**. The `production` con
 written to: verified by sha256 before and after (`52bad0d3306368c4`, unchanged). Environment
 variables resolve at deploy time, so this takes effect on the next preview build.
 
-**Production — NOT applied. Requires a separate owner decision.** Production still runs a
-legacy anon key. Migrating means replacing `NEXT_PUBLIC_SUPABASE_ANON_KEY` in the `production`
-context with the production project's publishable key, then redeploying. The value is
-client-visible, so the change is low-risk in itself, but it is a production release and should
-be done deliberately rather than opportunistically.
+**Production — APPLIED 2026-10-22** (owner-authorised). See
+`evidence/r014-production-anon-key-2026-10-22.md`.
+
+*Pre-flight, all measured before the change:* the live legacy key was confirmed identical to
+the one fetched from Supabase (sha256 `52bad0d3306368c4`, len 208); Supabase reported it
+`disabled: false`, so this was **preventative**; both the legacy and the publishable key
+returned HTTP 200 on production `/auth/v1/settings`; both returned the **identical**
+`400 invalid_credentials` response on a password-grant request, proving the publishable key
+is accepted for the exact operation the login form performs (an *invalid* key returns
+`401 Invalid API key` — a different response); and **no code parses the anon key as a JWT**,
+it is only passed to `createClient`.
+
+*Applied:* `NEXT_PUBLIC_SUPABASE_ANON_KEY` set in the **`production` context only**, via the
+CLI from a file so the value never entered an agent tool call, and deliberately **not**
+flagged `--secret` (`NEXT_PUBLIC_*` is compiled into the client bundle by design, and the
+Secrets Controller flag is irreversible). Per-context scoping verified by hash: production
+`52bad0d3306368c4` → **`c26787289bfc0ab3`**; `deploy-preview` and `branch-deploy` **unchanged**
+at `05709071c2150bb6`.
+
+*Deployed:* env vars resolve at deploy time, so a rebuild was triggered on the same commit
+(`5bdd9bab`) → deploy `6adabec7…`, **ready**.
+
+*Verified in the deployment:* the login page's chunk now contains the publishable key
+(`app/auth/login/page-602b8b6ba6e4a1cd.js`) and the **legacy JWT is present in 0 of 15
+chunks**, including across `/dashboard` and `/` — where before the deploy the same scan found
+it in `page-85467fe212e3974c.js` and found no publishable key. `/auth/login`,
+`/api/health/rate-limit` and `/api/token-stats` all return 200.
+
+*Rollback exists but is time-limited:* restoring the legacy key works only while Supabase
+keeps it enabled — which is the reason for acting before it is disabled rather than after.
+
+**Verification gap (why this stays OPEN).** No real authenticated sign-in has been exercised
+against production. The publishable key is proven valid for the auth operations the app
+performs and is proven present in the deployed bundle, but that a production user can complete
+a sign-in and reach a protected route is **not yet observed**. This gap is inherent to the
+control: R-014's failure mode presents as an *authorisation redirect*, so an anonymous request
+and an authentication-broken request are **indistinguishable from outside** — there is no
+unauthenticated probe that can discriminate them, which is exactly why the original breakage
+went unnoticed for three days. Closing it needs a genuine session: the operator signing in
+through the UI, or authorisation to mint one via a temporary production test account.
 
 ### Why this is recorded as a risk, not an incident
 
@@ -879,6 +916,6 @@ Options, in order of preference:
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
-| **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **OPEN — HIGH (availability).** Staging's legacy anon key was disabled 2026-10-19, breaking auth on all previews (fixed 2026-10-22); **production still runs a legacy anon key** | Shri (interim) | New |
+| **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **REMEDIATION APPLIED IN BOTH CONTEXTS** (staging + production, 2026-10-22) — production re-pointed to the publishable key while its legacy key was still enabled, and the deployed bundle verified to carry it (legacy JWT now in 0 of 15 chunks). **Retained OPEN pending an end-to-end authenticated sign-in**, which no unauthenticated probe can substitute for. | Shri (interim) | New |
 
 **Nothing in this register is closed by the ownership assignment.**
