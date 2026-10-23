@@ -45,6 +45,13 @@ values intact — the update sent each value back with its existing `id`.
 Readback confirms the effect: `env:get SUPABASE_SERVICE_ROLE_KEY --context production` now returns
 `****************a2t2` (20 chars, masked) instead of the 41-char key.
 
+> **CORRECTION 2026-10-23.** The `****************a2t2` above is the **staging** context's mask, not
+> production's — this readback was misattributed. The production context's mask hashed `d4871bb859`
+> (tail `****************3Sit`); the value hash recorded for production in
+> `r009-credential-isolation-reverified-2026-10-22.md` is `459ae3dc9f`, and `a2t2` matches the **preview**
+> value (`14eaa80ac7`). The staging key was left intact. See
+> `r009-service-role-key-rotation-2026-10-23.md` §2.
+
 **Every other variable remains `is_secret=False`**, which is correct: `NEXT_PUBLIC_*` values are
 compiled into the client bundle by design and must never be flagged.
 

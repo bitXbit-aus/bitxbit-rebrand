@@ -551,11 +551,34 @@ credential-exposure surface**; the table row below should not be read as implyin
 - the **legacy `service_role` key deactivation** (claimed in NA-8) was **not independently
   verified** — the Supabase MCP surface exposes only publishable and legacy-**anon** keys, with no
   secret-key listing. Carried as a claim, not a measurement;
-- **rotation** is consistent with the current state but not proven by it: what is confirmed is
-  that current production values differ from preview values, not that previously-exposed values
-  are retired.
+- **rotation** — **COMPLETED 2026-10-23.** The production service-role key in the Netlify
+  production context was replaced and the previously-live key was **revoked**, then production was
+  **re-verified after revocation**. See §"Rotation completed — 2026-10-23" below.
 
 Evidence: `evidence/r009-credential-isolation-reverified-2026-10-22.md`.
+
+### Rotation completed — 2026-10-23 (zero-outage cutover)
+
+The leaked production service-role key was rotated and the old key **revoked**, with production
+**re-verified after revocation** — the step that proves the cutover. Full record:
+`evidence/r009-service-role-key-rotation-2026-10-23.md`.
+
+- **New key live**: the Netlify production context was updated via the single-value endpoint
+  (`PATCH .../env/SUPABASE_SERVICE_ROLE_KEY`, `{context:"production",value:…}`) — **not** a full `PUT`,
+  because with the variable now `is_secret` a `PUT` would have written masked strings back over the other
+  contexts. `is_secret` **retained**; `production` mask `d4871bb859` → `f2c8a17069`; `dev` /
+  `branch-deploy` / `deploy-preview` untouched.
+- **Deployed** `6adae4cb` on the unchanged `main` HEAD `bc34a017` (no code change).
+- **Post-revoke verification**: `/api/health/rate-limit` **200 `shared:true, backend:supabase`**,
+  `/api/public/offers` 200 (real data), plus `/api/public/transparency`, `/auth/login`, `/api/token-stats`
+  all 200 — so the **new** key authenticates, independently of the revoked one.
+- **CORRECTION to the record** (same defect class as the other stale-prose findings): the production
+  masked readback previously recorded as `****************a2t2` was a **misattribution** — `a2t2` is the
+  **staging** key (it probes staging 200 / production 401). The production key tailed **`3Sit`**
+  (`sha256("****************a2t2")[:10] = e79dc94d5e`, i.e. the *preview* mask, whereas the production
+  mask hashed `d4871bb859` → tail `3Sit`). The staging `a2t2` key was deliberately left intact.
+- **Residual (owner decision):** two further production secret keys, **`xvxk`** and a default **`TLo1`**,
+  remain valid and were **not** verified as unused.
 
 Every variable present in the `production` context is **also present in
 `branch-deploy` and `deploy-preview` with the same value**, or is scoped to `all`:
@@ -620,7 +643,9 @@ HTTP 422 — {"code":422,"message":"Secrets are not allowed to run in 'post_proc
 That is the constraint this entry predicted. **The working path** is
 `PUT /accounts/{account_id}/env/{key}?site_id={site_id}` with the full body and
 **`post_processing` removed from `scopes`**. All four contexts were preserved with their values
-intact. Readback now masks the value (`****************a2t2`).
+intact. Readback now masks the value. *(The value recorded here as `****************a2t2` was the
+**staging** context's mask — a misattribution; the production mask was `****************3Sit`. Corrected
+2026-10-23, see R-009 §"Rotation completed — 2026-10-23".)*
 
 **Branch deploys never build here, so part of this entry's rationale is moot.** Across the last
 **100** deploys: `production` 58, `deploy-preview` 42, **`branch-deploy` 0**. The warning that
@@ -639,6 +664,9 @@ flag controls read-back through the API/UI, not delivery to the runtime.
 service-role key value entered this session's transcript before the flag was applied. **Rotation is
 approved.** Note the ordering consequence: the replacement value must be written with the secret
 flag **retained**, or the exposure is simply recreated.
+
+**Rotation completed 2026-10-23** — the leaked production key was revoked and production re-verified
+*after* revocation; see R-009 §"Rotation completed — 2026-10-23".
 
 Evidence: `evidence/r010-is-secret-flagging-2026-10-22.md`.
 
@@ -940,7 +968,7 @@ limiting) or R-006 (request-size) controls — those are behind authentication a
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
-| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19**, re-verified 2026-10-22. Re-scoping 20/20; treasury rotated, verified on-chain and by a real production airdrop; service key rotated, verified **by use**. **2026-10-22:** all six credentials re-confirmed isolated by per-context hash; a **missed seventh variable (`BIRDEYE_API_KEY`)** was found still shared and closed. **Not independently verified:** the legacy `service_role` deactivation claim (no secret-key listing in the available API surface) — carried as a claim. |
+| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19**, re-verified 2026-10-22. Re-scoping 20/20; treasury rotated, verified on-chain and by a real production airdrop; service key rotated, verified **by use**. **2026-10-22:** all six credentials re-confirmed isolated by per-context hash; a **missed seventh variable (`BIRDEYE_API_KEY`)** was found still shared and closed. **Not independently verified:** the legacy `service_role` deactivation claim (no secret-key listing in the available API surface) — carried as a claim. **2026-10-23:** the leaked production service-role key was rotated (new key live, old key **revoked**) and production **re-verified after revocation** — the rotation half of NA-8 is now closed. |
 | **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. **That precondition is now MET (D4 satisfied 2026-10-22)** — a deployment can be observed, so this is actionable and awaiting owner authorisation, not blocked. |
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
 | **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
@@ -992,8 +1020,8 @@ Options, in order of preference:
 | R-006 | No explicit request-size limits | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; a deployed preview refused a genuine 4 MB file with a returned, legible `{error}` (HTTP 200, not 500) | Shri (interim) | NA-4 done |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
-| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). | Shri (interim) | **NA-8** ✅ |
-| R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Remaining: rotate the exposed service-role key. | Shri (interim) | NA-9 |
+| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). **Leaked service-role key rotated 2026-10-23** — new key live, old key revoked, production re-verified after revocation. | Shri (interim) | **NA-8** ✅ |
+| R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Rotation of the exposed service-role key **completed 2026-10-23** — new key live, leaked key revoked, production re-verified after revocation. | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
