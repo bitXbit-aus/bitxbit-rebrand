@@ -510,16 +510,52 @@ hardening step.
 
 ## R-009 — Production credentials exposed to deploy previews and branch deploys
 
-**Status:** OPEN — **CRITICAL** (identified 2026-10-19). **Preview exposure path CLOSED
-2026-10-19** by re-scoping preview/branch-deploy to staging + devnet. **The deploy-time
-verification that was outstanding under D4 was completed 2026-10-22:** all **34** preview
-deploys — every one created since the re-scoping — are staging-scoped (devnet mint; staging
-Supabase ref in the client bundle with a production positive control; staging data), with
-**zero** production-wired and none inconclusive. See §D4 status.
-**What remains open is the owner's decision on the `is_secret` flagging (NA-9/R-010), not
-an unverified exposure path** — closure is recommended for the owner's sign-off, not taken
-unilaterally.
+**Status:** **CRITICAL path CLOSED and independently re-verified 2026-10-22.** Re-scoping was
+confirmed by per-context hash measurement, and **one variable the original audit missed was
+found and closed** (§ Re-verification). Three items are recorded rather than fixed.
+**What remains is the owner's decision on the `is_secret` flagging (NA-9/R-010)** — not an
+unverified exposure path. Owner sign-off on closure was given 2026-10-22.
 **Owner:** Shri — interim accountable owner.
+
+### Re-verification 2026-10-22
+
+Re-measured independently rather than trusting this entry's own claims. Every value fetched per
+context and compared by sha256. **All six production credentials are now isolated** from
+`deploy-preview` / `branch-deploy`: `AIRDROP_WALLET_PRIVATE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+`NEXT_PUBLIC_SUPABASE_URL`, `BITXBIT_TOKEN_MINT`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and
+`SOLANA_RPC_URL` all differ from production. Decoded, previews resolve to staging
+(`luqrwhgjtiyfmeawbtmp.supabase.co`), a **devnet** mint and `api.devnet.solana.com`.
+
+**FOUND — a variable the audit's table did not list.** `BIRDEYE_API_KEY` was still **identical**
+across `production`, `deploy-preview` and `branch-deploy` (`4faa22abd2`). `app/api/token-stats/route.ts:6`
+reads it and sends it as `X-API-KEY`, so **any branch pushed to the public repo could read and
+exfiltrate it** — the same defect class, lower-impact credential. **Closed 2026-10-22:** unset
+from `deploy-preview` and `branch-deploy` only (production unchanged). Removal rather than a
+staging value because previews are devnet-scoped and Birdeye serves **mainnet** data — the key
+was useless there as well as exposed; the route records `"BIRDEYE_API_KEY not configured"` and
+falls through to the keyless Dexscreener fallback, and D4 asserts only a 200 on that endpoint.
+**Verified on real deploys:** `deploy-preview-38` returns **200** with the key absent and **all 6
+D4 checks pass**; the prior preview returned `holders: 0` for a devnet mint, which reads like real
+data and is not — so the change improves legibility rather than removing working functionality.
+
+**RECLASSIFIED — `NEXT_PUBLIC_APP_URL`.** It is identical across contexts, but it is a
+`NEXT_PUBLIC_*` value compiled into the client bundle and therefore **public by design**, and the
+sharing is **deliberate** (`app/auth/callback/route.ts:15` — "always redirect to the canonical app
+URL, not the origin of the magic link"). It carries no secret and is **not part of the
+credential-exposure surface**; the table row below should not be read as implying otherwise.
+
+**RECORDED, not fixed:**
+- the `dev` context has `NEXT_PUBLIC_SUPABASE_URL` = the **production** project while its
+  `SUPABASE_SERVICE_ROLE_KEY` differs from production's — a half-migrated context. Inconsistent,
+  not an exposure (the mismatched key will not authenticate);
+- the **legacy `service_role` key deactivation** (claimed in NA-8) was **not independently
+  verified** — the Supabase MCP surface exposes only publishable and legacy-**anon** keys, with no
+  secret-key listing. Carried as a claim, not a measurement;
+- **rotation** is consistent with the current state but not proven by it: what is confirmed is
+  that current production values differ from preview values, not that previously-exposed values
+  are retired.
+
+Evidence: `evidence/r009-credential-isolation-reverified-2026-10-22.md`.
 
 Every variable present in the `production` context is **also present in
 `branch-deploy` and `deploy-preview` with the same value**, or is scoped to `all`:
@@ -530,7 +566,8 @@ Every variable present in the `production` context is **also present in
 | `NEXT_PUBLIC_SUPABASE_URL` | **all** | Resolves to the **production** project |
 | `AIRDROP_WALLET_PRIVATE_KEY` | production, branch-deploy, deploy-preview | **Production treasury signing key**, identical across all three |
 | `BITXBIT_TOKEN_MINT` | production, branch-deploy, deploy-preview | Production mint, identical across all three |
-| `NEXT_PUBLIC_APP_URL` | **all** | `https://app.bitxbit.com.au` — previews identify as production |
+| `NEXT_PUBLIC_APP_URL` | **all** | `https://app.bitxbit.com.au` — previews identify as production. **Reclassified 2026-10-22: public by design, deliberate, not a credential exposure.** |
+| `BIRDEYE_API_KEY` | *(missing from this audit)* | **Missed by the original audit; found 2026-10-22** — was identical across all three contexts, reachable from arbitrary branch code. **Closed 2026-10-22** (unset from preview/branch-deploy). |
 
 **Consequence:** a deploy preview or branch deploy executes **arbitrary branch
 code** with the **production treasury private key** and the **production
@@ -866,7 +903,7 @@ limiting) or R-006 (request-size) controls — those are behind authentication a
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
 | **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
 | **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
-| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19.** Re-scoping 20/20. Treasury rotated, verified on-chain, then proven end-to-end by a real production airdrop. Service key rotated, verified **by use** (200 vs production / 401 vs staging), proven by the same airdrop. Legacy `service_role` key deactivated; legacy `anon` retained so nobody was signed out. |
+| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19**, re-verified 2026-10-22. Re-scoping 20/20; treasury rotated, verified on-chain and by a real production airdrop; service key rotated, verified **by use**. **2026-10-22:** all six credentials re-confirmed isolated by per-context hash; a **missed seventh variable (`BIRDEYE_API_KEY`)** was found still shared and closed. **Not independently verified:** the legacy `service_role` deactivation claim (no secret-key listing in the available API surface) — carried as a claim. |
 | **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. **That precondition is now MET (D4 satisfied 2026-10-22)** — a deployment can be observed, so this is actionable and awaiting owner authorisation, not blocked. |
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
 | **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
@@ -918,7 +955,7 @@ Options, in order of preference:
 | R-006 | No explicit request-size limits | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; a deployed preview refused a genuine 4 MB file with a returned, legible `{error}` (HTTP 200, not 500) | Shri (interim) | NA-4 done |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
 | R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
-| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19** — forward path closed, preview rebuilt staging-scoped, **all 7 production-wired deploys deleted and verified 404** | Shri (interim) | **NA-8** ✅ |
+| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). | Shri (interim) | **NA-8** ✅ |
 | R-010 | Secrets not marked secret | **OPEN** — deliberately withheld (see NA-9) | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
