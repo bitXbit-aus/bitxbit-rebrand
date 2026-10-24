@@ -159,7 +159,8 @@ Middleware security headers intact (`x-frame-options: DENY`, `x-content-type-opt
 **Resolved since this document was written.** The authenticated half was verified on 2026-10-24; see
 `evidence/r007-authenticated-verification-2026-10-24.md`. Both items listed here as blockers are now
 measured: the session `setAll` refresh path (on the 200 branch) and the full role/status matrix —
-**19/19 on a deployed preview** (the gate has grown as review findings were closed).
+**21/21 on a deployed preview** (the gate has grown as review findings were closed; earlier counts of
+12/12 and 19/19 were smaller revisions of it).
 
 **1. Independent human review (M8) remains outstanding.** The register's division of authority is
 explicit: self-review by the implementing agent does not satisfy independent review — and this agent
