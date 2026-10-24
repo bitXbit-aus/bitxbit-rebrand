@@ -183,6 +183,20 @@ every issued user JWT** — all users are signed out. Far broader, and avoidable
    ```bash
    netlify env:set SUPABASE_SERVICE_ROLE_KEY "<new-key>" --context production --site $SITE
    ```
+
+   **Use the API, not the CLI, once the variable is `is_secret` (learned 2026-10-23).**
+   `netlify env:set --secret` silently no-ops and is rejected on `post_processing` (R-010). And a
+   full-variable `PUT` is the *wrong* instrument here: with `is_secret` on, `getEnvVars` returns
+   **masked** values for `production` / `deploy-preview` / `branch-deploy` (only `dev` is readable), so a
+   `PUT` writes those masks back and **clobbers the contexts you cannot read**. Update the single context
+   instead:
+
+   ```bash
+   PATCH /api/v1/accounts/{account_id}/env/SUPABASE_SERVICE_ROLE_KEY?site_id={site_id}
+   body: {"context":"production","value":"<new-key>"}     # read from a file; never printed
+   ```
+
+   Verify `is_secret` stayed `true` and every other context's mask hash is unchanged, before and after.
    Also update `NEXT_PUBLIC_SUPABASE_ANON_KEY` **only** if you chose Option 2.
 4. **Deploy** production.
 5. **Verify:** an authenticated read against production; confirm no `401` / `invalid JWT` in
