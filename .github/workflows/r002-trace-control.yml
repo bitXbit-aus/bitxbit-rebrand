@@ -1,0 +1,73 @@
+name: R-002 tracing control
+
+# Keeps the R-002 discriminating control from rotting.
+#
+# WHY THIS EXISTS
+# ---------------
+# scripts/r002-trace-control.py proves that `outputFileTracingExcludes` actually
+# keeps bigint-buffer's vulnerable native addon out of the traced server bundle.
+# It is the only check that is *capable of failing*: lib/dependency-exposure.test.ts
+# asserts only the config SHAPE, and a physical count of `.node` files under `.next`
+# is non-discriminating (0 with the exclusion both ON and OFF). The control runs two
+# full production builds, so it was manual — nothing detected it rotting as
+# next.config.mjs or the dependency layout drifted.
+#
+# Exit codes from the script (all non-zero fail the step):
+#   0 proven discriminating and effective
+#   1 exclusion ineffective
+#   2 inconclusive (fixture never reached the tracer) — treated as FAILURE, not a pass
+#   3 setup problem
+#
+# This job is deliberately NOT one of main's required status checks: main
+# auto-deploys, and a two-build job is too slow to gate every merge. It runs
+# nightly and whenever the config or dependency layout it depends on changes.
+
+on:
+  schedule:
+    # Nightly at 17:00 UTC (~03:00 AEST).
+    - cron: "0 17 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - "security/**"
+    paths:
+      - "dashboard-app/next.config.mjs"
+      - "dashboard-app/package.json"
+      - "dashboard-app/package-lock.json"
+      - "dashboard-app/scripts/r002-trace-control.py"
+      - ".github/workflows/r002-trace-control.yml"
+
+jobs:
+  r002-trace-control:
+    name: R-002 native-addon tracing control
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Confirm bigint-buffer native addon is present
+        # The control refuses (exit 3) if the addon is absent. Fail early with a
+        # clear message rather than letting it look like a control failure.
+        run: |
+          test -f node_modules/bigint-buffer/build/Release/bigint_buffer.node \
+            || { echo "::error::bigint-buffer native addon missing — the control cannot run"; exit 1; }
+
+      - name: Run R-002 tracing control
+        # The script restores the working tree and removes the instrumented .next
+        # on every exit path, and refuses to run if the tree is dirty.
+        run: python3 scripts/r002-trace-control.py
