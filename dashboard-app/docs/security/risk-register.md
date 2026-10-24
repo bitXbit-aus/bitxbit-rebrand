@@ -84,6 +84,7 @@ review control; it does not satisfy a single one of the three blockers above.
 | **D2** | Include **React 19** and the coupled **Supabase SSR + supabase-js** upgrades. Authentication, session persistence, middleware authorisation, and Solana financial operations must pass end-to-end regression tests. | Approved |
 | **D3** | Continue planning and isolated development, but **release in order: Phase 1 → interim Next.js security upgrade → full Next.js 15 migration.** Changes must be separately reviewable and independently approved. | Approved with sequencing |
 | **D4** | A **deployed Netlify staging HTTP test is mandatory**, on a deployment configured exclusively for staging Supabase and Solana devnet, verifying that **no production credentials or resources are involved.** | Approved |
+| **D5** | **Independent review of a release may be satisfied by a two-model independent AI security review**, as a **documented exception** to the independent-**human**-review requirement of M8. Conditions: two genuinely different models reviewing the exact release revision; findings, recommendations and concerns recorded; critical findings addressed and reviews/tests repeated after material changes; the mandatory CI, database-integrity, authentication and Solana-payout testing retained; the middleware redirect-cookie defect fixed in a separate PR; and final evidence presented to the owner for explicit approval. **The human-review condition is WAIVED, NOT SATISFIED** — no release may be described as human-reviewed under this decision. The owner accepts accountability for choosing the alternative. Scope: review step only; it does **not** authorise a merge, deployment or migration. Policy: `release-review-policy.md`. | Approved 2026-10-24 |
 | — | Decisions A (conditional temporary acceptance, R-001) and B (bigint-buffer, R-002) | Approved 2026-10-19 |
 
 ---
@@ -474,9 +475,11 @@ ceiling is documented, not measured; not verified in a deployment.** See
 
 **Status:** **IMPLEMENTED 2026-10-24 (PR #49) — NOT released.** The plan's technical verifications are
 done — the authenticated matrix, and the session `setAll` path **on the 200 branch** — with one gap
-that independent review found and measurement confirmed (below). **Blockers:** independent review
-(M8), which the implementing agent cannot supply (GitHub returns `422` on self-approval), and a
-decision on the redirect-branch cookie defect. Evidence:
+that independent review found and measurement confirmed (below). **Blockers:** independent **human**
+review (M8) — which the implementing agent cannot supply (GitHub returns `422` on self-approval) and
+which is **WAIVED, not satisfied, under owner decision D5** (two-model AI review instead; see
+`release-review-policy.md`) — and the owner's explicit release approval, which D5 requires and which
+has not yet been given. Evidence:
 `evidence/r007-nextjs-15-migration-2026-10-24.md`,
 `evidence/r007-authenticated-verification-2026-10-24.md`,
 `evidence/r007-independent-review-2026-10-24.md`.
@@ -519,7 +522,8 @@ second request: **no silent session loss**. Decoded, the access token changed an
 **rotated**, with the expiry in the future. `@supabase/ssr` treats an undecodable cookie as **absent**
 (i.e. a silent logout), which is precisely what this rules out.
 
-**Recorded, not fixed — found by independent review 2026-10-24, confirmed by measurement.** The
+**FIXED 2026-10-24 (PR #51, carried into this branch) — found by independent review, confirmed by
+measurement.** The
 refresh verification covers the **200 branch only**. On the four middleware **redirect** branches the
 adapter's refreshed cookies are **discarded** — `setAll` writes them onto `response`, but each redirect
 returns a fresh `NextResponse.redirect(...)` that never receives them. Measured with an expired cookie
@@ -528,8 +532,11 @@ and a suspended user: `307 → /auth/login?error=account_inactive` with **`Set-C
 this is not a migration regression — but the "no silent session loss" claim must be read as scoped to
 the 200 branch. **Consequence measured and narrower than first reported:** a replay 16 s later still
 authenticated, so no immediate logout reproduced; the browser simply never receives the refreshed
-session on a redirect path and re-refreshes each request. The fix (carry `response.cookies` onto the
-redirect response) is small and is recommended as its own change.
+session on a redirect path and re-refreshes each request. The fix — `lib/middleware-redirect.ts`, all four branches routed through it — landed in a **separate
+narrowly scoped PR (#51)** per D5, and is carried here because this branch rewrites `middleware.ts`
+and would otherwise revert it. Verified end-to-end: the same probe that returned `Set-Cookie: NONE`
+on a redirect now returns the refreshed cookie, and the session still authenticates. Unit tests are
+mutation-verified (removing the copy fails 2 tests; dropping attributes fails 1).
 
 **Remaining blocker:** **independent review (M8)** — not a technical gap.
 

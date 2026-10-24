@@ -20,8 +20,11 @@ Implements `docs/security/nextjs-15-migration-plan.md` (D1–D4).
 **Two things the types alone would not have caught**, both found by measuring rather than compiling:
 
 1. **`app/admin/users/page.tsx`** declares its *own* `PageProps` interface, so `tsc` reported **no
-   error** while `searchParams.search` would have been `undefined` at runtime in Next 15. Found by
-   grepping for `searchParams` rather than trusting a green `tsc`.
+   error** even though `searchParams` became a Promise in Next 15. Found by grepping for
+   `searchParams` rather than trusting a green `tsc`. *(The exact runtime consequence was **not**
+   measured — Next 15 keeps a compatibility shim for synchronous access that warns rather than
+   throws — so this is recorded as a typing defect the compiler could not catch, not as a
+   demonstrated failure.)*
 2. **`outputFileTracingExcludes`** (below) — a build-time warning plus a silent behavioural loss.
 
 ## 2. A silent control loss found by the build
@@ -172,15 +175,26 @@ with **`Set-Cookie: NONE`**, versus **`Set-Cookie` present** on the 200 branch.
 
 **Pre-existing, not a migration regression.** `origin/main` has the identical structure (the old
 `set`/`remove` also wrote onto `response`, and the same four bare redirects), so the migration
-preserved behaviour exactly as it set out to. **Recorded, not fixed.**
+preserved behaviour exactly as it set out to. **Recorded, then FIXED** (see the end of this
+section).
 
 **Consequence — measured, and narrower than first reported.** Replaying the same cookie 16 s later
 still authenticated and refreshed again, so **no immediate logout reproduced** in this configuration.
 The real effect: on any redirect path the browser is never given the refreshed session, so it keeps an
 expired access token and re-refreshes on every request, surviving only while the refresh token remains
-valid. Whether a stricter rotation setting could end the session has **not** been measured. The fix —
-carry `response.cookies` onto the redirect response — is small and is recommended as its own change
-rather than smuggled into this PR.
+valid. Whether a stricter rotation setting could end the session has **not** been measured. **Fix delivered.** Carrying `response.cookies` onto the redirect response was implemented in
+**PR #51**, its own narrowly scoped PR per owner decision **D5 condition 5**, and carried into this
+branch because this branch rewrites `middleware.ts` and would otherwise revert it. Verified
+end-to-end on a deployment: the same probe that returned `Set-Cookie: NONE` on a redirect now returns
+the refreshed cookie, and the session still authenticates. Unit tests are mutation-verified
+(removing the copy fails 2 tests; dropping cookie attributes fails 1).
+
+**A second review round then found two more adapter defects, both fixed here:** `setAll`'s second
+`headers` argument (which carries cache directives — `@supabase/ssr` warns that a cached response
+bearing auth cookies can serve one user's session to another) was being dropped; and `setAll`
+replaced the response object outright, so a second invocation in one request discarded the first
+batch of cookies. The adapter now accumulates cookies across invocations, honours the headers, and
+every response containing `Set-Cookie` is marked `Cache-Control: private, no-store`.
 
 **Also recorded:** no production deployment; **no schema change** (plan §6 — if that ever changes it
 stops being a single-PR migration); `images.unoptimized: true` unchanged, so R-001's Condition 1

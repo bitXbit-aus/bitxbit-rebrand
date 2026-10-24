@@ -15,6 +15,13 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   // Enforce HTTPS and set baseline XSS/filter protections.
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  // A response that writes auth cookies must never be cached: a CDN or reverse proxy could
+  // then serve one user's session to a different user. @supabase/ssr says exactly this and
+  // passes its own cache headers to setAll (honoured below). Applied here so every return
+  // path — including all four redirect branches — gets it.
+  if (response.headers.get("set-cookie")) {
+    response.headers.set("Cache-Control", "private, no-store");
+  }
   response.headers.set(
     "Content-Security-Policy",
     "default-src 'self'; " +
@@ -89,16 +96,29 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet, headersToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             request.cookies.set({ name, value, ...options });
           });
+          // The response is rebuilt so it carries the refreshed request headers (the
+          // cookie header included). Carry the cookies written by any EARLIER setAll call
+          // across the rebuild — replacing the object outright would silently drop them,
+          // and @supabase/ssr can invoke setAll more than once per request.
+          const alreadyWritten = response.cookies.getAll();
           response = NextResponse.next({
             request: { headers: forwardHeaders() },
           });
+          for (const cookie of alreadyWritten) {
+            response.cookies.set(cookie);
+          }
           cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set({ name, value, ...options });
           });
+          // Headers the library requires alongside the cookies (cache directives). Dropping
+          // them would allow a cacheable response to carry auth cookies.
+          for (const [key, value] of Object.entries(headersToSet ?? {})) {
+            response.headers.set(key, value);
+          }
         },
       },
     }

@@ -39,6 +39,8 @@ ENV_FILE = os.path.join(HERE, "..", ".env.staging.local")
 # from that list by index would target an UNRELATED real user and then mutate and delete
 # them. So: create a fresh user, and never look one up by list position.
 EMAIL = f"authz-matrix-probe-{os.urandom(4).hex()}@example.invalid"
+# /dashboard renders this (the email local part) when its own getUser() succeeds.
+PROBE_LOCALPART = EMAIL.split("@")[0]
 
 
 def load_staging():
@@ -196,6 +198,16 @@ class Probe:
         except urllib.error.HTTPError as e:
             return e.code, e.headers.get("Location"), e.headers
 
+    def get_body(self, path, cookies=None):
+        h = {"Accept": "text/html"}
+        if cookies:
+            h["Cookie"] = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+        try:
+            r = OP.open(urllib.request.Request(self.base + path, headers=h, method="GET"))
+            return r.status, r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode("utf-8", "replace")
+
     def check(self, label, pred, code, loc, note=""):
         ok = bool(pred(code, loc))
         self.results.append(ok)
@@ -248,9 +260,19 @@ class Probe:
         self.set_authz(role="admin", status="active")
         print("\n  admin")
         self.check("session -> /admin [allowed]", lambda c, l: c == 200, *self.get("/admin", valid)[:2])
+        # A repeated query key (?search=a&search=b) delivers searchParams values as an ARRAY.
+        # Before the guard in app/admin/users/page.tsx this threw on `.trim()` and 500'd.
+        self.check("repeated query key does not crash /admin/users",
+                   lambda c, l: c == 200, *self.get("/admin/users?search=a&search=b", valid)[:2])
         self.set_authz(role="member", status="active")
 
         print("\n  session refresh (setAll adapter — silent-session-loss path)")
+        # Each refresh check gets its OWN session: a refresh ROTATES the refresh token, so
+        # reusing one cookie across checks would depend on the library's reuse window and be
+        # intermittently flaky — the worst kind of gate.
+        expired_redirect = self.build_cookies(self.mint_session(), expired=True)
+        expired_page = self.build_cookies(self.mint_session(), expired=True)
+
         code, loc, headers = self.get("/dashboard", expired)
         setc = headers.get_all("Set-Cookie") or []
         self.check("expired access still serves /dashboard", lambda c, l: c == 200, code, loc)
@@ -280,6 +302,24 @@ class Probe:
                            note="[could not decode — cannot claim a refresh]")
         else:
             self.check("refreshed cookie usable (2nd request)", lambda c, l: False, 0, None)
+
+        # (a) The refresh must ALSO reach the client on a REDIRECT branch — the defect fixed
+        #     in PR #51. Without the fix this returns the redirect with no Set-Cookie.
+        self.set_authz(status="suspended")
+        c_r, l_r, h_r = self.get("/dashboard", expired_redirect)
+        setc_r = h_r.get_all("Set-Cookie") or []
+        self.check("redirect branch carries the refreshed cookie",
+                   lambda c, l: c == 307 and bool(setc_r), c_r, l_r, note=f"[{len(setc_r)} Set-Cookie]")
+        self.set_authz(role="member", status="active")
+
+        # (b) Did the refreshed session reach the PAGE, or only middleware? /dashboard renders
+        #     the user's display name and falls back to the literal "there" when its own
+        #     getUser() sees nothing — so the body discriminates the two.
+        c_p, body = self.get_body("/dashboard", expired_page)
+        saw_user = PROBE_LOCALPART in body
+        self.check("refreshed session reaches the PAGE (not just middleware)",
+                   lambda c, l: c_p == 200 and saw_user, c_p, None,
+                   note="[display name present]" if saw_user else "[page fell back to 'there']")
 
         return all(self.results), len(self.results)
 

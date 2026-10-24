@@ -92,8 +92,16 @@ itself and reports `teardown: user_authorizations rows=0 -> clean`.
 **Only the 200 branch was exercised for the refresh path.** The four middleware **redirect** branches
 discard the refreshed cookies (measured: `Set-Cookie: NONE` on a redirect; present on a 200). So the
 claim above is precise only as: *the refreshed session is delivered on the branch that returns 200.*
-It is **not** true that every path delivers it. Pre-existing on `main`; recorded, not fixed. Full
-detail in §5 of `r007-nextjs-15-migration-2026-10-24.md`.
+It is **not** true that every path delivers it. Pre-existing on `main` — now **fixed** in PR #51
+and carried into this branch; the gate below gained a redirect-branch check so the gap cannot
+silently return. Full detail in §5 of `r007-nextjs-15-migration-2026-10-24.md`.
+
+**Legacy cookie compatibility — tested because a review round flagged it, and it was a genuine
+release risk.** Every existing production user holds a cookie in the **0.1.0** format (raw JSON),
+while this migration reads **0.12.7**. If 0.12.7 could not read it, the migration would sign out the
+entire user base. Measured on a deployment: a legacy-format session cookie authenticates against the
+migrated app (`/dashboard` → **200**), and a refresh writes the session back in the new format. **No
+fleet-wide logout.**
 
 **The redirect rows of the matrix used a valid session**, so no refresh occurred on them — which is
 exactly why this gate did not surface the gap above. A future revision should pair an **expired cookie

@@ -28,9 +28,16 @@ export async function GET(request: Request) {
           .eq("id", data.user.id)
           .is("referred_by", null);
       }
-      return NextResponse.redirect(`${appUrl}${next}`);
+      // This redirect sets session cookies, so it must never be cached — a CDN or reverse
+      // proxy serving it to another user would leak a session. See @supabase/ssr's setAll
+      // cache guidance.
+      const authed = NextResponse.redirect(`${appUrl}${next}`);
+      authed.headers.set("Cache-Control", "private, no-store");
+      return authed;
     }
   }
 
-  return NextResponse.redirect(`${appUrl}/auth/login?error=callback`);
+  const failed = NextResponse.redirect(`${appUrl}/auth/login?error=callback`);
+  failed.headers.set("Cache-Control", "private, no-store");
+  return failed;
 }
