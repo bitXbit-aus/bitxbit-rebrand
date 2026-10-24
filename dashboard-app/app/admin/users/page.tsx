@@ -4,22 +4,32 @@ import { UsersTable } from "@/components/admin/users-table";
 
 interface PageProps {
   // Next 15: `searchParams` is a Promise, so the page awaits it.
+  //
+  // Each value can also be an ARRAY: a repeated query key (`?search=a&search=b`) arrives as
+  // `string[]`, not `string`. Typing these as plain `string` was a lie that the compiler
+  // cannot catch, and `.trim()` on an array throws — a server-render failure reachable from
+  // a crafted URL. Normalise through `firstParam` before use.
   searchParams: Promise<{
-    search?: string;
-    role?: string;
-    status?: string;
-    page?: string;
+    search?: string | string[];
+    role?: string | string[];
+    status?: string | string[];
+    page?: string | string[];
   }>;
+}
+
+/** Repeated query keys arrive as arrays; use the first value and ignore the rest. */
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 export default async function AdminUsersPage({ searchParams }: PageProps) {
   const supabase = createServiceClient();
   const resolvedSearchParams = await searchParams;
 
-  const search = (resolvedSearchParams.search ?? "").trim();
-  const roleFilter = resolvedSearchParams.role ?? "all";
-  const statusFilter = resolvedSearchParams.status ?? "all";
-  const page = Math.max(1, parseInt(resolvedSearchParams.page ?? "1", 10) || 1);
+  const search = (firstParam(resolvedSearchParams.search) ?? "").trim();
+  const roleFilter = firstParam(resolvedSearchParams.role) ?? "all";
+  const statusFilter = firstParam(resolvedSearchParams.status) ?? "all";
+  const page = Math.max(1, parseInt(firstParam(resolvedSearchParams.page) ?? "1", 10) || 1);
   const pageSize = 20;
 
   let query = supabase.from("users").select("*", { count: "exact" });

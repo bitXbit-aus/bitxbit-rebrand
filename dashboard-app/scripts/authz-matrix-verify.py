@@ -29,11 +29,16 @@ Usage:  python3 scripts/authz-matrix-verify.py https://<preview-host>
 Exit code 0 only if every check passes.
 """
 import argparse, base64, hashlib, json, os, subprocess, sys, tempfile, time
-import urllib.request, urllib.error
+import urllib.parse, urllib.request, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.join(HERE, "..", ".env.staging.local")
-EMAIL = "authz-matrix-probe@example.invalid"
+# A UNIQUE address per run. Reusing one address would need an "already exists" path, and
+# the only way to find an existing user is the admin list endpoint — which IGNORES its
+# ?email= filter (measured 2026-10-24: a bogus address returned all 19 users). Selecting
+# from that list by index would target an UNRELATED real user and then mutate and delete
+# them. So: create a fresh user, and never look one up by list position.
+EMAIL = f"authz-matrix-probe-{os.urandom(4).hex()}@example.invalid"
 
 
 def load_staging():
@@ -46,6 +51,21 @@ def load_staging():
             k, v = line.split("=", 1)
             env[k.strip()] = v.strip().strip('"').strip("'")
     return env["STAGING_SUPABASE_URL"].rstrip("/"), env["STAGING_SUPABASE_SERVICE_ROLE_KEY"]
+
+
+def decode_session(cookies):
+    """Decode a Supabase SSR auth cookie back into its session dict (both encodings)."""
+    val = "".join(c["value"] for c in cookies if c["name"].startswith("sb-"))
+    if not val:
+        return None
+    try:
+        if val.startswith("base64-"):
+            raw = val[len("base64-"):]
+            raw += "=" * (-len(raw) % 4)
+            return json.loads(base64.urlsafe_b64decode(raw))
+        return json.loads(urllib.parse.unquote(val))
+    except Exception:
+        return None
 
 
 class Probe:
@@ -69,15 +89,22 @@ class Probe:
             return e.code, e.read().decode()[:200]
 
     def setup_user(self):
+        """Create this run's own user. There is deliberately NO lookup fallback.
+
+        `GET /auth/v1/admin/users?email=...` ignores the filter (verified 2026-10-24), so a
+        "find the existing user" path would select an arbitrary real account and the run
+        would then change its authorisation and delete it. Failing loudly is the safe
+        behaviour; a stale run's leftovers are recoverable, a deleted user is not.
+        """
         st, res = self.sb("POST", "/auth/v1/admin/users", {"email": EMAIL, "email_confirm": True})
-        if st == 200 and isinstance(res, dict):
-            self.uid = res["id"]
-        else:                                     # already exists
-            st, res = self.sb("GET", f"/auth/v1/admin/users?email={EMAIL}")
-            users = (res.get("users") or []) if isinstance(res, dict) else []
-            assert users, f"cannot create or find test user: {st} {res}"
-            self.uid = users[0]["id"]
-        print(f"  staging test user: {self.uid}")
+        if st != 200 or not isinstance(res, dict) or not res.get("id"):
+            raise RuntimeError(
+                f"refusing to continue: could not create test user ({st}): {str(res)[:200]}. "
+                "Not falling back to a list lookup — that endpoint ignores ?email= and would "
+                "select an unrelated account."
+            )
+        self.uid = res["id"]
+        print(f"  staging test user: {self.uid} ({EMAIL})")
         return self.uid
 
     def set_authz(self, role=None, status=None):
@@ -87,14 +114,24 @@ class Probe:
         return self.sb("PATCH", f"/rest/v1/user_authorizations?user_id=eq.{self.uid}", patch)
 
     def teardown(self):
+        """Delete the test user and PROVE it is gone. Returns True only if all three
+        surfaces are empty — a cleanup failure must not be reported as success."""
         for p in (f"/rest/v1/user_authorizations?user_id=eq.{self.uid}",
                   f"/rest/v1/users?id=eq.{self.uid}",
                   f"/auth/v1/admin/users/{self.uid}"):
             self.sb("DELETE", p)
-        st, res = self.sb("GET", f"/rest/v1/user_authorizations?select=user_id&user_id=eq.{self.uid}")
-        gone_rows = isinstance(res, list) and len(res) == 0
-        print(f"  teardown: user_authorizations rows={len(res) if isinstance(res,list) else res} "
-              f"-> {'clean' if gone_rows else 'DIRTY'}")
+        st_a, rows_a = self.sb("GET", f"/rest/v1/user_authorizations?select=user_id&user_id=eq.{self.uid}")
+        st_u, rows_u = self.sb("GET", f"/rest/v1/users?select=id&id=eq.{self.uid}")
+        st_b, body_b = self.sb("GET", f"/auth/v1/admin/users/{self.uid}")
+        rows_a = rows_a if isinstance(rows_a, list) else ["<error>"]
+        rows_u = rows_u if isinstance(rows_u, list) else ["<error>"]
+        auth_gone = st_b in (400, 404)          # a deleted auth user is no longer retrievable
+        clean = (len(rows_a) == 0) and (len(rows_u) == 0) and auth_gone
+        print(f"  teardown: user_authorizations={len(rows_a)} rows, users={len(rows_u)} rows, "
+              f"auth user={'gone' if auth_gone else f'STILL PRESENT ({st_b})'} -> {'clean' if clean else 'DIRTY'}")
+        if not clean:
+            print(f"  ⚠️  TEST USER NOT FULLY REMOVED: {self.uid} ({EMAIL}) — remove it manually")
+        return clean
 
     # ---- session ----------------------------------------------------------
     def mint_session(self):
@@ -168,6 +205,20 @@ class Probe:
     # ---- the gate ----------------------------------------------------------
     def run(self):
         self.setup_user()
+        try:
+            return self._run_checks()
+        finally:
+            # Always attempt removal, including after an exception: an abandoned account
+            # left promoted to admin with a live session is worse than a failed test run.
+            try:
+                clean = self.teardown()
+            except Exception as exc:                       # noqa: BLE001 - must never mask
+                print(f"  ⚠️  teardown raised: {exc}")
+                clean = False
+            self.results.append(clean)
+            self.cleanup_ok = clean
+
+    def _run_checks(self):
         sess = self.mint_session()
         valid = self.build_cookies(sess)
         expired = self.build_cookies(sess, expired=True)
@@ -210,13 +261,26 @@ class Probe:
                          for s in setc]
             c2, l2, _ = self.get("/dashboard", refreshed)
             self.check("refreshed cookie usable (2nd request)", lambda c, l: c == 200, c2, l2)
-            hb = hashlib.sha256(json.dumps(valid).encode()).hexdigest()[:10]
-            ha = hashlib.sha256(json.dumps(refreshed).encode()).hexdigest()[:10]
-            self.check("refreshed token differs", lambda c, l: hb != ha, 0, None, note=f"[{hb} != {ha}]")
+            # Compare the TOKENS, not a serialisation hash: a hash of the whole cookie set
+            # differs for key ordering or an extra cookie, so it can "pass" without any
+            # token having changed. Decode both and look at the values that matter.
+            before, after = decode_session(valid), decode_session(refreshed)
+            if before and after:
+                self.check("access token actually changed",
+                           lambda c, l: before.get("access_token") != after.get("access_token"), 0, None)
+                self.check("refresh token actually rotated",
+                           lambda c, l: before.get("refresh_token") != after.get("refresh_token"), 0, None)
+                self.check("refreshed expiry is in the future",
+                           lambda c, l: (after.get("expires_at") or 0) > time.time(), 0, None)
+                self.check("refreshed session is the same user",
+                           lambda c, l: (before.get("user") or {}).get("id") == (after.get("user") or {}).get("id"),
+                           0, None)
+            else:
+                self.check("refreshed cookie decodes to a session", lambda c, l: False, 0, None,
+                           note="[could not decode — cannot claim a refresh]")
         else:
             self.check("refreshed cookie usable (2nd request)", lambda c, l: False, 0, None)
 
-        self.teardown()
         return all(self.results), len(self.results)
 
 
@@ -241,8 +305,12 @@ def main():
                     fh.seek(0); fh.write(os.urandom(size)); fh.flush(); os.fsync(fh.fileno())
             os.remove(path)
         os.rmdir(work)
+    # The exit code must include the teardown result appended in run()'s finally block,
+    # so a run that left a test account behind cannot report success.
     passed = sum(p.results)
-    print(f"\n{passed}/{n} checks passed")
+    total = len(p.results)
+    ok = ok and all(p.results)
+    print(f"\n{passed}/{total} checks passed" + ("" if p.results[-1] else "  ⚠️ CLEANUP FAILED"))
     return 0 if ok else 1
 
 

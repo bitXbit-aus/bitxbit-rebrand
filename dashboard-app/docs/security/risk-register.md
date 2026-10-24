@@ -482,17 +482,22 @@ decision on the redirect-branch cookie defect. Evidence:
 `evidence/r007-independent-review-2026-10-24.md`.
 **Owner:** Shri — interim accountable owner.
 
-**What landed:** `next@15.5.28` · `react`/`react-dom` 19.1.10 · `@supabase/ssr` 0.12.7 ·
+**What landed:** `next@15.5.28` · `react`/`react-dom` **^19.1.10 (lockfile resolves 19.3.1)** · `@supabase/ssr` 0.12.7 ·
 `@supabase/supabase-js` ^2.114 (2.117.1). `npm audit`: **no advisory targets `next` directly** (was
 25) — it is still listed transitively via a vulnerable `postcss`, so "0 next advisories" would be
 imprecise. Async request
 APIs (`await cookies()`, async `createClient()` + 24 awaited call sites, awaited `searchParams`);
 `getAll`/`setAll` cookie adapters in `lib/supabase/server.ts` and `middleware.ts`.
 
-**A control was nearly lost silently.** Next 15 moved `outputFileTracingExcludes` from
-`experimental` to top level; left in place it is **unrecognized and silently ignored**, which
-would have disabled **R-002's structural backstop** and traced `bigint-buffer`'s native addon back
-into the server bundle. Moved and re-verified (`.next`: **0** `.node` files).
+**A config placement error, corrected — with the impact re-measured down.** Next 15 moved
+`outputFileTracingExcludes` from `experimental` to top level; left in place it is **unrecognized and
+silently ignored**, so the exclusion would quietly stop applying. It was moved. **Correction
+(2026-10-24, from the AI review and then measured):** the original text here claimed the addon "would
+have been traced back in" and cited `.next` containing **0** `.node` files as proof. Both are wrong
+as stated — removing the exclusion entirely and rebuilding gives **0** `.nft.json` traces mentioning
+`bigint-buffer` and **0** `.node` files, i.e. **identical**, so the exclusion is **currently inert**
+and that check cannot distinguish "excluded" from "never included". The placement fix stands on its
+own merits; it is not what is preventing exposure. See R-002.
 
 **Verified:** tsc 0 errors · 167/167 tests · migration replay + 4 races · build clean · `next`
 absent from the audit · **D4** staging isolation on `deploy-preview-49` (0 production refs,

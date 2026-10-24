@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { parseHostPolicy, validateRequestHost } from "@/lib/host-validation";
 import { resolveClientIp, withClientIp } from "@/lib/client-ip";
+import { redirectWithCookies } from "@/lib/middleware-redirect";
 
 interface MiddlewareAuthorization {
   role: "member" | "admin";
@@ -114,7 +115,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/auth/login") || pathname.startsWith("/auth/signup");
 
   if (!user && (isAdminRoute || isDashboardRoute)) {
-    return applySecurityHeaders(NextResponse.redirect(new URL("/auth/login", request.url)));
+    return applySecurityHeaders(redirectWithCookies(new URL("/auth/login", request.url), response));
   }
 
   let authorization: MiddlewareAuthorization | null = null;
@@ -133,15 +134,15 @@ export async function middleware(request: NextRequest) {
   if (user && (isAdminRoute || isDashboardRoute) && !isActive) {
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("error", "account_inactive");
-    return applySecurityHeaders(NextResponse.redirect(loginUrl));
+    return applySecurityHeaders(redirectWithCookies(loginUrl, response));
   }
 
   if (user && isAdminRoute && authorization?.role !== "admin") {
-    return applySecurityHeaders(NextResponse.redirect(new URL("/dashboard", request.url)));
+    return applySecurityHeaders(redirectWithCookies(new URL("/dashboard", request.url), response));
   }
 
   if (user && isAuthEntryRoute && isActive) {
-    return applySecurityHeaders(NextResponse.redirect(new URL("/dashboard", request.url)));
+    return applySecurityHeaders(redirectWithCookies(new URL("/dashboard", request.url), response));
   }
 
   return applySecurityHeaders(response);

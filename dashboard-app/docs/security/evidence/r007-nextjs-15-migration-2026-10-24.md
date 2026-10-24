@@ -12,7 +12,7 @@ Implements `docs/security/nextjs-15-migration-plan.md` (D1–D4).
 
 | Area | Change |
 |---|---|
-| Deps (M1) | `next` 14.2.35 → **15.5.28** (D1 target) · `react`/`react-dom` 18 → **19.1.10** · `@types/react(-dom)` 19 · `@supabase/ssr` 0.1.0 → **0.12.7** · `@supabase/supabase-js` ^2.39 → ^2.114 (resolved **2.117.1**) · `eslint-config-next` 15.5.28 |
+| Deps (M1) | `next` 14.2.35 → **15.5.28** (D1 target) · `react`/`react-dom` 18 → **`^19.1.10`, which the lockfile resolves to `19.3.1`** · `@types/react(-dom)` 19 · `@supabase/ssr` 0.1.0 → **0.12.7** · `@supabase/supabase-js` ^2.39 → ^2.114 (resolved **2.117.1**) · `eslint-config-next` 15.5.28 |
 | Async request APIs (M3) | `await cookies()`; **`createClient()` is now `async`** and **24 call sites await it**. `app/admin/users/page.tsx` types `searchParams` as a Promise and awaits it. `lib/rate-limit.ts` drops the removed `NextRequest.ip`. |
 | Supabase cookie adapter (M4) | `get`/`set`/`remove` → **`getAll`/`setAll`** in `lib/supabase/server.ts` and `middleware.ts` |
 | Config | `outputFileTracingExcludes` **moved from `experimental` to top level** (see §2) |

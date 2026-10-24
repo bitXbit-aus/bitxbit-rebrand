@@ -57,10 +57,15 @@ const SERVER_ACTION_BODY_SIZE_LIMIT = '1mb';
 // The reachable path in this app is `@solana/spl-token` → `@solana/buffer-layout-utils`
 // → `bigint-buffer`, and that is the ONLY caller in the tree. Its `decode` passes
 // `Buffer.from(src)`, so the vulnerable function always receives a Buffer and the
-// trigger is unreachable by argument. This exclusion adds a second, structural
-// guarantee: the addon is not traced into the function bundle at all, so the safe
-// fallback is what runs — the vulnerable code is absent rather than merely
-// unreached. Do not remove this without re-reading the R-002 evidence.
+// trigger is unreachable by argument — that argument is what actually holds today.
+//
+// This exclusion is belt-and-braces and its effect is currently NIL: measured
+// 2026-10-24, removing it entirely and rebuilding produced the SAME result (0
+// `.nft.json` traces mentioning bigint-buffer, 0 `.node` files), because nothing in
+// the traced server graph reaches the addon. So do NOT read "no .node files" as
+// proof this exclusion works — that check cannot distinguish "excluded" from "never
+// included". Keep it anyway: it would matter if an import path ever pulled the
+// module in. Do not remove it without re-reading the R-002 evidence.
 const BIGINT_BUFFER_NATIVE_EXCLUDE = ['node_modules/bigint-buffer/build/**'];
 
 const nextConfig = {
@@ -69,11 +74,12 @@ const nextConfig = {
     domains: ['localhost'],
     unoptimized: true,
   },
-  // R-002's structural backstop. In Next 15 this option moved from `experimental`
-  // to the top level — left under `experimental` the build reports it as an
-  // unrecognized key AND silently stops excluding the addon, which is the failure
-  // mode this exclusion exists to prevent. Top level, verified by the build
-  // warning being absent and by `.next` containing no `.node` files.
+  // R-002 belt-and-braces (see the note above — currently inert, and its
+  // verification cannot be falsified by a .node-file count). In Next 15 this option
+  // moved from `experimental` to the top level; left under `experimental` the build
+  // reports it as an unrecognized key AND silently ignores it, so the exclusion
+  // would quietly stop applying. Placed at top level, verified by the build's
+  // "Unrecognized key" warning being absent.
   outputFileTracingExcludes: {
     '*': BIGINT_BUFFER_NATIVE_EXCLUDE,
   },
