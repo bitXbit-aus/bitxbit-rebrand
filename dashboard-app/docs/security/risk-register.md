@@ -103,18 +103,26 @@ ownership assignment.**
 | Image optimisation disabled | `next.config.mjs` → `images: { unoptimized: true }` | ✅ disabled |
 | `next/image` usage | none in the app | ✅ path unreachable |
 
-This neutralises the two remaining **criticals**:
+This neutralises the **criticals** (three as of the 2026-10-23 re-measure — see Condition 2):
 
 - GHSA-p293-qw3h-jr36 — RCE on **Windows-hosted** servers → N/A (Linux)
 - GHSA-2xp9-vwfh-vxw4 — RCE in the **Image Optimization API** (AVIF) → N/A
   (optimizer disabled)
+- **GHSA-2464-fhr4-w9xw** — RCE in the **Image Optimization API** (**SVG**) → N/A
+  (optimizer disabled). **Added 2026-10-23**; affects `<=15.5.27`, so it is *not* cleared by
+  15.5.26 — only by the approved D1 target **15.5.28**.
 
 **If either condition changes** — self-hosting, a platform move, or re-enabling
-image optimisation — this exception is void and both criticals apply immediately.
+image optimisation — this exception is void and all criticals apply immediately.
 
 ### Condition 2 — applicable Server Action / RSC / SSRF / middleware advisories assessed individually
 
-All 23 advisories still matching `next@14.2.35`, ruled one by one:
+All 23 advisories recorded here were ruled one by one. **Re-measured 2026-10-23:** the set has
+grown to **25** advisories via `next@14.2.35`, including a **third critical** — the added entries
+fall in categories already ruled (image-optimizer → N/A because the optimizer is disabled;
+RSC / Server-Action DoS → already accepted), so the character of the accepted set is unchanged. A
+full row-by-row re-ruling is due at the **2026-11-18** review. See
+`evidence/register-sweep-2026-10-23.md` §2 for the full GHSA list.
 
 | # | Advisory | Sev | Applies? | Reasoning |
 |---|---|---|---|---|
@@ -141,6 +149,8 @@ All 23 advisories still matching `next@14.2.35`, ruled one by one:
 | 21 | Unauthenticated disclosure of internal Server Function endpoints | mod | **Yes** | Server Actions are enumerable |
 | 22 | RCE on Windows-hosted servers | **crit** | **No** | Linux |
 | 23 | RCE in Image Optimization API (AVIF) | **crit** | **No** | Optimizer disabled |
+| 24 | RCE in Image Optimization API (**SVG**) — GHSA-2464-fhr4-w9xw *(added 2026-10-23)* | **crit** | **No** | Optimizer disabled |
+| 25 | DoS in App Router using **Server Actions** (second advisory) — GHSA-p3m5-59mp-jv5r *(added 2026-10-23)* | high | **Yes** | 30 exported Server Actions |
 
 **Applicable and accepted:** #2, #5, #6, #12, #15, #21, plus partial exposure on
 #7/#9/#13/#17/#18.
@@ -156,7 +166,7 @@ Verified. Full evidence: `docs/security/evidence/phase-1-controls-verification-2
 
 | Control | Verified state |
 |---|---|
-| Server-side access controls | ✅ **Strong.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; 30 Server Actions guarded; admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
+| Server-side access controls | ✅ **Strong, with one exception.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; **29 of 30** Server Actions guarded — re-measured 2026-10-23, `getTokenBalanceAction` has **no** guard (see R-005); admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
 | Shared rate limiting | ✅ **Satisfied.** The shared atomic store is deployed and the limiter keys on the **real client** — verified live: keys carry `206.83.119.2`, a forged forwarded chain creates no new key, and enforcement returns 429 from the 31st request against a 30/60 s limit. See R-004. |
 | Client identity for rate limiting | ✅ Uses Netlify's trusted `x-nf-client-connection-ip`; XFF trusted only behind an explicit `TRUST_PROXY` flag. |
 | Request limits | ✅ **Satisfied 2026-10-22** — `bodySizeLimit` set explicitly; the upload boundary is enforced by a tested policy below the platform ceiling (R-006). The `1mb` JSON limit is unchanged in effect but is now explicit. |
@@ -362,8 +372,9 @@ transition is the discriminator. The shared counter was observed in staging keye
 **Severity:** medium. **Owner:** Shri — interim accountable owner.
 
 `checkRateLimit` is applied to API routes only; it appears **zero times** in
-`lib/actions.ts` across **30 Server Actions**. Every action is
-authorization-guarded, so this is not an access-control gap — it is an
+`lib/actions.ts` across **30 Server Actions**. Twenty-nine are
+authorization-guarded (`getTokenBalanceAction` is **not** — see the outcome below), so this is not
+primarily an access-control gap — it is an
 unbounded-work gap: an authenticated user can drive costly actions (reward
 calculation, airdrop preparation) without a request ceiling.
 
@@ -479,15 +490,18 @@ lands and is independently approved, **R-001 is closed as remediated, not renewe
 accepted proceeding on the logical dump. Parity evidence was structural (table and column sets),
 not types, defaults, indexes, RLS policies, triggers or grants.
 
-**The window remains open until the code is deployed.** Migrations are applied but PR #1 is not
-yet merged, so production runs the old code against the new schema. Verified healthy, because
-server-side paths use the service role, which bypasses the RLS changes.
+**The window is CLOSED — re-measured 2026-10-23.** Migrations are applied **and** the code is
+deployed: PR #1 merged 2026-10-20T06:10:53Z, and every production deploy since is on `main`.
+Production (`flasgvendiiasuixeqzu`) now reports a complete ledger **`001`–`027`** and all six Phase 1
+landmark functions (`check_rate_limit`, `get_my_authorization`, `record_trusted_offer_click`,
+`verify_wallet_challenge`, `apply_reward_calculation`, `approve_reward_period`) plus
+`rate_limit_counters` are present; `check_rate_limit` is `SECURITY DEFINER` with a single overload.
 
-**Status:** OPEN — **blocking production release.** **Severity:** high (release risk).
+**Status:** ✅ **RESOLVED** — the "OPEN — blocking production release" text below was **stale**.
 **Owner:** Shri — interim accountable owner.
 
-Production (`flasgvendiiasuixeqzu`) has no `supabase_migrations` ledger and none of
-the Phase 1 objects, so the upgrade range is **`010` → `026`**, not `024` → `026`.
+*(Historical: at identification, production had no `supabase_migrations` ledger and none of the
+Phase 1 objects, so the upgrade range was `010` → `026`, not `024` → `026`.)*
 Evidence: `docs/security/evidence/phase-1-production-preflight-2026-10-19.md`.
 
 **Consequence for ordering:** `middleware.ts` calls the `get_my_authorization` RPC,
@@ -551,11 +565,34 @@ credential-exposure surface**; the table row below should not be read as implyin
 - the **legacy `service_role` key deactivation** (claimed in NA-8) was **not independently
   verified** — the Supabase MCP surface exposes only publishable and legacy-**anon** keys, with no
   secret-key listing. Carried as a claim, not a measurement;
-- **rotation** is consistent with the current state but not proven by it: what is confirmed is
-  that current production values differ from preview values, not that previously-exposed values
-  are retired.
+- **rotation** — **COMPLETED 2026-10-23.** The production service-role key in the Netlify
+  production context was replaced and the previously-live key was **revoked**, then production was
+  **re-verified after revocation**. See §"Rotation completed — 2026-10-23" below.
 
 Evidence: `evidence/r009-credential-isolation-reverified-2026-10-22.md`.
+
+### Rotation completed — 2026-10-23 (zero-outage cutover)
+
+The leaked production service-role key was rotated and the old key **revoked**, with production
+**re-verified after revocation** — the step that proves the cutover. Full record:
+`evidence/r009-service-role-key-rotation-2026-10-23.md`.
+
+- **New key live**: the Netlify production context was updated via the single-value endpoint
+  (`PATCH .../env/SUPABASE_SERVICE_ROLE_KEY`, `{context:"production",value:…}`) — **not** a full `PUT`,
+  because with the variable now `is_secret` a `PUT` would have written masked strings back over the other
+  contexts. `is_secret` **retained**; `production` mask `d4871bb859` → `f2c8a17069`; `dev` /
+  `branch-deploy` / `deploy-preview` untouched.
+- **Deployed** `6adae4cb` on the unchanged `main` HEAD `bc34a017` (no code change).
+- **Post-revoke verification**: `/api/health/rate-limit` **200 `shared:true, backend:supabase`**,
+  `/api/public/offers` 200 (real data), plus `/api/public/transparency`, `/auth/login`, `/api/token-stats`
+  all 200 — so the **new** key authenticates, independently of the revoked one.
+- **CORRECTION to the record** (same defect class as the other stale-prose findings): the production
+  masked readback previously recorded as `****************a2t2` was a **misattribution** — `a2t2` is the
+  **staging** key (it probes staging 200 / production 401). The production key tailed **`3Sit`**
+  (`sha256("****************a2t2")[:10] = e79dc94d5e`, i.e. the *preview* mask, whereas the production
+  mask hashed `d4871bb859` → tail `3Sit`). The staging `a2t2` key was deliberately left intact.
+- **Residual (owner decision):** two further production secret keys, **`xvxk`** and a default **`TLo1`**,
+  remain valid and were **not** verified as unused.
 
 Every variable present in the `production` context is **also present in
 `branch-deploy` and `deploy-preview` with the same value**, or is scoped to `all`:
@@ -620,7 +657,9 @@ HTTP 422 — {"code":422,"message":"Secrets are not allowed to run in 'post_proc
 That is the constraint this entry predicted. **The working path** is
 `PUT /accounts/{account_id}/env/{key}?site_id={site_id}` with the full body and
 **`post_processing` removed from `scopes`**. All four contexts were preserved with their values
-intact. Readback now masks the value (`****************a2t2`).
+intact. Readback now masks the value. *(The value recorded here as `****************a2t2` was the
+**staging** context's mask — a misattribution; the production mask was `****************3Sit`. Corrected
+2026-10-23, see R-009 §"Rotation completed — 2026-10-23".)*
 
 **Branch deploys never build here, so part of this entry's rationale is moot.** Across the last
 **100** deploys: `production` 58, `deploy-preview` 42, **`branch-deploy` 0**. The warning that
@@ -639,6 +678,9 @@ flag controls read-back through the API/UI, not delivery to the runtime.
 service-role key value entered this session's transcript before the flag was applied. **Rotation is
 approved.** Note the ordering consequence: the replacement value must be written with the secret
 flag **retained**, or the exposure is simply recreated.
+
+**Rotation completed 2026-10-23** — the leaked production key was revoked and production re-verified
+*after* revocation; see R-009 §"Rotation completed — 2026-10-23".
 
 Evidence: `evidence/r010-is-secret-flagging-2026-10-22.md`.
 
@@ -771,7 +813,9 @@ disabled in **Settings → API Keys → Legacy API keys**.
 
 ## R-013 — Local Netlify link targets the wrong site
 
-**Status:** OPEN — **medium** (operational). Identified 2026-10-19.
+**Status:** ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `dashboard-app/.netlify/state.json`
+now holds `9617719a-…` (`bitxbit-dashboard`), the correct site. The summary row below was stale.
+Identified 2026-10-19; fixed under NA-12.
 **Owner:** Shri — interim accountable owner.
 
 `dashboard-app/.netlify/state.json` links to `dazzling-vacherin-66d29b`
@@ -938,9 +982,9 @@ limiting) or R-006 (request-size) controls — those are behind authentication a
 | **NA-3** | Prioritise rate limiting for costly Server Actions before significant production use | R-005 | ✅ **DONE AND VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per user (`lib/action-rate-limit.ts`); refusals returned, not thrown; 146/146 tests, **8/8 mutations detected**. **Enforcement observed on a deployed preview**: 6 allowed, #7 refused with HTTP 200 and a legible countdown; counter seen in the shared store keyed on the user id. See `evidence/r005-server-action-rate-limiting-2026-10-22.md` and `evidence/r005-r006-deployed-verification-2026-10-22.md`. |
 | **NA-4** | Keep the request-size boundary documented; make it explicit in the Next.js 15 migration | R-006 | ✅ **DONE AND VERIFIED IN A DEPLOYMENT 2026-10-22** — boundary explicit in `next.config.mjs` and a tested policy module; upload refusals legible. 158/158 tests, **7/7 mutations detected**. **Verified on a deployed preview**: a 4 MB file refused with HTTP 200 and a legible message naming limit and actual size; type check refused likewise; valid upload completed as a control. See `evidence/r006-request-size-limits-2026-10-22.md` and `evidence/r005-r006-deployed-verification-2026-10-22.md`. |
 | **NA-5** | Production backup, full schema-parity checks, rehearsal against a production-like database — before any production merge | R-008 | ✅ **DONE** — pg_dump backup (hashed), column-level fixture parity, staging rehearsal incl. D4 deployed-app test, then `010`–`026` applied to production with verification |
-| **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | **OPEN — needs an owner decision, see below** |
-| **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ Current approval is on head `bdbdf003`; re-approval required after any further push |
-| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19**, re-verified 2026-10-22. Re-scoping 20/20; treasury rotated, verified on-chain and by a real production airdrop; service key rotated, verified **by use**. **2026-10-22:** all six credentials re-confirmed isolated by per-context hash; a **missed seventh variable (`BIRDEYE_API_KEY`)** was found still shared and closed. **Not independently verified:** the legacy `service_role` deactivation claim (no secret-key listing in the available API surface) — carried as a claim. |
+| **NA-6** | Resolve PR #2's CI trigger **without unnecessarily expanding automation credentials**; run CI on its exact merge candidate | Release process | ✅ **CLOSED 2026-10-23 — already satisfied, no change made.** Verified: **all 41 PRs** (every one → `main`) carry the required "Tests, migration replay, and build" check on their head sha, and `main` requires it (`strict: true`). The recorded diagnosis was wrong — `pull_request.branches` filters on the **base**, so `branches: [main]` already covered every PR; the original gap was the workflow file existing only on PR #1's branch, fixed when PR #1 merged it to `main` (2026-10-20). The proposed diff is a no-op for `pull_request` and would **add** duplicate `push` runs. Detail below; see `evidence/na6-ci-trigger-resolution-2026-10-23.md`. |
+| **NA-7** | Preserve the fresh GitHub approval on PR #1; obtain new approval whenever a change invalidates it | Release process | ✅ **MOOT / CLOSED 2026-10-23** — PR #1 **merged** 2026-10-20T06:10:53Z (head `bdbdf003`); there is no open PR #1 approval left to preserve. Approval now applies per-PR at hand. |
+| **NA-8** | Re-scope production credentials out of preview contexts; **rotate** treasury + service-role keys | **R-009 (critical)** | **DONE 2026-10-19**, re-verified 2026-10-22. Re-scoping 20/20; treasury rotated, verified on-chain and by a real production airdrop; service key rotated, verified **by use**. **2026-10-22:** all six credentials re-confirmed isolated by per-context hash; a **missed seventh variable (`BIRDEYE_API_KEY`)** was found still shared and closed. **Not independently verified:** the legacy `service_role` deactivation claim (no secret-key listing in the available API surface) — carried as a claim. **2026-10-23:** the leaked production service-role key was rotated (new key live, old key **revoked**) and production **re-verified after revocation** — the rotation half of NA-8 is now closed. |
 | **NA-9** | Mark credential variables `is_secret: true` | R-010 | **WITHHELD DELIBERATELY.** The flag is irreversible, drops the `post_processing` scope, and has a reported failure mode masking values in functions on branch deploys — D4's own context. Apply once a deployment can be observed. **That precondition is now MET (D4 satisfied 2026-10-22)** — a deployment can be observed, so this is actionable and awaiting owner authorisation, not blocked. |
 | **NA-10** | Explicit per-context Solana RPC (devnet for preview/branch-deploy) | R-011 | ✅ **DONE** — `SOLANA_RPC_URL` → devnet for preview/branch-deploy; production left on its existing mainnet default |
 | **NA-11** | Replace the production key in `.env.staging.local` with a funded devnet key | R-012 | ✅ **DONE** — fixture holds the funded devnet key; key derives to the funded address |
@@ -950,33 +994,33 @@ limiting) or R-006 (request-size) controls — those are behind authentication a
 | **NA-15** | A degraded rate-limit store is undetectable in production | **R-004** | ✅ **FIXED AND VERIFIED 2026-10-21.** The fallback paths called `console.error`, but Netlify's request logs return `logs: []` even for requests with `has_function_invocation: true`, so a degraded store could not report its own degradation. **Fix:** a degradation registry (`lib/rate-limit-health.ts`, typed reasons + running count + timestamp) exposed on **`GET /api/health/rate-limit`** — **503 when degraded**, `cache-control: no-store`, `x-ratelimit-degraded` header, no credentials and no raw error text — plus the same header on the 429 path. **Verified:** the degraded branch was **executed against the real route file** (503, `backend: memory`, `lastReason: no-shared-store`) since production is healthy and cannot show it; live production reports `200 / degraded: false / backend: supabase` and is not cached (distinct `checkedAt` across calls); driving real traffic produced **no false positive**. 125/125 tests, **8/8 mutations detected**. **Limitation recorded:** the registry is per-process, so a probe observes one instance — adequate because the dominant failure modes are global, but not a substitute for watching counter rows advance. See `evidence/na15-degradation-visibility-2026-10-21.md`. |
 | **NA-16** | `lib/supabase/server.ts` may share NA-14's fetch-caching flaw | **NA-14** | ✅ **MEASURED 2026-10-22 — NOT AFFECTED. No fix needed.** Measured in production with a temporary instrument (PR #24/#27) that read through the **real** server client while a raw `fetch` with `cache: "force-cache"` acted as a **positive control**; upstream requests were counted in Supabase's own edge logs, where the SSR client identifies itself as `supabase-ssr/0.1.0`. Over 5 app calls: `GET /rest/v1/users?select=id&limit=1` → **10 upstream (1:1, not cached)**; `POST /rest/v1/rpc/is_admin` → **10 (1:1, not cached)** — covering the mutating RPCs `lib/actions.ts` drives through this client (reward approval, payout finalization); control → **1 (cached)**, so the method demonstrably detects caching and the negative result is meaningful. Instrument removed. **Side finding:** this falsifies the general mechanism recorded for NA-14 — see that row. See `evidence/na16-server-client-fetch-caching-2026-10-22.md`. |
 
-### NA-6 detail
+### NA-6 detail — CLOSED 2026-10-23 (already satisfied; the recorded diagnosis was wrong)
 
-The workflow triggers only on `main` and `security/phase-1-hardening`, so PR #2 and
-PR #3 get **no CI**. The fix is a two-line change to `.github/workflows/`, but the
-automation token **lacks `workflow` scope** and the push is rejected.
+**Resolution: no change made, no credential expansion needed.** The register recorded that "the
+workflow triggers only on `main` and `security/phase-1-hardening`, so PR #2 and PR #3 get no CI",
+and proposed adding `security/**` to the trigger. Measured against the live repo and GitHub
+Actions on 2026-10-23: **every PR to `main` already runs CI on its merge candidate** — including
+PR #2 and PR #3 — and `main` **requires** the check (`strict: true`).
 
-Options, in order of preference:
+- **All 41 PRs** carry the `Tests, migration replay, and build` check on their head sha (queried
+  per-PR via `/commits/{sha}/check-runs`). PR #2 has 2 `pull_request` runs, PR #3 has 2, PR #41
+  has 1 — all `success`.
+- **`pull_request.branches` filters on the BASE branch**, so `branches: [main]` already covered
+  every PR (40+ `pull_request` runs have `security/*` head branches). The proposed `pull_request`
+  addition is a **no-op**; the proposed `push` addition (`security/**`) would **add** duplicate
+  runs — the opposite of "without unnecessarily expanding".
+- The real cause of the original gap was **not the trigger**: the workflow file existed only on
+  PR #1's branch. For `pull_request`, GitHub runs the workflow in the PR's merge ref, so PR #1
+  (whose head held the file) ran from creation, while PR #2/#3 (neither head nor base held it) did
+  not — until **PR #1 merged the file to `main` at `2026-10-20T06:10:53Z`**. PR #2's first run is
+  five minutes later (`06:16:02Z`), and every PR to `main` has run CI since. **The proposed diff
+  would not have fixed the original symptom.**
 
-1. **The owner applies the two-line diff via the GitHub web UI.** No credential
-   expansion at all; ~30 seconds.
-2. A **fine-grained PAT scoped to this single repository** with only
-   `Workflows: write`, used once and revoked.
-3. Broadening the existing token's scopes — **not recommended**; this is the
-   "unnecessary expansion" the instruction excludes.
-
-```diff
- on:
-   push:
-     branches:
-       - main
--      - security/phase-1-hardening
-+      - "security/**"
-   pull_request:
-     branches:
-       - main
-+      - "security/**"
-```
+**Residual (not a gap today):** PRs targeting a non-`main` base (stacked PRs) would be uncovered;
+**none exist** — all 41 target `main`. If stacked PRs are ever used, add the base branch to
+`pull_request.branches` (one line, no credential expansion).
+**Also stale:** the token "lacks `workflow` scope" — as of 2026-10-23 it carries `repo` **and**
+`workflow`. See `evidence/na6-ci-trigger-resolution-2026-10-23.md`.
 
 ---
 
@@ -984,19 +1028,26 @@ Options, in order of preference:
 
 | ID | Risk | Status | Owner | Review |
 |---|---|---|---|---|
-| R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** — Condition 3 now satisfied in fact (host validation released; rate limiting live and verified; request limits explicit). Formally contingent only on **R-003's closure** (independent review waived). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`) | Shri (interim) | **2026-11-18 (expires)** |
+| R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** — Condition 3 now satisfied in fact (host validation released; rate limiting live and verified; request limits explicit). Formally contingent only on **R-003's closure** (independent review waived). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`). **Re-measured 2026-10-23:** the advisory set has grown — **25** advisories via `next`, **3 criticals** (new: GHSA-2464-fhr4-w9xw, SVG image-optimizer RCE, `<=15.5.27`); all criticals still neutralised by Condition 1; minimum clearing version is now **15.5.28** (= approved D1 target) | Shri (interim) | **2026-11-18 (expires)** |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional — **re-assessed by measurement 2026-10-22**: the trigger is **non-Buffer input** to the native addon, and the tree's **only** caller wraps in `Buffer.from`; the native build is additionally excluded from the deployed bundle. Guarded by 4 mutation-verified tests. *(Prior justification argued the wrong axis and was replaced.)* | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
 | R-005 | Server Actions not rate limited | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per authenticated user; enforcement observed on a deployed preview (6 allowed, #7 refused with a returned, legible `{error}`); counter seen in the shared store keyed on the user id | Shri (interim) | NA-3 done |
 | R-006 | No explicit request-size limits | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; a deployed preview refused a genuine 4 MB file with a returned, legible `{error}` (HTTP 200, not 500) | Shri (interim) | NA-4 done |
 | R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
-| R-008 | Production pre-010, no ledger | **RESOLVED 2026-10-19** — `010`–`026` applied and verified; ledger backfilled | Shri (interim) | NA-5 done |
-| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). | Shri (interim) | **NA-8** ✅ |
-| R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Remaining: rotate the exposed service-role key. | Shri (interim) | NA-9 |
+| R-008 | Production pre-010, no ledger | ✅ **RESOLVED** — `010`–`026` applied and verified; ledger backfilled. **Re-measured 2026-10-23:** production ledger is complete `001`–`027`, all Phase 1 landmarks present, and the code is **deployed** (PR #1 merged 2026-10-20) — the "window remains open" text was stale | Shri (interim) | NA-5 done |
+| **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). **Leaked service-role key rotated 2026-10-23** — new key live, old key revoked, production re-verified after revocation. | Shri (interim) | **NA-8** ✅ |
+| R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Rotation of the exposed service-role key **completed 2026-10-23** — new key live, leaked key revoked, production re-verified after revocation. | Shri (interim) | NA-9 |
 | R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
-| R-013 | Local Netlify link targets the wrong site | **OPEN** — operational | Shri (interim) | NA-12 |
+| R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
+
+**Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
+live production, the Netlify/GitHub APIs and the production database. See
+`evidence/register-sweep-2026-10-23.md`. Corrections applied: R-001 (advisory set grew to 25 / 3
+criticals; "30 guarded" → 29 of 30), R-005, R-008 (resolved), R-013 (closed), NA-7 (moot). One
+**confirmed open issue**: `getTokenBalanceAction` is an unguarded Server Action — assessment
+tracked separately.
 
 **Nothing in this register is closed by the ownership assignment.**
