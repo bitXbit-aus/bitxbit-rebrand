@@ -4,7 +4,9 @@
 migration. Everything below was measured on a **deployed preview**, not locally.
 
 **Gate:** `dashboard-app/scripts/authz-matrix-verify.py` — re-runnable, exit 0 only if all 12 checks
-pass. Re-run twice on 2026-10-24 (second run after a type-only edit), **12/12 both times**.
+pass. **The gate has since grown to 19 checks** as review findings were closed (redirect-branch
+refresh, page-level session visibility, token-level assertions, repeated-query-key guard). Current
+result on the frozen revision: **19/19**.
 
 ---
 
@@ -41,7 +43,7 @@ was checked by reading it instead — `lib/supabase/client.ts` passes no `cookie
 `get/set/remove` → `getAll/setAll` interface change does not touch it. The app's browser client needed
 no change, and none was made.
 
-## Results — 12/12
+## Results — 12/12 at this revision (the gate now runs 19 checks; see the note above)
 
 `user_authorizations` was mutated between phases; the same session was reused, since the middleware
 re-reads authorisation on every request.

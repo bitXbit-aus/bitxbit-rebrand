@@ -112,5 +112,6 @@ mechanical gate re-ran clean (see below).
 
 Six of seven claims held under independent re-run: `npm ci` exit 0 · `tsc` 0 errors · **167/167** on a
 verified-clean environment · migration replay + 4 race tests · build exit 0 with no `Unrecognized key`
-warnings and 0 `.node` files · **authorisation matrix 12/12, exit 0, teardown clean**. The seventh
+warnings and 0 `.node` files · **authorisation matrix 12/12 at that revision** (the gate has since
+grown to 19 checks; current result on the frozen revision is 19/19), exit 0, teardown clean. The seventh
 ("zero `next` advisories") is the wording correction in §8 above.

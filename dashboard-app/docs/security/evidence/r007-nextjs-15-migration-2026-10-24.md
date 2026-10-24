@@ -159,7 +159,7 @@ Middleware security headers intact (`x-frame-options: DENY`, `x-content-type-opt
 **Resolved since this document was written.** The authenticated half was verified on 2026-10-24; see
 `evidence/r007-authenticated-verification-2026-10-24.md`. Both items listed here as blockers are now
 measured: the session `setAll` refresh path (on the 200 branch) and the full role/status matrix —
-**12/12, twice, on a deployed preview**.
+**19/19 on a deployed preview** (the gate has grown as review findings were closed).
 
 **1. Independent human review (M8) remains outstanding.** The register's division of authority is
 explicit: self-review by the implementing agent does not satisfy independent review — and this agent
@@ -194,7 +194,10 @@ the refreshed cookie, and the session still authenticates. Unit tests are mutati
 bearing auth cookies can serve one user's session to another) was being dropped; and `setAll`
 replaced the response object outright, so a second invocation in one request discarded the first
 batch of cookies. The adapter now accumulates cookies across invocations, honours the headers, and
-every response containing `Set-Cookie` is marked `Cache-Control: private, no-store`.
+every **middleware-produced** response containing `Set-Cookie` is marked `Cache-Control: private,
+no-store`, and so is the PKCE callback route. *(Not literally every response: a cookie written by a
+Route Handler or Server Action outside those two is not covered — `cookies()` gives no access to the
+response headers. Recorded as a residual rather than claimed closed.)*
 
 **Also recorded:** no production deployment; **no schema change** (plan §6 — if that ever changes it
 stops being a single-PR migration); `images.unoptimized: true` unchanged, so R-001's Condition 1

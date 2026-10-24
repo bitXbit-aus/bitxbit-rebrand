@@ -506,7 +506,8 @@ own merits; it is not what is preventing exposure. See R-002.
 absent from the audit · **D4** staging isolation on `deploy-preview-49` (0 production refs,
 devnet mint) · `test:staging` and `test:solana-fault` all pass.
 
-**Verified in a deployment — the full authenticated matrix (§5.3): 12/12, twice.** Manual gate, **not
+**Verified in a deployment — the full authenticated matrix (§5.3): 19/19** (the gate has grown as
+review findings were closed; the earlier "12/12" was a smaller revision of it). Manual gate, **not
 wired into CI** (it needs a staging service-role credential and a live preview, neither of which CI
 has): `scripts/authz-matrix-verify.py`. A real session (minted against a staging-scoped preview; no password
 or one-time code handled) for a staging test user: unauthenticated → `/auth/login`; active member →
@@ -538,7 +539,19 @@ and would otherwise revert it. Verified end-to-end: the same probe that returned
 on a redirect now returns the refreshed cookie, and the session still authenticates. Unit tests are
 mutation-verified (removing the copy fails 2 tests; dropping attributes fails 1).
 
-**Remaining blocker:** **independent review (M8)** — not a technical gap.
+**Residuals recorded by the AI review (D5), not fixed — each with its reason:**
+
+| Residual | Why it stands |
+|---|---|
+| **Nested React 18** ships under `@fractalwagmi/solana-wallet-adapter` alongside React 19. Two React copies can produce "Invalid hook call", visible only in a browser | Wallet-stack dependency surgery is R-002 territory; out of scope for a migration whose job is to change nothing else. **The wallet path needs a browser exercise before launch.** |
+| **`sharp` and other native deps entered the tree** via Next 15, so "0 `.node` files" is no longer package-specific | R-002's check is documented as non-falsifying; a discriminating test is separate work. |
+| **Per-IP rate limiting is weak for IPv6 clients.** Re-measured on Next 15: counters carry the real client (so R-004's control holds), but the same host presented **two different IPv6 privacy addresses within a minute** — each gets its own bucket | Inherent to IP-based limiting; the fix is to key on the authenticated user. Out of scope. |
+| **`app/admin/users/page.tsx` reads every user with the service-role client and no in-page guard** | Pre-existing; the `"use server"` guard rule does not cover pages. Recorded because this migration rewrote the file and the middleware. |
+| **No browser sign-in exercised** (client cookie write, PKCE verifier, `/auth/callback` exchange) | Recorded in the authenticated-verification evidence. The server adapter and legacy-cookie compatibility were tested directly. |
+| **Cookie writes outside middleware / the PKCE callback** are not marked `no-store` | `cookies()` gives no access to response headers. |
+| **The review process has no platform enforcement** — `main` requires no approving review and auto-deploys | Structural; see `release-review-policy.md`. |
+
+**Remaining blocker:** **independent review (M8)** — not a technical gap; **waived, not satisfied, under D5**, and the owner's explicit release approval has not yet been given.
 
 `15.5.28` remains the approved target (D1). Successor to R-001: when the migration lands and is
 independently approved, **R-001 is closed as remediated, not renewed.**
@@ -1111,7 +1124,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
 | R-005 | Server Actions not rate limited | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per authenticated user; enforcement observed on a deployed preview (6 allowed, #7 refused with a returned, legible `{error}`); counter seen in the shared store keyed on the user id | Shri (interim) | NA-3 done |
 | R-006 | No explicit request-size limits | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; a deployed preview refused a genuine 4 MB file with a returned, legible `{error}` (HTTP 200, not 500) | Shri (interim) | NA-4 done |
-| R-007 | Next.js 15 migration | **IMPLEMENTED AND FULLY VERIFIED 2026-10-24 (PR #49) — not released.** `next@15.5.28` + React 19 + Supabase SSR 0.12.7; `next` advisories 25 → 0; tsc/tests/migration replay/build green; D4 staging regression passed. **Authenticated matrix 12/12 on a deployed preview** (`scripts/authz-matrix-verify.py`), incl. the session `setAll` refresh path — refreshed cookie written to the response **and replayable**, so no silent session loss. **Only blocker: independent review (M8)** | Shri (interim) | PR #49 |
+| R-007 | Next.js 15 migration | **IMPLEMENTED 2026-10-24 (PR #49) — not released.** `next@15.5.28` + React 19 + Supabase SSR 0.12.7; **no advisory targets `next` directly** (was 25); tsc/tests/migration replay/build green; D4 staging regression passed. **Authenticated gate 19/19 on a deployed preview** (`scripts/authz-matrix-verify.py`), incl. the session `setAll` refresh path on the **200 and redirect** branches and a page-level check that the refreshed session reaches the page. **Not "fully verified":** the browser sign-in path is untested and the residuals in the R-007 entry remain open. **Blockers: owner release approval; human review waived — not satisfied — under D5** | Shri (interim) | PR #49 |
 | R-008 | Production pre-010, no ledger | ✅ **RESOLVED** — `010`–`026` applied and verified; ledger backfilled. **Re-measured 2026-10-23:** production ledger is complete `001`–`027`, all Phase 1 landmarks present, and the code is **deployed** (PR #1 merged 2026-10-20) — the "window remains open" text was stale | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). **Leaked service-role key rotated 2026-10-23** — new key live, old key revoked, production re-verified after revocation. | Shri (interim) | **NA-8** ✅ |
 | R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Rotation of the exposed service-role key **completed 2026-10-23** — new key live, leaked key revoked, production re-verified after revocation. | Shri (interim) | NA-9 |

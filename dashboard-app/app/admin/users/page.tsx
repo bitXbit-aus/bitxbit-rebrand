@@ -43,7 +43,12 @@ export default async function AdminUsersPage({ searchParams }: PageProps) {
   }
 
   if (search) {
-    const pattern = `%${search}%`;
+    // PostgREST's `or()` takes a RAW filter expression, so a search term containing its
+    // separators can inject extra filter clauses. Impact here is limited — the page is
+    // admin-only and already lists every user — but an unescaped user value inside a filter
+    // string is a footgun regardless, and this file is already being touched.
+    // Only `,` `(` `)` `"` are stripped: `.` is left alone so ordinary email searches still work.
+    const pattern = `%${search.replace(/[,()"]/g, " ")}%`;
     query = query.or(
       `email.ilike.${pattern},display_name.ilike.${pattern},wallet_address.ilike.${pattern},referral_code.ilike.${pattern}`
     );
