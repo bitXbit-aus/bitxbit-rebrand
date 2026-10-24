@@ -1,8 +1,9 @@
 # R-007 — real-browser verification of the client paths (2026-10-24)
 
-**Closes the "browser sign-in and wallet path are untested" residual** for everything a headless HTTP
-gate cannot reach: the React 19 client render, the nested React 18 wallet subtree, and browser cookie
-acceptance. Measured against the staging-scoped deploy preview of the release candidate.
+**Narrows — but does not close — the browser-path residual.** This proves the React 19 client render,
+the nested React 18 wallet subtree's page mount, and browser acceptance of an injected SSR-format
+session cookie. It does **not** prove application sign-in/PKCE cookie writing or wallet
+connect/sign/disconnect. Measured against the staging-scoped deploy preview of the release candidate.
 
 ---
 
@@ -61,8 +62,8 @@ recorded above.
 - **Actual wallet connection was not exercised.** No wallet extension was present, so
   connect / sign / disconnect against a real provider is still untested. Only the wallet page's
   render and mount are proven.
-- **The PKCE magic-link flow through the browser was not exercised.** The callback route's logic is
-  unit-tested and the resulting cookie path is now browser-verified, but the full
+- **The PKCE magic-link flow through the browser was not exercised.** The redirect-path safety and
+  resulting injected-cookie authentication are separately tested, but the full
   click-link → `/auth/callback?code=` → exchange sequence in a browser was not run, because that
   would require handling a one-time code in the browser tool.
 - Chromium only; no other engine was tested.

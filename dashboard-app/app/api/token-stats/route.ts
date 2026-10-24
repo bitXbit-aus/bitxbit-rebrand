@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
   const identifier = getClientIdentifier(request);
   const rateLimit = await checkRateLimit(identifier, TOKEN_STATS_RATE_LIMIT);
   if (!rateLimit.allowed) {
-    return rateLimitResponse(rateLimit.resetAt);
+    return rateLimitResponse(rateLimit.resetAt, identifier);
   }
 
   const stats: TokenStats = {

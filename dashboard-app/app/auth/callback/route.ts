@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { safeAuthNextPath } from "@/lib/auth-redirect";
+import { withAuthNoStore } from "@/lib/supabase/response-cache";
 import { NextResponse } from "next/server";
 
 function isUuid(value: string): boolean {
@@ -32,13 +33,9 @@ export async function GET(request: Request) {
       // This redirect sets session cookies, so it must never be cached — a CDN or reverse
       // proxy serving it to another user would leak a session. See @supabase/ssr's setAll
       // cache guidance.
-      const authed = NextResponse.redirect(`${appUrl}${next}`);
-      authed.headers.set("Cache-Control", "private, no-store");
-      return authed;
+      return withAuthNoStore(NextResponse.redirect(`${appUrl}${next}`));
     }
   }
 
-  const failed = NextResponse.redirect(`${appUrl}/auth/login?error=callback`);
-  failed.headers.set("Cache-Control", "private, no-store");
-  return failed;
+  return withAuthNoStore(NextResponse.redirect(`${appUrl}/auth/login?error=callback`));
 }

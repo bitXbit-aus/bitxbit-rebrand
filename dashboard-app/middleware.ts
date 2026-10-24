@@ -1,9 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { parseHostPolicy, validateRequestHost } from "@/lib/host-validation";
-import { resolveClientIp, withClientIp } from "@/lib/client-ip";
+import { resolveClientIp } from "@/lib/client-ip";
 import { redirectWithCookies } from "@/lib/middleware-redirect";
 import { createMiddlewareCookieAdapter } from "@/lib/supabase/middleware-cookies";
+import { buildForwardingResponse } from "@/lib/supabase/middleware-forwarding";
 
 interface MiddlewareAuthorization {
   role: "member" | "admin";
@@ -75,8 +76,6 @@ export async function middleware(request: NextRequest) {
   // may still reach downstream code that can see it, but do NOT key the limiter
   // on it.
   const clientIp = resolveClientIp(request.headers);
-  // Built fresh at each use so cookies refreshed below are still forwarded.
-  const forwardHeaders = () => withClientIp(new Headers(request.headers), clientIp);
 
   // The response is rebuilt on every `setAll` call so it carries the refreshed request
   // headers (the cookie header included). The adapter itself lives in
@@ -85,11 +84,7 @@ export async function middleware(request: NextRequest) {
   // from "the page refreshed the session itself". `state.response` is always the
   // current response; never hold a stale reference to it.
   const state = {
-    response: NextResponse.next({
-      request: {
-        headers: forwardHeaders(),
-      },
-    }),
+    response: buildForwardingResponse(request, clientIp),
   };
 
   const supabase = createServerClient(
@@ -98,7 +93,7 @@ export async function middleware(request: NextRequest) {
     {
       // @supabase/ssr 0.12.x interface — 0.1.0's get/set/remove is gone.
       cookies: createMiddlewareCookieAdapter(request, state, () =>
-        NextResponse.next({ request: { headers: forwardHeaders() } })
+        buildForwardingResponse(request, clientIp)
       ),
     }
   );

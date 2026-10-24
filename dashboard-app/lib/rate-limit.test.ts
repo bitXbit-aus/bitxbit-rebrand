@@ -318,7 +318,7 @@ describe("rate-limit store selection (R-004 fallback visibility)", () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     resetRateLimitHealth();
     try {
-      const response = rateLimitResponse(Date.now() + 30_000);
+      const response = rateLimitResponse(Date.now() + 30_000, "203.0.113.7");
 
       assert.equal(response.status, 429);
       assert.ok(response.headers.get("retry-after"), "the existing contract must be intact");
@@ -341,7 +341,7 @@ describe("rate-limit store selection (R-004 fallback visibility)", () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
     resetRateLimitHealth();
     try {
-      const response = rateLimitResponse(Date.now() + 30_000);
+      const response = rateLimitResponse(Date.now() + 30_000, "203.0.113.7");
       assert.equal(response.headers.get("x-ratelimit-degraded"), "false");
     } finally {
       resetRateLimitHealth();

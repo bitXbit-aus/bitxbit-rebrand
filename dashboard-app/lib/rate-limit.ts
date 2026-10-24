@@ -155,7 +155,7 @@ export function rateLimitResponse(
    * and cumulative process counters would mislabel correctly-resolved clients
    * as soon as any earlier request on the same instance had been unresolved.
    */
-  identifier?: string
+  identifier: string
 ): NextResponse<{
   error: string;
 }> {

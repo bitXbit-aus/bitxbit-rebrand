@@ -67,17 +67,10 @@ describe("R-007 auth-cookie cache safety", () => {
         if (/cache-control["'\s:,]+[^\n]*no-store/i.test(expression)) return false;
         if (/"Cache-Control":\s*"private, no-store"/.test(expression)) return false;
 
-        // A named response may be marked on the preceding line before return,
-        // as in the OAuth callback. Require the exact returned identifier to be
-        // the object whose header is set; an unrelated marked response must not
-        // bless another branch.
-        const identifier = expression.match(/^([A-Za-z_$][\w$]*)$/)?.[1];
-        if (!identifier) return true;
-        const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        return !new RegExp(
-          `${escaped}\\.headers\\.set\\(\\s*["']Cache-Control["']\\s*,\\s*["']private, no-store["']\\s*\\)`,
-          "i"
-        ).test(postClient);
+        // Named/manual responses are deliberately rejected. A file-wide search for
+        // `response.headers.set(...)` can be satisfied by unreachable code, a
+        // shadowed identifier, or another branch. Require marking at the return.
+        return true;
       });
       if (returns.length === 0 || unmarked.length > 0) {
         offenders.push(
