@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import { requireActiveAdmin } from "@/lib/authz";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { UsersTable } from "@/components/admin/users-table";
 
@@ -23,6 +24,10 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 }
 
 export default async function AdminUsersPage({ searchParams }: PageProps) {
+  // Defence in depth: middleware is the first gate, but this page instantiates a
+  // service-role client and reads every user. Re-verify the session and active admin
+  // authorisation in the page before creating that privileged client.
+  await requireActiveAdmin();
   const supabase = createServiceClient();
   const resolvedSearchParams = await searchParams;
 

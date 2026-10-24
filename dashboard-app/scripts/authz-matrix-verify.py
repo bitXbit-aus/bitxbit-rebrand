@@ -33,6 +33,8 @@ import urllib.parse, urllib.request, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.join(HERE, "..", ".env.staging.local")
+PRODUCTION_SUPABASE_REF = "flasgvendiiasuixeqzu"
+PRODUCTION_APP_HOST = "app.bitxbit.com.au"
 # A UNIQUE address per run. Reusing one address would need an "already exists" path, and
 # the only way to find an existing user is the admin list endpoint — which IGNORES its
 # ?email= filter (measured 2026-10-24: a bogus address returned all 19 users). Selecting
@@ -353,6 +355,11 @@ def main():
     ap.add_argument("base", help="deployed preview base URL")
     a = ap.parse_args()
     surl, skey = load_staging()
+    target_host = urllib.parse.urlparse(a.base).hostname
+    staging_ref = surl.split("//")[1].split(".")[0]
+    if staging_ref == PRODUCTION_SUPABASE_REF or target_host == PRODUCTION_APP_HOST:
+        print("REFUSING: the authenticated verification gate must never target production")
+        return 2
     print(f"target: {a.base}\nstaging: {surl.split('//')[1].split('.')[0]}\n")
     work = tempfile.mkdtemp(prefix="authzmatrix-")
     os.chmod(work, 0o700)

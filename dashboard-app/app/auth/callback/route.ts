@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { safeAuthNextPath } from "@/lib/auth-redirect";
 import { NextResponse } from "next/server";
 
 function isUuid(value: string): boolean {
@@ -9,7 +10,7 @@ function isUuid(value: string): boolean {
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = safeAuthNextPath(searchParams.get("next"));
   const ref = searchParams.get("ref");
 
   // Always redirect to the canonical app URL, not the origin of the magic link.
