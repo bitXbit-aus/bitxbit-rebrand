@@ -55,11 +55,35 @@ describe("R-007 auth-cookie cache safety", () => {
       if (!src.includes("@/lib/supabase/server")) continue;
       checked.push(file.slice(root.length + 1));
 
-      const marked =
-        src.includes("withAuthNoStore") ||
-        /cache-control["'\s:,]+[^\n]*no-store/i.test(src) ||
-        /"Cache-Control":\s*"private, no-store"/.test(src);
-      if (!marked) offenders.push(file.slice(root.length + 1));
+      // An import/mention is not a guard. GPT's exact-commit review demonstrated
+      // that deleting every wrapper call while retaining the import still passed
+      // the old check. Inspect EVERY return after createClient(): each possible
+      // post-auth response must either be wrapped or construct an explicit
+      // private/no-store response at that return site.
+      const postClient = src.slice(src.indexOf("createClient()") + "createClient()".length);
+      const returns = [...postClient.matchAll(/\breturn\s+([^;]+);/gs)].map((m) => m[1].trim());
+      const unmarked = returns.filter((expression) => {
+        if (expression.startsWith("withAuthNoStore(")) return false;
+        if (/cache-control["'\s:,]+[^\n]*no-store/i.test(expression)) return false;
+        if (/"Cache-Control":\s*"private, no-store"/.test(expression)) return false;
+
+        // A named response may be marked on the preceding line before return,
+        // as in the OAuth callback. Require the exact returned identifier to be
+        // the object whose header is set; an unrelated marked response must not
+        // bless another branch.
+        const identifier = expression.match(/^([A-Za-z_$][\w$]*)$/)?.[1];
+        if (!identifier) return true;
+        const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return !new RegExp(
+          `${escaped}\\.headers\\.set\\(\\s*["']Cache-Control["']\\s*,\\s*["']private, no-store["']\\s*\\)`,
+          "i"
+        ).test(postClient);
+      });
+      if (returns.length === 0 || unmarked.length > 0) {
+        offenders.push(
+          `${file.slice(root.length + 1)} (${returns.length === 0 ? "no return paths found" : `${unmarked.length} unmarked return path(s)`})`
+        );
+      }
     }
 
     assert.ok(checked.length > 0, "expected at least one auth-bearing route handler to check");

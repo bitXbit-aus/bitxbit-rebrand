@@ -200,8 +200,13 @@ def main() -> int:
     finally:
         shutil.rmtree(APP / "app" / PROBE_SEGMENT, ignore_errors=True)
         CONFIG.write_text(original)
+        # The final experiment build intentionally has the exclusion OFF and
+        # contains the synthetic route. Never leave that artifact available to
+        # `next start` or packaging tools after tracked source is restored.
+        shutil.rmtree(APP / ".next", ignore_errors=True)
         dirty = git("status", "--porcelain").strip()
-        print(f"\n[restored] working tree {'clean' if not dirty else 'DIRTY: ' + dirty}")
+        print(f"\n[restored] probe/config restored; instrumented .next removed; "
+              f"working tree {'clean' if not dirty else 'DIRTY: ' + dirty}")
 
 
 if __name__ == "__main__":

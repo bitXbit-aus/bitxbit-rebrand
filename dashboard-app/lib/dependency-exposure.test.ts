@@ -80,11 +80,32 @@ describe("R-002 bigint-buffer exposure", () => {
     assert.ok(patterns.length > 0, "the exclusion must contain at least one pattern");
 
     // Next 15 moved this option to the top level; nested under `experimental` it is
-    // silently ignored. Assert the placement structurally rather than trusting a
-    // build warning nobody reads.
-    assert.ok(
-      cfg.indexOf("outputFileTracingExcludes") < cfg.indexOf("experimental:"),
-      "outputFileTracingExcludes must be top-level, not nested under experimental (Next 15)"
+    // silently ignored. The previous check compared source POSITIONS, which is
+    // comment-sensitive: moving the real property under `experimental` still passed
+    // while an earlier comment retained the option's name. This instead measures
+    // the property's BRACE DEPTH inside the exported config object, so it is
+    // unaffected by comments or ordering. (A dynamic import is not usable here:
+    // this file compiles to CommonJS, where `import()` becomes `require()` and
+    // cannot load an `.mjs`.)
+    const clean = cfg
+      .replace(/\/\*[\s\S]*?\*\//g, "")      // block comments
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1"); // line comments, but not `https://`
+    const cfgStart = clean.search(/const\s+nextConfig\s*=\s*\{/);
+    assert.ok(cfgStart >= 0, "the config must still export a `nextConfig` object literal");
+    const objOpen = clean.indexOf("{", cfgStart);
+    const optionAt = clean.search(/\boutputFileTracingExcludes\s*:/);
+    assert.ok(optionAt > objOpen, "outputFileTracingExcludes must be configured inside nextConfig");
+
+    let depth = 0;
+    for (let i = objOpen; i < optionAt; i += 1) {
+      if (clean[i] === "{") depth += 1;
+      else if (clean[i] === "}") depth -= 1;
+    }
+    assert.equal(
+      depth,
+      1,
+      "outputFileTracingExcludes must be a top-level property of nextConfig (depth 1) — " +
+        "nested under `experimental` it is silently ignored by Next 15"
     );
 
     // The real artifact, not a guess about one.
