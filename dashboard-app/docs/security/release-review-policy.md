@@ -91,10 +91,10 @@ requirement, and `main` auto-deploys. Discipline, not tooling, is what holds thi
 
 | Field | Value |
 |---|---|
-| Reviewed commit | `3a441a27f0e0c0f305d7a90bbbb2ec1887b774a9` (PR #49 head) |
-| Reviewers | Two models from different labs, run in separate calls on the identical bundle |
-| Method | Whole-diff plus key full files, with an explicit adversarial prompt; no shared context with the implementer |
-| Findings | See `evidence/r007-independent-review-2026-10-24.md` and `evidence/r007-ai-review-2026-10-24.md` |
-| Status | See those documents — findings were re-measured by the implementer, and the review was repeated on the revised commit per condition 3 |
+| Reviewed commit | `ba0c765a26054c4004d223c457b58002b958b0e3` (PR #49 application head reviewed by both models) |
+| Reviewers | OpenAI `openai/gpt-6.1-sol-pro` and Google `google/gemini-3-flash-preview`, different labs, separate calls, identical exact-SHA bundle |
+| Method | Full diff plus key full files read from that SHA with `git show`; adversarial prompt; no shared model context; preflight secret scan 0 hits |
+| Findings | See `evidence/r007-independent-review-2026-10-24.md` for historical leads and `evidence/r007-ai-review-2026-10-24.md` for the final review of record |
+| Status | No critical findings. Substantive findings were independently measured; false findings and residual verification limits are recorded rather than silently discarded. Exact-SHA CI, 19/19 authenticated matrix and Solana devnet fault suite passed. Explicit owner approval remains outstanding. |
 
 **The human-review condition for this release is waived under §2, not satisfied.**

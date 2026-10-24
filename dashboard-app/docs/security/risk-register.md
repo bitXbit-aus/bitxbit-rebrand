@@ -473,16 +473,16 @@ ceiling is documented, not measured; not verified in a deployment.** See
 
 ## R-007 — Next.js 15 migration
 
-**Status:** **IMPLEMENTED 2026-10-24 (PR #49) — NOT released.** The plan's technical verifications are
-done — the authenticated matrix, and the session `setAll` path **on the 200 branch** — with one gap
-that independent review found and measurement confirmed (below). **Blockers:** independent **human**
-review (M8) — which the implementing agent cannot supply (GitHub returns `422` on self-approval) and
-which is **WAIVED, not satisfied, under owner decision D5** (two-model AI review instead; see
-`release-review-policy.md`) — and the owner's explicit release approval, which D5 requires and which
-has not yet been given. Evidence:
+**Status:** **IMPLEMENTED AND TECHNICALLY GATED 2026-10-24 (PR #49) — NOT released.** The exact
+application revision `ba0c765a26054c4004d223c457b58002b958b0e3` passed CI, the 19/19 deployed
+authentication/session matrix, the Solana devnet fault suite, and adversarial reviews by independent
+OpenAI and Google model families. Independent **human** review (M8) remains **UNSATISFIED** and is
+**WAIVED, not satisfied, under owner decision D5**. The remaining release blocker is the owner's
+explicit approval, which has not yet been given. Evidence:
 `evidence/r007-nextjs-15-migration-2026-10-24.md`,
 `evidence/r007-authenticated-verification-2026-10-24.md`,
-`evidence/r007-independent-review-2026-10-24.md`.
+`evidence/r007-independent-review-2026-10-24.md`, and
+`evidence/r007-ai-review-2026-10-24.md`.
 **Owner:** Shri — interim accountable owner.
 
 **What landed:** `next@15.5.28` · `react`/`react-dom` **^19.1.10 (lockfile resolves 19.3.1)** · `@supabase/ssr` 0.12.7 ·
@@ -502,9 +502,10 @@ as stated — removing the exclusion entirely and rebuilding gives **0** `.nft.j
 and that check cannot distinguish "excluded" from "never included". The placement fix stands on its
 own merits; it is not what is preventing exposure. See R-002.
 
-**Verified:** tsc 0 errors · 167/167 tests · migration replay + 4 races · build clean · `next`
-absent from the audit · **D4** staging isolation on `deploy-preview-49` (0 production refs,
-devnet mint) · `test:staging` and `test:solana-fault` all pass.
+**Verified on the final reviewed application revision:** tsc 0 errors · **179/179 tests** · migration
+replay + 4 races in the successful exact-head GitHub check · build clean · no advisory directly
+targets `next` · **D4** staging isolation on `deploy-preview-49` (0 production refs, devnet mint) ·
+19/19 authenticated matrix · `test:staging` and `test:solana-fault` pass.
 
 **Verified in a deployment — the full authenticated matrix (§5.3): 19/19** (the gate has grown as
 review findings were closed; the earlier "12/12" was a smaller revision of it). Manual gate, **not
@@ -546,12 +547,17 @@ mutation-verified (removing the copy fails 2 tests; dropping attributes fails 1)
 | **Nested React 18** ships under `@fractalwagmi/solana-wallet-adapter` alongside React 19. Two React copies can produce "Invalid hook call", visible only in a browser | Wallet-stack dependency surgery is R-002 territory; out of scope for a migration whose job is to change nothing else. **The wallet path needs a browser exercise before launch.** |
 | **`sharp` and other native deps entered the tree** via Next 15, so "0 `.node` files" is no longer package-specific | R-002's check is documented as non-falsifying; a discriminating test is separate work. |
 | **Per-IP rate limiting is weak for IPv6 clients.** Re-measured on Next 15: counters carry the real client (so R-004's control holds), but the same host presented **two different IPv6 privacy addresses within a minute** — each gets its own bucket | Inherent to IP-based limiting; the fix is to key on the authenticated user. Out of scope. |
-| **`app/admin/users/page.tsx` reads every user with the service-role client and no in-page guard** | Pre-existing; the `"use server"` guard rule does not cover pages. Recorded because this migration rewrote the file and the middleware. |
+| **The auth matrix's state PATCH helper does not independently verify exact row count and returned values** | Later route behaviour detects most failures, but the deactivated phase could pass while still suspended. Recorded as harness hardening, not an observed application defect. |
+| **The redirect refresh probe checks auth-cookie presence/attributes but does not merge deletion/chunk semantics and replay the exact redirected jar** | Focused helper tests and the deployed auth-cookie response pass, but this is weaker than the 200-response refresh replay. |
+| **The page-level refresh check cannot uniquely prove whether middleware or the downstream page performed the last refresh inside the provider's reuse window** | It proves a usable authenticated rendered page, not the precise refreshing layer. No production defect was reproduced. |
 | **No browser sign-in exercised** (client cookie write, PKCE verifier, `/auth/callback` exchange) | Recorded in the authenticated-verification evidence. The server adapter and legacy-cookie compatibility were tested directly. |
 | **Cookie writes outside middleware / the PKCE callback** are not marked `no-store` | `cookies()` gives no access to response headers. |
 | **The review process has no platform enforcement** — `main` requires no approving review and auto-deploys | Structural; see `release-review-policy.md`. |
 
-**Remaining blocker:** **independent review (M8)** — not a technical gap; **waived, not satisfied, under D5**, and the owner's explicit release approval has not yet been given.
+**Remaining blocker:** the owner's explicit release approval has not yet been given. Independent human
+review remains **waived, not satisfied, under D5**; the owner-authorised substitute — two different
+model-family reviews of exact application revision `ba0c765a…` — is complete. PR #51 must still land
+before PR #49; neither merge is authorised by this status.
 
 `15.5.28` remains the approved target (D1). Successor to R-001: when the migration lands and is
 independently approved, **R-001 is closed as remediated, not renewed.**
