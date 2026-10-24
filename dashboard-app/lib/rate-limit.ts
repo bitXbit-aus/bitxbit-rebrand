@@ -5,6 +5,7 @@ import {
   buildRateLimitHealth,
   rateLimitHealthSnapshot,
   recordRateLimitDegradation,
+  recordUnresolvedClient,
 } from "./rate-limit-health";
 
 let sharedStore: RateLimitStore | undefined;
@@ -113,10 +114,20 @@ export function getClientIdentifier(request: NextRequest): string {
   // Last resort: one shared bucket, "anonymous". Coarse, but safe — it never
   // lets a caller choose its own key.
   //
+  // Deliberately NOT derived from caller-controlled input. Independent review
+  // suggested a "coarser per-client fallback" (e.g. a hash of User-Agent), but
+  // that trades a fail-closed availability risk for an EVASION risk: a caller
+  // could rotate its own User-Agent to mint fresh buckets and escape the limit
+  // entirely. A single shared bucket cannot be evaded that way, so the bucket
+  // stays. The genuine defect was that this state was INVISIBLE — a single
+  // caller could exhaust the shared bucket and nobody could see it — so it is
+  // now recorded and exposed on the rate-limit health surface.
+  //
   // Next.js 15 **removed `NextRequest.ip`**, so the previous `request.ip`
   // fallback is gone rather than replaced. It was never populated on Netlify
   // anyway (documented above), so production behaviour is unchanged: resolution
   // comes only from `resolveClientIp`, or the shared bucket.
+  recordUnresolvedClient();
   return "anonymous";
 }
 
@@ -147,6 +158,11 @@ export function rateLimitResponse(
     rateLimitHealthSnapshot()
   ).degraded;
 
+  // Surface the client-attribution state on the rejection itself, so a limiter
+  // that is bucketing everyone together is visible from the response and not
+  // only from a log line production does not keep.
+  const unresolved = rateLimitHealthSnapshot().unresolvedClientCount > 0;
+
   return NextResponse.json(
     { error: "Too many requests. Please try again later." },
     {
@@ -154,6 +170,7 @@ export function rateLimitResponse(
       headers: {
         "Retry-After": String(Math.ceil((resetAt - Date.now()) / 1000)),
         "x-ratelimit-degraded": String(degraded),
+        "x-ratelimit-client-resolution": unresolved ? "shared-bucket" : "ok",
       },
     }
   );

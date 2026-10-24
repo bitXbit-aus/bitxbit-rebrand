@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { parseHostPolicy, validateRequestHost } from "@/lib/host-validation";
 import { resolveClientIp, withClientIp } from "@/lib/client-ip";
 import { redirectWithCookies } from "@/lib/middleware-redirect";
+import { createMiddlewareCookieAdapter } from "@/lib/supabase/middleware-cookies";
 
 interface MiddlewareAuthorization {
   role: "member" | "admin";
@@ -77,50 +78,28 @@ export async function middleware(request: NextRequest) {
   // Built fresh at each use so cookies refreshed below are still forwarded.
   const forwardHeaders = () => withClientIp(new Headers(request.headers), clientIp);
 
-  let response = NextResponse.next({
-    request: {
-      headers: forwardHeaders(),
-    },
-  });
+  // The response is rebuilt on every `setAll` call so it carries the refreshed request
+  // headers (the cookie header included). The adapter itself lives in
+  // lib/supabase/middleware-cookies.ts so its semantics are EXECUTED by unit tests —
+  // the deployed gate cannot tell "middleware forwarded the refreshed request cookies"
+  // from "the page refreshed the session itself". `state.response` is always the
+  // current response; never hold a stale reference to it.
+  const state = {
+    response: NextResponse.next({
+      request: {
+        headers: forwardHeaders(),
+      },
+    }),
+  };
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      // @supabase/ssr 0.12.x interface — 0.1.0's get/set/remove is gone. The
-      // behaviour mirrors the old set/remove exactly: mutate the request cookies,
-      // rebuild the response that carries the forwarded client-IP header, then
-      // write the cookies onto it. Do not simplify this — a wrong adapter here
-      // causes silent session loss rather than an error (plan §3.3).
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet, headersToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            request.cookies.set({ name, value, ...options });
-          });
-          // The response is rebuilt so it carries the refreshed request headers (the
-          // cookie header included). Carry the cookies written by any EARLIER setAll call
-          // across the rebuild — replacing the object outright would silently drop them,
-          // and @supabase/ssr can invoke setAll more than once per request.
-          const alreadyWritten = response.cookies.getAll();
-          response = NextResponse.next({
-            request: { headers: forwardHeaders() },
-          });
-          for (const cookie of alreadyWritten) {
-            response.cookies.set(cookie);
-          }
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set({ name, value, ...options });
-          });
-          // Headers the library requires alongside the cookies (cache directives). Dropping
-          // them would allow a cacheable response to carry auth cookies.
-          for (const [key, value] of Object.entries(headersToSet ?? {})) {
-            response.headers.set(key, value);
-          }
-        },
-      },
+      // @supabase/ssr 0.12.x interface — 0.1.0's get/set/remove is gone.
+      cookies: createMiddlewareCookieAdapter(request, state, () =>
+        NextResponse.next({ request: { headers: forwardHeaders() } })
+      ),
     }
   );
 
@@ -135,7 +114,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/auth/login") || pathname.startsWith("/auth/signup");
 
   if (!user && (isAdminRoute || isDashboardRoute)) {
-    return applySecurityHeaders(redirectWithCookies(new URL("/auth/login", request.url), response));
+    return applySecurityHeaders(redirectWithCookies(new URL("/auth/login", request.url), state.response));
   }
 
   let authorization: MiddlewareAuthorization | null = null;
@@ -154,18 +133,18 @@ export async function middleware(request: NextRequest) {
   if (user && (isAdminRoute || isDashboardRoute) && !isActive) {
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("error", "account_inactive");
-    return applySecurityHeaders(redirectWithCookies(loginUrl, response));
+    return applySecurityHeaders(redirectWithCookies(loginUrl, state.response));
   }
 
   if (user && isAdminRoute && authorization?.role !== "admin") {
-    return applySecurityHeaders(redirectWithCookies(new URL("/dashboard", request.url), response));
+    return applySecurityHeaders(redirectWithCookies(new URL("/dashboard", request.url), state.response));
   }
 
   if (user && isAuthEntryRoute && isActive) {
-    return applySecurityHeaders(redirectWithCookies(new URL("/dashboard", request.url), response));
+    return applySecurityHeaders(redirectWithCookies(new URL("/dashboard", request.url), state.response));
   }
 
-  return applySecurityHeaders(response);
+  return applySecurityHeaders(state.response);
 }
 
 export const config = {
