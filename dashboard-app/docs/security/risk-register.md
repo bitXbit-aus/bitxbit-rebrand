@@ -470,16 +470,36 @@ ceiling is documented, not measured; not verified in a deployment.** See
 
 ---
 
-## R-007 — Next.js 15 migration outstanding
+## R-007 — Next.js 15 migration
 
-**Status:** PLANNED — Decision C approved 2026-10-19; D1/D2/D3 resolved.
-**Owner:** Shri — interim accountable owner. Implementation ownership to be
-delegated.
+**Status:** **IMPLEMENTED 2026-10-24 (PR #49) — NOT released.** Automated gate green and the
+deployed staging regression (D4) passed on a Next 15 preview, but the migration is **not** a
+remediated risk yet. Two release blockers remain: the **authenticated** half of the authorisation
+matrix (session persistence — the plan's highest-risk item) and **independent review (M8)**.
+Full evidence: `evidence/r007-nextjs-15-migration-2026-10-24.md`.
+**Owner:** Shri — interim accountable owner.
 
-`next@15.5.26` is the **minimum version clearing all 34 `next` advisories**;
-`15.5.28` is the approved target (D1). Plan:
-`docs/security/nextjs-15-migration-plan.md`. Successor to R-001: when the migration
-lands and is independently approved, **R-001 is closed as remediated, not renewed.**
+**What landed:** `next@15.5.28` · `react`/`react-dom` 19.1.10 · `@supabase/ssr` 0.12.7 ·
+`@supabase/supabase-js` ^2.114 (2.117.1). `npm audit`: **`next` advisories 25 → 0**. Async request
+APIs (`await cookies()`, async `createClient()` + 24 awaited call sites, awaited `searchParams`);
+`getAll`/`setAll` cookie adapters in `lib/supabase/server.ts` and `middleware.ts`.
+
+**A control was nearly lost silently.** Next 15 moved `outputFileTracingExcludes` from
+`experimental` to top level; left in place it is **unrecognized and silently ignored**, which
+would have disabled **R-002's structural backstop** and traced `bigint-buffer`'s native addon back
+into the server bundle. Moved and re-verified (`.next`: **0** `.node` files).
+
+**Verified:** tsc 0 errors · 167/167 tests · migration replay + 4 races · build clean · `next`
+absent from the audit · **D4** staging isolation on `deploy-preview-49` (0 production refs,
+devnet mint) · `test:staging` and `test:solana-fault` all pass · unauthenticated redirect rows of
+the §5.3 matrix (307 → `/auth/login`).
+
+**NOT verified:** any authenticated path — nothing above signs a user in, so the cookie `setAll`
+branch is unexercised, and a wrong adapter fails **silently** rather than loudly. Suspended /
+deactivated / admin rows of the matrix are likewise unverified.
+
+`15.5.28` remains the approved target (D1). Successor to R-001: when the migration lands and is
+independently approved, **R-001 is closed as remediated, not renewed.**
 
 ---
 
@@ -1049,7 +1069,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
 | R-005 | Server Actions not rate limited | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per authenticated user; enforcement observed on a deployed preview (6 allowed, #7 refused with a returned, legible `{error}`); counter seen in the shared store keyed on the user id | Shri (interim) | NA-3 done |
 | R-006 | No explicit request-size limits | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; a deployed preview refused a genuine 4 MB file with a returned, legible `{error}` (HTTP 200, not 500) | Shri (interim) | NA-4 done |
-| R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
+| R-007 | Next.js 15 migration | **IMPLEMENTED 2026-10-24 (PR #49) — not released.** `next@15.5.28` + React 19 + Supabase SSR 0.12.7; `next` advisories 25 → 0; tsc/tests/migration replay/build green; D4 staging regression passed on a preview. **Blockers:** authenticated session persistence (unverified — the cookie adapter fails silently) and independent review (M8) | Shri (interim) | PR #49 |
 | R-008 | Production pre-010, no ledger | ✅ **RESOLVED** — `010`–`026` applied and verified; ledger backfilled. **Re-measured 2026-10-23:** production ledger is complete `001`–`027`, all Phase 1 landmarks present, and the code is **deployed** (PR #1 merged 2026-10-20) — the "window remains open" text was stale | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). **Leaked service-role key rotated 2026-10-23** — new key live, old key revoked, production re-verified after revocation. | Shri (interim) | **NA-8** ✅ |
 | R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Rotation of the exposed service-role key **completed 2026-10-23** — new key live, leaked key revoked, production re-verified after revocation. | Shri (interim) | NA-9 |
