@@ -72,11 +72,133 @@ def decode_session(cookies):
         return None
 
 
+# ---- browser-equivalent cookie jar -----------------------------------------
+# A browser keeps every cookie the response did not mention, REPLACES by name,
+# and REMOVES on a deletion (Max-Age<=0 / past Expires). The earlier probe
+# discarded the original cookies and used the response alone, so it could pass
+# while a real browser held a stale leftover. Review flagged that; this closes it.
+
+def parse_set_cookie(header):
+    parts = header.split(";")
+    name, _, value = parts[0].partition("=")
+    out = {"name": name.strip(), "value": value.strip(), "max_age": None, "expires": None}
+    for attr in parts[1:]:
+        k, _, v = attr.partition("=")
+        k, v = k.strip().lower(), v.strip()
+        if k == "max-age":
+            try:
+                out["max_age"] = int(v)
+            except ValueError:
+                pass
+        elif k == "expires":
+            out["expires"] = v
+    return out
+
+
+def is_deletion(cookie):
+    if cookie["max_age"] is not None and cookie["max_age"] <= 0:
+        return True
+    if cookie["expires"]:
+        try:
+            from email.utils import parsedate_to_datetime
+            return parsedate_to_datetime(cookie["expires"]).timestamp() <= time.time()
+        except Exception:
+            return False
+    return False
+
+
+class CookieJar:
+    def __init__(self, cookies=None):
+        self.jar = {c["name"]: c["value"] for c in (cookies or [])}
+
+    def apply(self, set_cookie_headers):
+        for header in set_cookie_headers:
+            c = parse_set_cookie(header)
+            if is_deletion(c):
+                self.jar.pop(c["name"], None)
+            else:
+                self.jar[c["name"]] = c["value"]
+        return self
+
+    def auth_value(self, ref):
+        """Reconstruct the auth-cookie family the way the SSR reader does: the
+        base name, or numbered chunks joined in CHUNK-NUMBER order. Returns
+        (value, stale) where stale means both a base cookie and chunks are
+        present — two generations in one jar, which a browser really can hold."""
+        base = f"sb-{ref}-auth-token"
+        chunks = []
+        for name, value in self.jar.items():
+            if name.startswith(base + "."):
+                tail = name.rsplit(".", 1)[1]
+                if tail.isdigit():
+                    chunks.append((int(tail), value))
+        chunks.sort()
+        has_base = base in self.jar
+        if has_base and chunks:
+            return self.jar[base], True
+        if has_base:
+            return self.jar[base], False
+        if chunks:
+            return "".join(v for _, v in chunks), False
+        return None, False
+
+    def as_cookies(self):
+        return [{"name": k, "value": v} for k, v in self.jar.items()]
+
+
+def decode_jar(jar, ref):
+    """Decode the jar's auth family back to a session dict. Returns (session, stale)."""
+    value, stale = jar.auth_value(ref)
+    if not value:
+        return None, stale
+    return decode_session([{"name": f"sb-{ref}-auth-token", "value": value}]), stale
+
+
+def jar_selftest():
+    """Deterministic proof that the merge is browser-equivalent on the three
+    transitions a browser performs: replacement by name, deletion, chunk shrink.
+    No network — this runs even if the deployed gate cannot."""
+    ref = "selftest"
+    base = f"sb-{ref}-auth-token"
+
+    jar = CookieJar([{"name": base, "value": "OLD"}]).apply([f"{base}=NEW; Path=/; Max-Age=3600"])
+    if jar.jar.get(base) != "NEW":
+        return False, "replacement by name failed"
+
+    jar.apply([f"{base}=; Path=/; Max-Age=0"])
+    if base in jar.jar:
+        return False, "deletion (Max-Age=0) did not remove the cookie"
+
+    jar = CookieJar([{"name": f"{base}.0", "value": "A"},
+                     {"name": f"{base}.1", "value": "B"},
+                     {"name": f"{base}.2", "value": "C"}])
+    jar.apply([f"{base}.0=X; Path=/; Max-Age=3600",
+               f"{base}.1=; Path=/; Max-Age=0",
+               f"{base}.2=; Path=/; Max-Age=0"])
+    value, stale = jar.auth_value(ref)
+    if value != "X" or stale:
+        return False, f"chunk shrink failed (value={value!r}, stale={stale})"
+
+    # A base cookie surviving alongside chunks must be reported as stale, not
+    # silently preferred — that is the leftover-cookie hazard in one assertion.
+    jar = CookieJar([{"name": base, "value": "BASE"}, {"name": f"{base}.0", "value": "CHUNK"}])
+    _, stale = jar.auth_value(ref)
+    if not stale:
+        return False, "base+chunk coexistence was not flagged as stale"
+
+    return True, "replacement, deletion, chunk-shrink and stale-detection hold"
+
+
 class Probe:
     def __init__(self, base, surl, skey, workdir):
         self.base, self.surl, self.skey, self.work = base, surl, skey, workdir
         self.uid = None
         self.results = []
+
+    @property
+    def sref(self):
+        """The Supabase project ref, i.e. the `sb-<ref>-auth-token` cookie prefix."""
+        return self.surl.split("//")[1].split(".")[0]
 
     # ---- staging admin API -------------------------------------------------
     def sb(self, method, path, body=None):
@@ -265,6 +387,10 @@ class Probe:
             self.cleanup_ok = clean
 
     def _run_checks(self):
+        jar_ok, jar_note = jar_selftest()
+        self.check("cookie-jar merge is browser-equivalent", lambda c, l: jar_ok, 0, None,
+                   note=f"[{jar_note}]")
+
         sess = self.mint_session()
         valid = self.build_cookies(sess)
         expired = self.build_cookies(sess, expired=True)
@@ -342,22 +468,35 @@ class Probe:
 
         # (a) The refresh must ALSO reach the client on a REDIRECT branch — the defect fixed
         #     in PR #51. Without the fix this returns the redirect with no Set-Cookie.
+        #     Strengthened after review: the response is merged into the ORIGINAL jar with
+        #     browser semantics (replace by name, delete on Max-Age<=0, chunks in numeric
+        #     order) and the MERGED jar is decoded, compared and REPLAYED — not the response's
+        #     own cookies alone, which a browser would never send by itself.
         self.set_authz(status="suspended")
+        before_session, _ = decode_jar(CookieJar(expired_redirect), self.sref)
         c_r, l_r, h_r = self.get("/dashboard", expired_redirect)
         setc_r = h_r.get_all("Set-Cookie") or []
-        redirect_cookies = [{"name": s.split(";", 1)[0].split("=", 1)[0],
-                             "value": s.split(";", 1)[0].split("=", 1)[1]} for s in setc_r]
-        decoded_r = decode_session(redirect_cookies) if redirect_cookies else None
-        same_user_r = bool(decoded_r) and (decoded_r.get("user") or {}).get("id") == self.uid
+        merged = CookieJar(expired_redirect).apply(setc_r)
+        after_session, stale_r = decode_jar(merged, self.sref)
+        same_user_r = bool(after_session) and (after_session.get("user") or {}).get("id") == self.uid
+        rotated_r = bool(before_session and after_session
+                         and before_session.get("access_token") != after_session.get("access_token"))
         self.check("redirect branch carries the refreshed cookie",
                    lambda c, l: c == 307 and bool(setc_r), c_r, l_r, note=f"[{len(setc_r)} Set-Cookie]")
-        # Strengthened after review: a bare `bool(setc)` also passes for a response that
-        # CLEARED the session, emitted only an unrelated cookie, or dropped a required chunk.
-        # Require the redirect's auth cookie to decode to the same user.
-        self.check("redirect cookie is a usable same-user session",
-                   lambda c, l: same_user_r, c_r, l_r,
-                   note="[decoded, same user]" if same_user_r else "[missing/foreign/undecodable]")
+        # A bare `bool(setc)` also passes for a response that CLEARED the session, emitted only
+        # an unrelated cookie, dropped a required chunk, or left a stale generation behind.
+        self.check("merged redirected jar is a usable same-user session",
+                   lambda c, l: same_user_r and not stale_r, c_r, l_r,
+                   note=("[decoded, same user]" if same_user_r else "[missing/foreign/undecodable]")
+                        + (" [STALE LEFTOVER]" if stale_r else ""))
+        self.check("redirect refresh actually rotated the access token",
+                   lambda c, l: rotated_r, c_r, l_r)
         self.set_authz(role="member", status="active")
+        # Replay the MERGED jar — original cookies plus the response's updates — which is what
+        # a browser would send on the next request, after authorization is restored.
+        c_rep, l_rep, _ = self.get("/dashboard", merged.as_cookies())
+        self.check("replayed merged redirected jar authenticates", lambda c, l: c == 200, c_rep, l_rep)
+
         # A second redirect branch: an expired session hitting a DENIED route must also carry
         # the refreshed cookie, not only the suspended-user branch.
         expired_admin = self.build_cookies(self.mint_session(), expired=True)
