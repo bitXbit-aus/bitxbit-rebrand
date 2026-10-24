@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export default async function TransparencyPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const { data: model } = await supabase
     .from("allocation_models")

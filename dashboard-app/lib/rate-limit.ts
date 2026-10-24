@@ -110,10 +110,14 @@ export function getClientIdentifier(request: NextRequest): string {
   const resolved = resolveClientIp(request.headers);
   if (resolved) return resolved;
 
-  // Last resort. `request.ip` is not populated on Netlify, so this is normally
-  // "anonymous": one shared bucket. Coarse, but safe — it never lets a caller
-  // choose its own key.
-  return request.ip ?? "anonymous";
+  // Last resort: one shared bucket, "anonymous". Coarse, but safe — it never
+  // lets a caller choose its own key.
+  //
+  // Next.js 15 **removed `NextRequest.ip`**, so the previous `request.ip`
+  // fallback is gone rather than replaced. It was never populated on Netlify
+  // anyway (documented above), so production behaviour is unchanged: resolution
+  // comes only from `resolveClientIp`, or the shared bucket.
+  return "anonymous";
 }
 
 export async function checkRateLimit(

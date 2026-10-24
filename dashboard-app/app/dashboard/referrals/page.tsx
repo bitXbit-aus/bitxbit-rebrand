@@ -36,7 +36,7 @@ export default function ReferralsPage() {
 }
 
 async function ReferralsData() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 

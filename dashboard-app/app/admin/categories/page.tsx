@@ -5,7 +5,7 @@ import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createCategory, updateCategory, deleteCategory } from "@/lib/actions";
 
 export default async function AdminCategoriesPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: categories } = await supabase.from("categories").select("*").order("display_order");
 
   return (

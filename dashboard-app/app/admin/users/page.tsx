@@ -3,21 +3,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { UsersTable } from "@/components/admin/users-table";
 
 interface PageProps {
-  searchParams: {
+  // Next 15: `searchParams` is a Promise, so the page awaits it.
+  searchParams: Promise<{
     search?: string;
     role?: string;
     status?: string;
     page?: string;
-  };
+  }>;
 }
 
 export default async function AdminUsersPage({ searchParams }: PageProps) {
   const supabase = createServiceClient();
+  const resolvedSearchParams = await searchParams;
 
-  const search = (searchParams.search ?? "").trim();
-  const roleFilter = searchParams.role ?? "all";
-  const statusFilter = searchParams.status ?? "all";
-  const page = Math.max(1, parseInt(searchParams.page ?? "1", 10) || 1);
+  const search = (resolvedSearchParams.search ?? "").trim();
+  const roleFilter = resolvedSearchParams.role ?? "all";
+  const statusFilter = resolvedSearchParams.status ?? "all";
+  const page = Math.max(1, parseInt(resolvedSearchParams.page ?? "1", 10) || 1);
   const pageSize = 20;
 
   let query = supabase.from("users").select("*", { count: "exact" });

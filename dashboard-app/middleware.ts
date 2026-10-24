@@ -1,4 +1,4 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { parseHostPolicy, validateRequestHost } from "@/lib/host-validation";
 import { resolveClientIp, withClientIp } from "@/lib/client-ip";
@@ -79,23 +79,25 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // @supabase/ssr 0.12.x interface — 0.1.0's get/set/remove is gone. The
+      // behaviour mirrors the old set/remove exactly: mutate the request cookies,
+      // rebuild the response that carries the forwarded client-IP header, then
+      // write the cookies onto it. Do not simplify this — a wrong adapter here
+      // causes silent session loss rather than an error (plan §3.3).
       cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value;
+        getAll() {
+          return request.cookies.getAll();
         },
-        set(name: string, value: string, options: CookieOptions) {
-          request.cookies.set({ name, value, ...options });
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            request.cookies.set({ name, value, ...options });
+          });
           response = NextResponse.next({
             request: { headers: forwardHeaders() },
           });
-          response.cookies.set({ name, value, ...options });
-        },
-        remove(name: string, options: CookieOptions) {
-          request.cookies.set({ name, value: "", ...options });
-          response = NextResponse.next({
-            request: { headers: forwardHeaders() },
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set({ name, value, ...options });
           });
-          response.cookies.set({ name, value: "", ...options });
         },
       },
     }

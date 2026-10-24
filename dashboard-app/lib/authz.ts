@@ -84,7 +84,7 @@ function toAuthorizationRecord(row: AuthorizationRow): AuthorizationRecord {
 async function getAuthenticatedAuthorization(
   options: AuthorizationOptions = {}
 ): Promise<AuthorizationContext> {
-  const sessionClient = createClient();
+  const sessionClient = await createClient();
   const {
     data: { user },
     error: userError,

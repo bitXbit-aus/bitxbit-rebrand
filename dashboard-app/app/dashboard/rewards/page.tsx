@@ -9,7 +9,7 @@ import { RewardsExportButton } from "@/components/dashboard/rewards-export-butto
 import { RewardsPageChart } from "./rewards-page-chart";
 
 export default async function RewardsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   const { data: rewards } = await supabase

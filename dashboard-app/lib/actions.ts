@@ -120,7 +120,7 @@ async function auditedAdminMutation<T>(
 
 export async function updateProfile(formData: FormData) {
   const { user } = await requireActiveUser();
-  const supabase = createClient();
+  const supabase = await createClient();
   const displayName = formData.get("displayName") as string;
 
   const { error } = await supabase

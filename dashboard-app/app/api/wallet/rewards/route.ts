@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     return rateLimitResponse(rateLimit.resetAt);
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {

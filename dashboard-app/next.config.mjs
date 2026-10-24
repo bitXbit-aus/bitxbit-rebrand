@@ -69,13 +69,18 @@ const nextConfig = {
     domains: ['localhost'],
     unoptimized: true,
   },
+  // R-002's structural backstop. In Next 15 this option moved from `experimental`
+  // to the top level — left under `experimental` the build reports it as an
+  // unrecognized key AND silently stops excluding the addon, which is the failure
+  // mode this exclusion exists to prevent. Top level, verified by the build
+  // warning being absent and by `.next` containing no `.node` files.
+  outputFileTracingExcludes: {
+    '*': BIGINT_BUFFER_NATIVE_EXCLUDE,
+  },
   experimental: {
     serverActions: {
       allowedOrigins: allowedServerActionOrigins(),
       bodySizeLimit: SERVER_ACTION_BODY_SIZE_LIMIT,
-    },
-    outputFileTracingExcludes: {
-      '*': BIGINT_BUFFER_NATIVE_EXCLUDE,
     },
   },
 };

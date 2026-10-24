@@ -5,7 +5,7 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 import { Trophy, Users, MousePointer, TrendingUp } from "lucide-react";
 
 export default async function AdminReferralsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const { data: users } = await supabase
     .from("users")
