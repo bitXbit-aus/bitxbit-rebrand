@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { handleServerCookieWriteError } from "./cookie-write";
 
 /**
  * Server-side Supabase client, backed by the request's cookies.
@@ -37,11 +38,10 @@ export async function createClient() {
             // refreshed. Anything else is a real failure (a Route Handler or Server Action where
             // the write is the whole point: swallowing it yields a "successful" sign-in with no
             // session, or a refresh the browser never receives), so surface it rather than
-            // discarding it silently. We still do not rethrow: a render must not break.
-            const message = error instanceof Error ? error.message : String(error);
-            if (!/read-only|can only be modified|outside a request scope|Server Component/i.test(message)) {
-              console.warn("[supabase/server] cookie write failed:", message);
-            }
+            // discarding it silently. The helper ignores only Next's exact read-only
+            // Server Component error and rethrows everything else, so a Route Handler
+            // or Server Action cannot report success after failing to persist a session.
+            handleServerCookieWriteError(error);
           }
           // `headersToSet` (the library's cache directives) cannot be applied here: `cookies()`
           // writes cookies only, with no access to the response headers. Responses that carry

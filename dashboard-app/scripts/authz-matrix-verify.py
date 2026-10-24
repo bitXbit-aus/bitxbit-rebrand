@@ -212,6 +212,23 @@ class Probe:
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode("utf-8", "replace")
 
+    @staticmethod
+    def rendered_page(body, marker):
+        """Reject Next's global error shell and require complete, page-specific HTML.
+
+        A streamed Server Component can send HTTP 200 before rendering fails, so status
+        alone is not a regression check. Requiring the marker catches failures before
+        the page returns its JSX (including the repeated-searchParams crash), while the
+        closing tag rejects a truncated stream.
+        """
+        lower = body.lower()
+        return (
+            marker in body
+            and "</html>" in lower
+            and 'id="__next_error__"' not in lower
+            and "application error:" not in lower
+        )
+
     def check(self, label, pred, code, loc, note=""):
         ok = bool(pred(code, loc))
         self.results.append(ok)
@@ -266,8 +283,11 @@ class Probe:
         self.check("session -> /admin [allowed]", lambda c, l: c == 200, *self.get("/admin", valid)[:2])
         # A repeated query key (?search=a&search=b) delivers searchParams values as an ARRAY.
         # Before the guard in app/admin/users/page.tsx this threw on `.trim()` and 500'd.
-        self.check("repeated query key does not crash /admin/users",
-                   lambda c, l: c == 200, *self.get("/admin/users?search=a&search=b", valid)[:2])
+        repeated_code, repeated_body = self.get_body("/admin/users?search=a&search=b", valid)
+        repeated_rendered = self.rendered_page(repeated_body, ">Users<")
+        self.check("repeated query key renders /admin/users",
+                   lambda c, l: c == 200 and repeated_rendered, repeated_code, None,
+                   note="[complete Users page]" if repeated_rendered else "[error/truncated page]")
         self.set_authz(role="member", status="active")
 
         print("\n  session refresh (setAll adapter — silent-session-loss path)")
@@ -320,7 +340,7 @@ class Probe:
         #     the user's display name and falls back to the literal "there" when its own
         #     getUser() sees nothing — so the body discriminates the two.
         c_p, body = self.get_body("/dashboard", expired_page)
-        saw_user = PROBE_LOCALPART in body
+        saw_user = self.rendered_page(body, PROBE_LOCALPART)
         self.check("refreshed session reaches the PAGE (not just middleware)",
                    lambda c, l: c_p == 200 and saw_user, c_p, None,
                    note="[display name present]" if saw_user else "[page fell back to 'there']")
