@@ -473,17 +473,26 @@ ceiling is documented, not measured; not verified in a deployment.** See
 
 ## R-007 — Next.js 15 migration
 
-**Status:** **IMPLEMENTED AND TECHNICALLY GATED 2026-10-24 (PR #49) — NOT released.** The terminal
-candidate `294a1dc5d59e5873647696a2ba6449518466e0a7` passed exact-head CI, the **21/21** deployed
-authentication/session matrix, the Solana devnet fault suite, and adversarial reviews by independent
-OpenAI and Google model families (application tree byte-identical to `ba0c765a…`). Independent
-**human** review (M8) remains **UNSATISFIED** and is **WAIVED, not satisfied, under owner decision
-D5**. The remaining release blocker is the owner's explicit approval, which has not yet been given.
+**Status:** **IMPLEMENTED AND TECHNICALLY GATED 2026-10-24 (PR #49) — NOT released.** The final
+candidate `299b99539539c03cc11e9fe30098fe66c9876a69` passed exact-head CI, the **24/24** deployed
+authentication/session matrix, the R-002 two-build tracing control, the Solana devnet fault suite,
+a real-browser pass bound to that revision, and adversarial reviews by two independent model labs
+(OpenAI and Google), neither of which reported a critical or high finding. Independent **human**
+review (M8) remains **UNSATISFIED** and is **WAIVED, not satisfied, under owner decision D5**.
+The remaining release blocker is the owner's explicit approval, which has not yet been given.
 Evidence:
+`evidence/r007-final-review-299b995-2026-10-24.md` (review of record),
 `evidence/r007-nextjs-15-migration-2026-10-24.md`,
 `evidence/r007-authenticated-verification-2026-10-24.md`,
-`evidence/r007-independent-review-2026-10-24.md`, and
-`evidence/r007-ai-review-2026-10-24.md`.
+`evidence/r007-browser-verification-2026-10-24.md`,
+`evidence/r002-trace-control-2026-10-24.md`, and
+`evidence/r007-independent-review-2026-10-24.md` (superseded historical leads).
+
+**Verification scope, stated precisely — the browser/client paths are NOT verified.** What is
+verified is the server-side authentication, authorisation, session-refresh, cache-safety and payout
+paths, plus authenticated *rendering* in a real browser from an injected session cookie. Application
+sign-in/PKCE cookie writing and wallet connect/sign/disconnect remain **unverified residuals**, as
+does the preview-only callback-destination behaviour. Do not read this entry as "fully verified".
 **Owner:** Shri — interim accountable owner.
 
 **What landed:** `next@15.5.28` · `react`/`react-dom` **^19.1.10 (lockfile resolves 19.3.1)** · `@supabase/ssr` 0.12.7 ·
@@ -499,9 +508,14 @@ silently ignored**, so the exclusion would quietly stop applying. It was moved. 
 (2026-10-24, from the AI review and then measured):** the original text here claimed the addon "would
 have been traced back in" and cited `.next` containing **0** `.node` files as proof. Both are wrong
 as stated — removing the exclusion entirely and rebuilding gives **0** `.nft.json` traces mentioning
-`bigint-buffer` and **0** `.node` files, i.e. **identical**, so the exclusion is **currently inert**
-and that check cannot distinguish "excluded" from "never included". The placement fix stands on its
-own merits; it is not what is preventing exposure. See R-002.
+`bigint-buffer` and **0** `.node` files, i.e. **identical**, so that check cannot distinguish
+"excluded" from "never included" and was non-discriminating. **Superseded 2026-10-24 by a
+discriminating control** (`scripts/r002-trace-control.py`): with a synthetic traceable import of
+`bigint-buffer` and a routable probe route, the exclusion ON yields **0** trace entries naming
+`bigint_buffer.node` and the exclusion OFF yields **11**, and the probe route's own trace names the
+addon when the exclusion is off. The exclusion is therefore **effective**, and the control is proven
+capable of failing (it exits inconclusive if its positive fixture does not reach the tracer). See
+`evidence/r002-trace-control-2026-10-24.md`.
 
 **Verified on the terminal candidate `294a1dc…`:** tsc 0 errors · **179/179 tests** · migration
 replay + 4 races in the successful exact-head GitHub check · build exit 0 · no advisory directly

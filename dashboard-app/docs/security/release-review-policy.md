@@ -91,10 +91,29 @@ requirement, and `main` auto-deploys. Discipline, not tooling, is what holds thi
 
 | Field | Value |
 |---|---|
-| Reviewed commit | `294a1dc5d59e5873647696a2ba6449518466e0a7` (terminal PR #49 head; application tree byte-identical to `ba0c765a26054c4004d223c457b58002b958b0e3`) |
-| Reviewers | OpenAI `openai/gpt-6.1-sol-pro` and Google `google/gemini-3-flash-preview`, different labs, separate calls, identical exact-SHA bundle |
-| Method | Full diff plus key full files read from that SHA with `git show`; adversarial prompt; no shared model context; preflight secret scan 0 hits |
-| Findings | See `evidence/r007-independent-review-2026-10-24.md` for historical leads and `evidence/r007-ai-review-2026-10-24.md` for the final review of record |
-| Status | No critical findings in the terminal round. Substantive findings were independently measured; false findings and residual verification limits are recorded rather than silently discarded. Exact-head CI, the 21/21 authenticated matrix and the Solana devnet fault suite passed on `294a1dc`. Explicit owner approval remains outstanding. |
+| Reviewed commit | `299b99539539c03cc11e9fe30098fe66c9876a69` (final PR #49 head) |
+| Superseded reviews | `294a1dc…`, `ba0c765…`, `d5dec979…`, `4d2c3b9…`, `33d1ee1…` — each reviewed on its own exact SHA; superseded whenever shipped application code changed afterwards |
+| Reviewers | OpenAI `openai/gpt-6.1-sol-pro` and Google `google/gemini-3-flash-preview` — different labs, separate calls, identical exact-SHA bundle, no shared model context |
+| Method | Exact-commit diff from `origin/main` plus post-image files read with `git show <sha>:<path>`; adversarial prompt; preflight secret scan 0 hits. For the final round the bundle was reduced to the complete code/config diff plus the current policy/evidence documents, because OpenRouter imposed a prompt-cost ceiling; no code was excluded from review |
+| Findings | See `evidence/r007-final-review-299b995-2026-10-24.md` for the review of record, and `evidence/r007-independent-review-2026-10-24.md` for superseded historical leads |
+| Status | **Two independent reviews completed on the final commit; neither reported a critical or high finding.** Every substantive finding was reproduced or falsified against the code and dispositioned. Exact-head CI, the 24/24 authenticated matrix, the R-002 two-build tracing control and the Solana devnet fault suite all passed on `299b995`. Explicit owner approval remains outstanding. |
+
+### Non-counting review attempts (recorded, not silently dropped)
+
+Provider failures are not reviews. For the final round: OpenRouter returned HTTP 402
+(`weight_exceeds_budget`) on the full bundle and on the reduced bundle at a 22 000-token
+ceiling, and Moonshot returned HTTP 429 (account suspended for insufficient balance).
+None of these were treated as evidence in either direction; the OpenAI review that is
+recorded above is the later successful call at a reduced output ceiling.
+
+### Post-review harness change (recorded under §4)
+
+After the final reviews, `scripts/authz-matrix-verify.py` was strengthened to **positively
+allowlist** the project's own Netlify site hosts (and to require HTTPS and reject userinfo,
+query and fragment components) instead of only excluding the production hostname — an
+arbitrary HTTPS target would otherwise have received the fixture's bearer session, including
+while that fixture was promoted to admin. This is a verification-harness change that
+strengthens a gate; **no shipped application file changed**, so the reviewed application
+artifact `299b995` stands, and the gate was re-run against the reviewed revision afterwards.
 
 **The human-review condition for this release is waived under §2, not satisfied.**

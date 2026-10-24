@@ -5,6 +5,13 @@ the nested React 18 wallet subtree's page mount, and browser acceptance of an in
 session cookie. It does **not** prove application sign-in/PKCE cookie writing or wallet
 connect/sign/disconnect. Measured against the staging-scoped deploy preview of the release candidate.
 
+**Re-run against the final shipped tree `299b99539539c03cc11e9fe30098fe66c9876a69`** (the earlier
+pass was bound to a pre-extraction candidate, and `middleware.ts` changed after it). Same method,
+fresh unique fixture: `/dashboard` authenticated with the fixture display name, `/dashboard/wallet`
+wallet UI mounted, member → `/admin` denied and redirected, authenticated → `/auth/login` bounced —
+**zero** console errors, uncaught errors and unhandled rejections across all four navigations.
+Fixture deleted and the minted session payload shredded afterwards (teardown verified clean).
+
 ---
 
 ## 1. Method

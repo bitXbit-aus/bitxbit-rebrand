@@ -35,6 +35,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.join(HERE, "..", ".env.staging.local")
 PRODUCTION_SUPABASE_REF = "flasgvendiiasuixeqzu"
 PRODUCTION_APP_HOST = "app.bitxbit.com.au"
+# The only Netlify site this gate may send a session to. Excluding production is NOT the
+# same as trusting the destination: an arbitrary HTTPS host would receive the fixture's
+# bearer session, including during the interval it is promoted to admin (found by
+# independent review). Bind the run to this project's own site hosts instead.
+NETLIFY_SITE = "bitxbit-dashboard"
 # A UNIQUE address per run. Reusing one address would need an "already exists" path, and
 # the only way to find an existing user is the admin list endpoint — which IGNORES its
 # ?email= filter (measured 2026-10-24: a bogus address returned all 19 users). Selecting
@@ -535,8 +540,23 @@ def main():
     ap.add_argument("base", help="deployed preview base URL")
     a = ap.parse_args()
     surl, skey = load_staging()
-    target_host = urllib.parse.urlparse(a.base).hostname
+    parsed = urllib.parse.urlparse(a.base)
+    if parsed.scheme != "https":
+        print("REFUSING: this gate mints a session and will only send it over HTTPS")
+        return 2
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        print("REFUSING: the target URL must not carry userinfo, a query or a fragment")
+        return 2
+    target_host = parsed.hostname or ""
     staging_ref = surl.split("//")[1].split(".")[0]
+    on_project_site = (
+        target_host == f"{NETLIFY_SITE}.netlify.app"
+        or target_host.endswith(f"--{NETLIFY_SITE}.netlify.app")
+    )
+    if not on_project_site:
+        print(f"REFUSING: {target_host!r} is not a host of the {NETLIFY_SITE} Netlify site. "
+              "This gate only sends a minted session to its own deployed previews.")
+        return 2
     if staging_ref == PRODUCTION_SUPABASE_REF or target_host == PRODUCTION_APP_HOST:
         print("REFUSING: the authenticated verification gate must never target production")
         return 2
