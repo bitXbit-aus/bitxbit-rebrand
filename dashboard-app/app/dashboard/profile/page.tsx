@@ -9,7 +9,7 @@ import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { formatDate } from "@/lib/utils";
 
 export default async function ProfilePage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from("users").select("*").eq("id", user?.id).single();
 

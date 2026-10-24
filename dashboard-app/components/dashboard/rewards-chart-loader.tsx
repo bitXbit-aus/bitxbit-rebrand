@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { RewardsChart } from "./rewards-chart";
 
 export async function RewardsChartLoader() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   const { data: periods } = await supabase

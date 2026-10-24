@@ -30,7 +30,7 @@ export default function ActivityPage() {
 }
 
 async function ActivityData() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   const { data: activities } = await supabase

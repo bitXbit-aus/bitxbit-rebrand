@@ -7,7 +7,7 @@ import { createOffer, updateOffer, deleteOffer } from "@/lib/actions";
 import { ImageUploadField } from "@/components/admin/image-upload-field";
 
 export default async function AdminOffersPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: offers } = await supabase
     .from("affiliate_offers")
     .select("*, category:categories(name)")

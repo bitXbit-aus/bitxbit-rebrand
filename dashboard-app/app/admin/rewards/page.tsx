@@ -15,7 +15,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { SolanaAddress } from "@/components/dashboard/solana-address";
 
 export default async function AdminRewardsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: periods } = await supabase
     .from("reward_periods")
     .select("*, allocation_model:allocation_models(name, community_rewards_pct)")

@@ -6,7 +6,7 @@ import { formatCurrency, formatDate, formatNumber } from "@/lib/utils";
 import { Download, TrendingUp, Users, MousePointer, DollarSign } from "lucide-react";
 
 export default async function AdminReportsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const { data: income } = await supabase
     .from("affiliate_income")

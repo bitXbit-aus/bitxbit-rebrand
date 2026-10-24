@@ -41,6 +41,14 @@ export interface RateLimitHealthSnapshot {
   degradedCount: number;
   lastDegradedAt: number | null;
   lastReason: RateLimitDegradationReason | null;
+  /**
+   * Requests that could not be attributed to a client and fell into the shared
+   * `anonymous` bucket. Tracked SEPARATELY from store degradation on purpose:
+   * the store can be perfectly healthy while client-IP resolution is failing,
+   * and conflating the two would report a 503 for a limiter that is working.
+   */
+  unresolvedClientCount: number;
+  lastUnresolvedClientAt: number | null;
   /** When this process began tracking. */
   since: number;
 }
@@ -59,6 +67,8 @@ export interface RateLimitHealth extends RateLimitHealthSnapshot {
 let degradedCount = 0;
 let lastDegradedAt: number | null = null;
 let lastReason: RateLimitDegradationReason | null = null;
+let unresolvedClientCount = 0;
+let lastUnresolvedClientAt: number | null = null;
 const since = Date.now();
 
 /**
@@ -75,7 +85,28 @@ export function recordRateLimitDegradation(
 }
 
 export function rateLimitHealthSnapshot(): RateLimitHealthSnapshot {
-  return { degradedCount, lastDegradedAt, lastReason, since };
+  return {
+    degradedCount,
+    lastDegradedAt,
+    lastReason,
+    unresolvedClientCount,
+    lastUnresolvedClientAt,
+    since,
+  };
+}
+
+/**
+ * Record one request that could not be attributed to a client.
+ *
+ * Why this exists: when client-IP resolution fails, every such request shares one
+ * `anonymous` bucket. That is deliberately fail-closed (a caller can never choose
+ * its own key), but it means a single caller could exhaust the bucket for
+ * everyone. The failure was previously invisible, so it is now recorded and
+ * exposed on the health surface — the same fix pattern used for R-004/NA-15.
+ */
+export function recordUnresolvedClient(now: number = Date.now()): void {
+  unresolvedClientCount += 1;
+  lastUnresolvedClientAt = now;
 }
 
 /** Test hook. Production code never resets the registry. */
@@ -83,6 +114,8 @@ export function resetRateLimitHealth(): void {
   degradedCount = 0;
   lastDegradedAt = null;
   lastReason = null;
+  unresolvedClientCount = 0;
+  lastUnresolvedClientAt = null;
 }
 
 /**
@@ -109,6 +142,8 @@ export function buildRateLimitHealth(
     backend,
     degradedCount: snapshot.degradedCount,
     lastDegradedAt: snapshot.lastDegradedAt,
+    unresolvedClientCount: snapshot.unresolvedClientCount,
+    lastUnresolvedClientAt: snapshot.lastUnresolvedClientAt,
     // When nothing shared is configured the reason is knowable even before any
     // request has been made, so report it rather than leaving the field null.
     lastReason: snapshot.lastReason ?? (shared ? null : "no-shared-store"),

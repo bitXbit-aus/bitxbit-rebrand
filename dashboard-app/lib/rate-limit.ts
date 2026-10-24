@@ -5,9 +5,17 @@ import {
   buildRateLimitHealth,
   rateLimitHealthSnapshot,
   recordRateLimitDegradation,
+  recordUnresolvedClient,
 } from "./rate-limit-health";
 
 let sharedStore: RateLimitStore | undefined;
+
+/**
+ * The single shared bucket used when a request cannot be attributed to a client.
+ * Exported so callers can report attribution per request rather than inferring it
+ * from process-wide counters.
+ */
+export const ANONYMOUS_IDENTIFIER = "anonymous";
 
 /**
  * Which backing store a deployment will use.
@@ -110,10 +118,24 @@ export function getClientIdentifier(request: NextRequest): string {
   const resolved = resolveClientIp(request.headers);
   if (resolved) return resolved;
 
-  // Last resort. `request.ip` is not populated on Netlify, so this is normally
-  // "anonymous": one shared bucket. Coarse, but safe — it never lets a caller
-  // choose its own key.
-  return request.ip ?? "anonymous";
+  // Last resort: one shared bucket, "anonymous". Coarse, but safe — it never
+  // lets a caller choose its own key.
+  //
+  // Deliberately NOT derived from caller-controlled input. Independent review
+  // suggested a "coarser per-client fallback" (e.g. a hash of User-Agent), but
+  // that trades a fail-closed availability risk for an EVASION risk: a caller
+  // could rotate its own User-Agent to mint fresh buckets and escape the limit
+  // entirely. A single shared bucket cannot be evaded that way, so the bucket
+  // stays. The genuine defect was that this state was INVISIBLE — a single
+  // caller could exhaust the shared bucket and nobody could see it — so it is
+  // now recorded and exposed on the rate-limit health surface.
+  //
+  // Next.js 15 **removed `NextRequest.ip`**, so the previous `request.ip`
+  // fallback is gone rather than replaced. It was never populated on Netlify
+  // anyway (documented above), so production behaviour is unchanged: resolution
+  // comes only from `resolveClientIp`, or the shared bucket.
+  recordUnresolvedClient();
+  return ANONYMOUS_IDENTIFIER;
 }
 
 export async function checkRateLimit(
@@ -126,7 +148,14 @@ export async function checkRateLimit(
 }
 
 export function rateLimitResponse(
-  resetAt: number
+  resetAt: number,
+  /**
+   * The identifier THIS request was limited under. Pass it so the attribution
+   * header describes this request; without it the header cannot be per-request,
+   * and cumulative process counters would mislabel correctly-resolved clients
+   * as soon as any earlier request on the same instance had been unresolved.
+   */
+  identifier: string
 ): NextResponse<{
   error: string;
 }> {
@@ -143,6 +172,12 @@ export function rateLimitResponse(
     rateLimitHealthSnapshot()
   ).degraded;
 
+  // Surface THIS request's attribution on the rejection itself, so a limiter that
+  // is bucketing everyone together is visible from the response and not only from
+  // a log line production does not keep. Derived from this request's identifier,
+  // never from cumulative process state.
+  const unresolved = identifier === ANONYMOUS_IDENTIFIER;
+
   return NextResponse.json(
     { error: "Too many requests. Please try again later." },
     {
@@ -150,6 +185,7 @@ export function rateLimitResponse(
       headers: {
         "Retry-After": String(Math.ceil((resetAt - Date.now()) / 1000)),
         "x-ratelimit-degraded": String(degraded),
+        "x-ratelimit-client-resolution": unresolved ? "shared-bucket" : "ok",
       },
     }
   );

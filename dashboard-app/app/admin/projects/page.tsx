@@ -9,7 +9,7 @@ import { formatCurrency } from "@/lib/utils";
 import { ImageUploadField } from "@/components/admin/image-upload-field";
 
 export default async function AdminProjectsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: projects } = await supabase.from("projects").select("*").order("display_order");
 
   return (
