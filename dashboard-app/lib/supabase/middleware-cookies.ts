@@ -12,7 +12,12 @@
  *      Server Components see them in this same request) and the response (so the
  *      browser receives them);
  *   2. a second `setAll` call preserves the cookies written by the first —
- *      rebuilding the response must not silently drop an earlier batch;
+ *      rebuilding the response must not silently drop an earlier batch, and it
+ *      must preserve that batch's ATTRIBUTES. Re-reading them from the response
+ *      is not enough: `ResponseCookies.getAll()` returns only `name`/`value`, so
+ *      Path, Max-Age/Expires, SameSite and Secure would be silently lost on the
+ *      rebuild. That defect was inherited from `origin/main`; the adapter keeps
+ *      its own record of what it wrote instead;
  *   3. an overlapping name REPLACES rather than duplicating;
  *   4. a deletion is propagated, not resurrected;
  *   5. the library's response headers (cache directives) are applied.
@@ -61,6 +66,12 @@ export function createMiddlewareCookieAdapter(
   state: MiddlewareCookieState,
   buildResponse: () => ResponseLike
 ): MiddlewareCookieAdapter {
+  // What this adapter has written, WITH attributes. `ResponseCookies.getAll()`
+  // cannot be used for this: it returns only name/value, so re-applying from it
+  // would drop Path, Max-Age/Expires, SameSite and Secure on every rebuild.
+  const written = new Map<string, CookieToSet>();
+  const extraHeaders = new Map<string, string>();
+
   return {
     getAll() {
       return request.cookies.getAll();
@@ -69,28 +80,32 @@ export function createMiddlewareCookieAdapter(
     setAll(cookiesToSet: CookieToSet[], headersToSet?: Record<string, string>) {
       // 1. The REQUEST. Without this the refreshed session never reaches Server
       //    Components rendering in this same request.
-      cookiesToSet.forEach(({ name, value, ...options }) => {
+      //
+      //    `options` is destructured as a PROPERTY and then spread, so the cookie
+      //    attributes (path, maxAge, expires, sameSite, secure, …) land at the TOP
+      //    LEVEL of the object handed to `set`. Writing `{ name, value, ...rest }`
+      //    instead would nest them under an `options` key, which `set` ignores —
+      //    silently discarding every attribute, including a deletion's Max-Age: 0.
+      cookiesToSet.forEach(({ name, value, options }) => {
         request.cookies.set({ name, value, ...options });
+        // Recorded with attributes so a later rebuild can re-apply them faithfully.
+        written.set(name, { name, value, options });
       });
 
-      // 2. Carry cookies written by any EARLIER setAll across the rebuild.
-      //    Replacing the response object outright would silently drop them, and
-      //    the library can invoke setAll more than once per request.
-      const alreadyWritten = state.response.cookies.getAll();
+      // 2. Rebuild, then re-apply EVERYTHING written so far — attributes included.
+      //    Replacing the response object outright would silently drop an earlier
+      //    batch, and the library can invoke setAll more than once per request.
       state.response = buildResponse();
-      for (const cookie of alreadyWritten) {
-        state.response.cookies.set(cookie);
+      for (const { name, value, options } of written.values()) {
+        state.response.cookies.set({ name, value, ...options });
       }
 
-      // 3. The new batch. Setting by name REPLACES, so an overlapping cookie
-      //    never ends up duplicated or stale.
-      cookiesToSet.forEach(({ name, value, ...options }) => {
-        state.response.cookies.set({ name, value, ...options });
-      });
-
-      // 4. The library's response headers. Dropping them would allow a cacheable
+      // 3. The library's response headers, accumulated across calls. Dropping them would allow a cacheable
       //    response to carry auth cookies.
       for (const [key, value] of Object.entries(headersToSet ?? {})) {
+        extraHeaders.set(key, value);
+      }
+      for (const [key, value] of extraHeaders) {
         state.response.headers.set(key, value);
       }
     },

@@ -11,6 +11,13 @@ import {
 let sharedStore: RateLimitStore | undefined;
 
 /**
+ * The single shared bucket used when a request cannot be attributed to a client.
+ * Exported so callers can report attribution per request rather than inferring it
+ * from process-wide counters.
+ */
+export const ANONYMOUS_IDENTIFIER = "anonymous";
+
+/**
  * Which backing store a deployment will use.
  *
  * Supabase Postgres is preferred because it is already part of the stack — no
@@ -128,7 +135,7 @@ export function getClientIdentifier(request: NextRequest): string {
   // anyway (documented above), so production behaviour is unchanged: resolution
   // comes only from `resolveClientIp`, or the shared bucket.
   recordUnresolvedClient();
-  return "anonymous";
+  return ANONYMOUS_IDENTIFIER;
 }
 
 export async function checkRateLimit(
@@ -141,7 +148,14 @@ export async function checkRateLimit(
 }
 
 export function rateLimitResponse(
-  resetAt: number
+  resetAt: number,
+  /**
+   * The identifier THIS request was limited under. Pass it so the attribution
+   * header describes this request; without it the header cannot be per-request,
+   * and cumulative process counters would mislabel correctly-resolved clients
+   * as soon as any earlier request on the same instance had been unresolved.
+   */
+  identifier?: string
 ): NextResponse<{
   error: string;
 }> {
@@ -158,10 +172,11 @@ export function rateLimitResponse(
     rateLimitHealthSnapshot()
   ).degraded;
 
-  // Surface the client-attribution state on the rejection itself, so a limiter
-  // that is bucketing everyone together is visible from the response and not
-  // only from a log line production does not keep.
-  const unresolved = rateLimitHealthSnapshot().unresolvedClientCount > 0;
+  // Surface THIS request's attribution on the rejection itself, so a limiter that
+  // is bucketing everyone together is visible from the response and not only from
+  // a log line production does not keep. Derived from this request's identifier,
+  // never from cumulative process state.
+  const unresolved = identifier === ANONYMOUS_IDENTIFIER;
 
   return NextResponse.json(
     { error: "Too many requests. Please try again later." },

@@ -76,7 +76,14 @@ def decode_session(cookies):
 # A browser keeps every cookie the response did not mention, REPLACES by name,
 # and REMOVES on a deletion (Max-Age<=0 / past Expires). The earlier probe
 # discarded the original cookies and used the response alone, so it could pass
-# while a real browser held a stale leftover. Review flagged that; this closes it.
+# while a real browser held a stale leftover.
+#
+# SCOPE, stated honestly (independent review): this implements name-replacement,
+# deletion and chunk-ordering semantics. It does NOT implement RFC 6265 domain /
+# path / Secure acceptance rules or Max-Age-vs-Expires precedence, so it is NOT
+# a full browser-equivalent jar. The strongest available check is the real
+# browser pass in evidence/r007-browser-verification-2026-10-24.md; this jar is
+# the deterministic HTTP-level approximation, and is labelled as such.
 
 def parse_set_cookie(header):
     parts = header.split(";")
@@ -388,7 +395,7 @@ class Probe:
 
     def _run_checks(self):
         jar_ok, jar_note = jar_selftest()
-        self.check("cookie-jar merge is browser-equivalent", lambda c, l: jar_ok, 0, None,
+        self.check("cookie-jar merge semantics", lambda c, l: jar_ok, 0, None,
                    note=f"[{jar_note}]")
 
         sess = self.mint_session()
@@ -442,8 +449,10 @@ class Probe:
         self.check("response carries refreshed cookie", lambda c, l: bool(setc), code, loc,
                    note=f"[{len(setc)} Set-Cookie]")
         if setc:
-            refreshed = [{"name": s.split(";", 1)[0].split("=", 1)[0], "value": s.split(";", 1)[0].split("=", 1)[1]}
-                         for s in setc]
+            # Merge into the ORIGINAL jar, as a browser would — not the response's
+            # cookies alone. A response that adds a valid session but fails to delete
+            # an obsolete cookie or stale chunk would otherwise still pass.
+            refreshed = CookieJar(expired).apply(setc).as_cookies()
             c2, l2, _ = self.get("/dashboard", refreshed)
             self.check("refreshed cookie usable (2nd request)", lambda c, l: c == 200, c2, l2)
             # Compare the TOKENS, not a serialisation hash: a hash of the whole cookie set

@@ -42,7 +42,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 APP = HERE.parent
-PROBE = APP / "app" / "__r002probe" / "route.ts"
+# A ROUTABLE segment. An underscore-prefixed folder is a Next.js "private" folder:
+# it is excluded from routing, so a probe placed there may never be compiled or
+# traced — which would make the whole control meaningless. Independent review
+# caught that; the probe route's OWN trace is now asserted below.
+PROBE_SEGMENT = "r002-trace-probe"
+PROBE = APP / "app" / PROBE_SEGMENT / "route.ts"
 CONFIG = APP / "next.config.mjs"
 ADDON = "node_modules/bigint-buffer/build/Release/bigint_buffer.node"
 
@@ -84,6 +89,28 @@ def traces_naming(pattern: str) -> int:
         except OSError:
             pass
     return hits
+
+
+def probe_trace_mentions_addon() -> bool:
+    """True only if the PROBE ROUTE'S OWN trace names the native addon.
+
+    This is what makes the control non-vacuous: it proves the synthetic import
+    actually entered a generated route's trace, rather than the difference coming
+    from some unrelated global trace.
+    """
+    for nft in (APP / ".next").rglob("*.nft.json"):
+        if PROBE_SEGMENT not in str(nft):
+            continue
+        try:
+            if re.search(r"bigint_buffer\.node", nft.read_text(errors="ignore")):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def probe_trace_exists() -> bool:
+    return any(PROBE_SEGMENT in str(p) for p in (APP / ".next").rglob("*.nft.json"))
 
 
 def build(label: str, exclusion: str) -> None:
@@ -148,6 +175,13 @@ def main() -> int:
         print(f"  exclusion OFF: trace entries naming bigint_buffer.node = {off_addon}, "
               f"bigint-buffer/build = {off_build}\n")
 
+        if not probe_trace_exists():
+            print(f"INCONCLUSIVE: the probe route ({PROBE_SEGMENT}) produced no .nft.json trace,")
+            print("so the synthetic import never reached a generated route. Fix the fixture.")
+            return 2
+        print(f"  probe route trace exists: yes ({PROBE_SEGMENT})")
+        print(f"  probe route trace names the addon with the exclusion OFF: {probe_trace_mentions_addon()}")
+
         if off_addon == 0 and off_build == 0:
             print("INCONCLUSIVE: with the exclusion OFF the addon still is not traced, so the")
             print("fixture never reached the tracer. This proves nothing either way — do not")
@@ -156,11 +190,15 @@ def main() -> int:
         if on_addon or on_build:
             print("FAIL: the addon is traced even with the exclusion ON — the control is INEFFECTIVE.")
             return 1
+        if not probe_trace_mentions_addon():
+            print("INCONCLUSIVE: the probe route's own trace does not name the addon even with the")
+            print("exclusion OFF, so the positive control is not established. Do not record a pass.")
+            return 2
         print("PASS: the addon is traced without the exclusion and absent with it.")
         print("The exclusion is effective AND the check is capable of failing.")
         return 0
     finally:
-        shutil.rmtree(APP / "app" / "__r002probe", ignore_errors=True)
+        shutil.rmtree(APP / "app" / PROBE_SEGMENT, ignore_errors=True)
         CONFIG.write_text(original)
         dirty = git("status", "--porcelain").strip()
         print(f"\n[restored] working tree {'clean' if not dirty else 'DIRTY: ' + dirty}")

@@ -348,6 +348,27 @@ describe("rate-limit store selection (R-004 fallback visibility)", () => {
       restore();
     }
   });
+
+  it("reports client attribution for THIS request, not cumulative process state", () => {
+    // Independent review: deriving this header from process-wide counters labelled
+    // correctly-resolved clients as `shared-bucket` as soon as any earlier request
+    // on the same instance had been unresolved — so the diagnostic was misleading.
+    resetRateLimitHealth();
+    try {
+      const anonymous = rateLimitResponse(Date.now() + 30_000, "anonymous");
+      assert.equal(anonymous.headers.get("x-ratelimit-client-resolution"), "shared-bucket");
+
+      const resolved = rateLimitResponse(Date.now() + 30_000, "203.0.113.7");
+      assert.equal(
+        resolved.headers.get("x-ratelimit-client-resolution"),
+        "ok",
+        "a resolved client must not inherit another request's shared-bucket label"
+      );
+    } finally {
+      resetRateLimitHealth();
+      restore();
+    }
+  });
 });
 
 describe("rate-limit backend selection", () => {

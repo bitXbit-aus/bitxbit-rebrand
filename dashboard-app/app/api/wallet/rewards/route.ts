@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const identifier = getClientIdentifier(request);
   const rateLimit = await checkRateLimit(identifier, WALLET_REWARDS_RATE_LIMIT);
   if (!rateLimit.allowed) {
-    return rateLimitResponse(rateLimit.resetAt);
+    return rateLimitResponse(rateLimit.resetAt, identifier);
   }
 
   const supabase = await createClient();
