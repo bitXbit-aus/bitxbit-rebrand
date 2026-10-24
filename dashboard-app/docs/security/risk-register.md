@@ -473,13 +473,28 @@ ceiling is documented, not measured; not verified in a deployment.** See
 
 ## R-007 — Next.js 15 migration
 
-**Status:** **IMPLEMENTED AND TECHNICALLY GATED 2026-10-24 (PR #49) — NOT released.** The final
+**Status:** **RELEASED 2026-10-24** by explicit owner approval. PR #51 merged to `main`
+(merge commit `eec9a343ded4af31f73418272ad3013e3d24f480`), then PR #49
+(merge commit `4821905b2ce319e68ebc4d328487fe3770df877a`, now `main`), and the production deploy
+for that commit reached `ready` at `https://app.bitxbit.com.au`. Production probes after the
+cutover: `/` 302 → `/dashboard`; `/auth/login` 200; `/dashboard` and `/admin` both 307 → `/auth/login`
+for an unauthenticated request, so middleware authorisation is live; `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy` and a CSP are all present. No database
+migration was run as part of this release.
+
+**Reviewed artifact:** the reviewed application tree `299b99539539c03cc11e9fe30098fe66c9876a69`
+is byte-identical to the shipped application tree — the only diffs between it and `main` are
+documentation files and `scripts/authz-matrix-verify.py`, verified with
+`git diff --stat 299b995… HEAD -- dashboard-app`.
+
+**Prior state, retained for context:** the final
 candidate `299b99539539c03cc11e9fe30098fe66c9876a69` passed exact-head CI, the **24/24** deployed
 authentication/session matrix, the R-002 two-build tracing control, the Solana devnet fault suite,
 a real-browser pass bound to that revision, and adversarial reviews by two independent model labs
 (OpenAI and Google), neither of which reported a critical or high finding. Independent **human**
 review (M8) remains **UNSATISFIED** and is **WAIVED, not satisfied, under owner decision D5**.
-The remaining release blocker is the owner's explicit approval, which has not yet been given.
+That waiver is unaffected by the release and must be re-affirmed or replaced at the next release
+review.
 Evidence:
 `evidence/r007-final-review-299b995-2026-10-24.md` (review of record),
 `evidence/r007-nextjs-15-migration-2026-10-24.md`,
