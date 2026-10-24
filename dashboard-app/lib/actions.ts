@@ -1070,7 +1070,27 @@ export async function getAirdropWalletBalanceAction() {
   }
 }
 
+/**
+ * Reads the connected wallet's SPL token balance for the dashboard wallet page.
+ *
+ * This is a `"use server"` export, so it is a **publicly reachable endpoint**: with
+ * no guard, an unauthenticated caller could drive an on-chain RPC read for an
+ * arbitrary address. The balance itself is public chain state — the exposure is
+ * *unauthenticated work*, not disclosure — and it was the one action in this file
+ * without a guard (R-005, found by the 2026-10-23 register sweep).
+ *
+ * `requireActiveUser` throws for an unauthenticated or inactive caller. The only
+ * caller (`app/dashboard/wallet/page.tsx`, a client component) already wraps the
+ * call in `try/catch` and renders no balance on failure, so the guard needs no
+ * refusal shape and no client change.
+ *
+ * Deliberately **not** rate limited: it is a single cheap read whose caller expects
+ * a balance, so a returned refusal object would be rendered as the balance and
+ * break the page. That is R-005's documented exclusion for the read-path actions;
+ * the access-control fix is the guard.
+ */
 export async function getTokenBalanceAction(walletAddress: string) {
+  await requireActiveUser();
   return getTokenBalance(walletAddress);
 }
 

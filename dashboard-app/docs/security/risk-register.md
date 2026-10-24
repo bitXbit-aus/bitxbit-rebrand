@@ -166,7 +166,7 @@ Verified. Full evidence: `docs/security/evidence/phase-1-controls-verification-2
 
 | Control | Verified state |
 |---|---|
-| Server-side access controls | ✅ **Strong, with one exception.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; **29 of 30** Server Actions guarded — re-measured 2026-10-23, `getTokenBalanceAction` has **no** guard (see R-005); admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
+| Server-side access controls | ✅ **Strong.** `requireActiveUser` / `requireActiveAdmin` / `requireCapability`; **30 of 30** Server Actions guarded — the 2026-10-23 re-measure found `getTokenBalanceAction` unguarded, and it was **fixed 2026-10-23** (now `await requireActiveUser()`; see R-005). Admin mutations audited to `security_audit_log`. Authorization does **not** rely on middleware. |
 | Shared rate limiting | ✅ **Satisfied.** The shared atomic store is deployed and the limiter keys on the **real client** — verified live: keys carry `206.83.119.2`, a forged forwarded chain creates no new key, and enforcement returns 429 from the 31st request against a 30/60 s limit. See R-004. |
 | Client identity for rate limiting | ✅ Uses Netlify's trusted `x-nf-client-connection-ip`; XFF trusted only behind an explicit `TRUST_PROXY` flag. |
 | Request limits | ✅ **Satisfied 2026-10-22** — `bodySizeLimit` set explicitly; the upload boundary is enforced by a tested policy below the platform ceiling (R-006). The `1mb` JSON limit is unchanged in effect but is now explicit. |
@@ -372,8 +372,8 @@ transition is the discriminator. The shared counter was observed in staging keye
 **Severity:** medium. **Owner:** Shri — interim accountable owner.
 
 `checkRateLimit` is applied to API routes only; it appears **zero times** in
-`lib/actions.ts` across **30 Server Actions**. Twenty-nine are
-authorization-guarded (`getTokenBalanceAction` is **not** — see the outcome below), so this is not
+`lib/actions.ts` across **30 Server Actions**. All thirty are now
+authorization-guarded (`getTokenBalanceAction` was the exception — fixed 2026-10-23, see below), so this is not
 primarily an access-control gap — it is an
 unbounded-work gap: an authenticated user can drive costly actions (reward
 calculation, airdrop preparation) without a request ceiling.
@@ -399,12 +399,22 @@ costly actions; five are bounded — `reward.airdrop` and `reward.testAirdrop` a
 - Keys are `action:<action>:user:<id>`, so budgets are independent per action and
   per user.
 
-**Deliberately excluded:** `getAirdropWalletBalanceAction` and `getTokenBalanceAction`
-are called on render paths whose callers expect a balance, so a refusal object would
-break the page — bounding those needs its own design. **Separate observation
-recorded, not fixed here:** `getTokenBalanceAction` has **no authorization guard at
-all**, unlike every other action in the file; assess on its own. Bulk user mutations
-are left to a follow-up.
+**Deliberately excluded from rate limiting:** `getAirdropWalletBalanceAction` and
+`getTokenBalanceAction` are called on render paths whose callers expect a balance, so a
+returned refusal object would be rendered as the balance and break the page — bounding
+those needs its own design.
+
+**FIXED 2026-10-23 — the authorization gap on `getTokenBalanceAction`.** The separate
+observation above was correct: it was the one action of 30 with **no** guard, so an
+unauthenticated caller could invoke it out of the `"use server"` module and drive an
+on-chain RPC read for an arbitrary address. It now calls `await requireActiveUser()`. No
+client change was needed — the sole caller (`app/dashboard/wallet/page.tsx`) already wraps
+the call in `try/catch` and renders no balance on failure, so the guard's throw is
+tolerated. Rate limiting remains a deliberate exclusion (above). A structural guard test
+(`lib/action-authz.test.ts`) now asserts **every** exported action is guarded —
+mutation-verified **5/5**. See `evidence/gettokenbalance-authz-fix-2026-10-23.md`.
+
+Bulk user mutations are left to a follow-up.
 
 **Verification:** 146/146 tests (13 new); `tsc` clean; migration replay + races pass;
 dummy-env build compiles; **8/8 mutations detected with 0 compile errors**, including
@@ -1046,8 +1056,9 @@ PR #2 and PR #3 — and `main` **requires** the check (`strict: true`).
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
 `evidence/register-sweep-2026-10-23.md`. Corrections applied: R-001 (advisory set grew to 25 / 3
-criticals; "30 guarded" → 29 of 30), R-005, R-008 (resolved), R-013 (closed), NA-7 (moot). One
-**confirmed open issue**: `getTokenBalanceAction` is an unguarded Server Action — assessment
-tracked separately.
+criticals; "30 guarded" → 29 of 30), R-005, R-008 (resolved), R-013 (closed), NA-7 (moot). The one
+**confirmed open issue** — `getTokenBalanceAction` was an unguarded Server Action — was
+**fixed 2026-10-23** (`await requireActiveUser()`; now **30 of 30** guarded, with a
+mutation-verified structural test).
 
 **Nothing in this register is closed by the ownership assignment.**

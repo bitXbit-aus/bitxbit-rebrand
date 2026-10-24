@@ -40,8 +40,10 @@ Legend: ✅ holds · ⚠️ stale/incorrect · 🔴 confirmed open issue
 
 **Not re-measured (no instrument used):** R-005/R-006 "verified in a deployment" — those controls
 are behind authentication and were verified on a deployed preview in a prior session; nothing here
-contradicts them. R-002's "`.next` contains 0 `.node` files" — the guard test asserts the tracing
-exclusion; the post-build file scan was not repeated.
+contradicts them. R-002's "`.next` contains 0 `.node` files" — **since re-measured** (2026-10-23, after a
+production build): **0** `.node` files and **0** `bigint-buffer` directories in `.next`, with the
+native addon present in `node_modules` (so the exclusion is meaningful). See
+`gettokenbalance-authz-fix-2026-10-23.md` §6.
 
 ---
 
