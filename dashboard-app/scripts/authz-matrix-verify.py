@@ -115,7 +115,18 @@ class Probe:
         patch = {}
         if role: patch["role"] = role
         if status: patch["status"] = status
-        return self.sb("PATCH", f"/rest/v1/user_authorizations?user_id=eq.{self.uid}", patch)
+        st, rows = self.sb("PATCH", f"/rest/v1/user_authorizations?user_id=eq.{self.uid}", patch)
+        # The matrix asserts behaviour for a SPECIFIC authorisation state, so that state must
+        # actually be established. A PATCH that silently updated zero rows would let the
+        # "deactivated" phase pass against an account still merely suspended — both redirect to
+        # /auth/login?error=account_inactive, so HTTP assertions alone cannot tell them apart.
+        # Fail loudly instead (added after review).
+        if st not in (200, 204) or not isinstance(rows, list) or len(rows) != 1:
+            raise RuntimeError(f"authorization PATCH did not affect exactly one row: {st} {str(rows)[:200]}")
+        for k, v in patch.items():
+            if rows[0].get(k) != v:
+                raise RuntimeError(f"authorization PATCH did not set {k}={v}: got {rows[0].get(k)!r}")
+        return st, rows
 
     def teardown(self):
         """Delete the test user and PROVE it is gone. Returns True only if all three
@@ -334,16 +345,37 @@ class Probe:
         self.set_authz(status="suspended")
         c_r, l_r, h_r = self.get("/dashboard", expired_redirect)
         setc_r = h_r.get_all("Set-Cookie") or []
+        redirect_cookies = [{"name": s.split(";", 1)[0].split("=", 1)[0],
+                             "value": s.split(";", 1)[0].split("=", 1)[1]} for s in setc_r]
+        decoded_r = decode_session(redirect_cookies) if redirect_cookies else None
+        same_user_r = bool(decoded_r) and (decoded_r.get("user") or {}).get("id") == self.uid
         self.check("redirect branch carries the refreshed cookie",
                    lambda c, l: c == 307 and bool(setc_r), c_r, l_r, note=f"[{len(setc_r)} Set-Cookie]")
+        # Strengthened after review: a bare `bool(setc)` also passes for a response that
+        # CLEARED the session, emitted only an unrelated cookie, or dropped a required chunk.
+        # Require the redirect's auth cookie to decode to the same user.
+        self.check("redirect cookie is a usable same-user session",
+                   lambda c, l: same_user_r, c_r, l_r,
+                   note="[decoded, same user]" if same_user_r else "[missing/foreign/undecodable]")
         self.set_authz(role="member", status="active")
+        # A second redirect branch: an expired session hitting a DENIED route must also carry
+        # the refreshed cookie, not only the suspended-user branch.
+        expired_admin = self.build_cookies(self.mint_session(), expired=True)
+        c_a, l_a, h_a = self.get("/admin", expired_admin)
+        setc_a = h_a.get_all("Set-Cookie") or []
+        self.check("denied-route redirect carries the refreshed cookie",
+                   lambda c, l: c == 307 and bool(setc_a), c_a, l_a, note=f"[{len(setc_a)} Set-Cookie]")
 
         # (b) Did the refreshed session reach the PAGE, or only middleware? /dashboard renders
         #     the user's display name and falls back to the literal "there" when its own
         #     getUser() sees nothing — so the body discriminates the two.
         c_p, body = self.get_body("/dashboard", expired_page)
         saw_user = self.rendered_page(body, PROBE_LOCALPART)
-        self.check("refreshed session reaches the PAGE (not just middleware)",
+        # PRECISION LIMIT (recorded after review): inside Supabase's refresh-token reuse window a
+        # downstream page can refresh the same session itself, so this proves an authenticated
+        # page RENDERED — it does not uniquely prove middleware forwarded its own refreshed
+        # request cookies. The check is named for exactly what it establishes.
+        self.check("refreshed session renders an authenticated PAGE",
                    lambda c, l: c_p == 200 and saw_user, c_p, None,
                    note="[display name present]" if saw_user else "[page fell back to 'there']")
 

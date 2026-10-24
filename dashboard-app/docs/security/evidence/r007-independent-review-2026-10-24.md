@@ -1,5 +1,17 @@
 # R-007 — independent review record (2026-10-24)
 
+> **HISTORICAL — SUPERSEDED. Applicable revision: `b9aa047c870a5fe08abcf5fa89a730f2b80d87a1`
+> and earlier.**
+>
+> This document records the **early** fresh-context review rounds (`6cb6e16`, `b9aa047`) whose
+> findings drove fixes that landed **after** it was written. It is retained for provenance, **not**
+> as a description of the current release state. Specifically, the redirect-cookie loss and the
+> repeated-`setAll` loss described below as open gaps were **fixed and verified** afterwards
+> (PR #51 plus the carry-into-PR-#49 commit), and the `get_body` crash noted below was fixed too.
+>
+> The **current** review of record is `r007-ai-review-2026-10-24.md`. Independent **human** review
+> (M8) remains **waived, not satisfied**, under owner decision D5.
+
 **What this is:** an adversarial review of PR #49 by two independent reviewers with **no memory of
 implementing the change** — one static (attack the diff), one dynamic (re-run the gate and try to
 falsify the claims). Findings were **not** accepted on the reviewers' word: each substantive one was
