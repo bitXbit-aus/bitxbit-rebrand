@@ -1026,11 +1026,16 @@ PR #2 and PR #3 — and `main` **requires** the check (`strict: true`).
   five minutes later (`06:16:02Z`), and every PR to `main` has run CI since. **The proposed diff
   would not have fixed the original symptom.**
 
-**Residual (not a gap today):** PRs targeting a non-`main` base (stacked PRs) would be uncovered;
-**none exist** — all 41 target `main`. If stacked PRs are ever used, add the base branch to
-`pull_request.branches` (one line, no credential expansion).
-**Also stale:** the token "lacks `workflow` scope" — as of 2026-10-23 it carries `repo` **and**
-`workflow`. See `evidence/na6-ci-trigger-resolution-2026-10-23.md`.
+**Residual — CLOSED 2026-10-24.** PRs targeting a non-`main` base (stacked PRs) were uncovered, and a
+stacked PR then hit it: **#45 ran 0 check runs**. Fixed by adding `"security/**"` to
+`pull_request.branches` — the filter matches the **base**, so that is what covers a stacked PR. Not
+added to `push`, which would double every run for security branches that already have a PR. **Verified
+by use:** a probe PR whose base was a `security/*` branch ran `Tests, migration replay, and build` →
+success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-10-24.md`.
+*(Repo hygiene, noted there: **39 stale `security/*` branches** remain.)*
+**Also stale — and now moot:** the token "lacks `workflow` scope". It carries `repo` **and**
+`workflow`, which is why this workflow change was pushable with no credential expansion. See
+`evidence/na6-ci-trigger-resolution-2026-10-23.md`.
 
 ---
 
