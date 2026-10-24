@@ -91,10 +91,10 @@ requirement, and `main` auto-deploys. Discipline, not tooling, is what holds thi
 
 | Field | Value |
 |---|---|
-| Reviewed commit | `ba0c765a26054c4004d223c457b58002b958b0e3` (PR #49 application head reviewed by both models) |
+| Reviewed commit | `294a1dc5d59e5873647696a2ba6449518466e0a7` (terminal PR #49 head; application tree byte-identical to `ba0c765a26054c4004d223c457b58002b958b0e3`) |
 | Reviewers | OpenAI `openai/gpt-6.1-sol-pro` and Google `google/gemini-3-flash-preview`, different labs, separate calls, identical exact-SHA bundle |
 | Method | Full diff plus key full files read from that SHA with `git show`; adversarial prompt; no shared model context; preflight secret scan 0 hits |
 | Findings | See `evidence/r007-independent-review-2026-10-24.md` for historical leads and `evidence/r007-ai-review-2026-10-24.md` for the final review of record |
-| Status | No critical findings. Substantive findings were independently measured; false findings and residual verification limits are recorded rather than silently discarded. Exact-SHA CI, 19/19 authenticated matrix and Solana devnet fault suite passed. Explicit owner approval remains outstanding. |
+| Status | No critical findings in the terminal round. Substantive findings were independently measured; false findings and residual verification limits are recorded rather than silently discarded. Exact-head CI, the 21/21 authenticated matrix and the Solana devnet fault suite passed on `294a1dc`. Explicit owner approval remains outstanding. |
 
 **The human-review condition for this release is waived under §2, not satisfied.**

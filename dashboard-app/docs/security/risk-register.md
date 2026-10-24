@@ -473,12 +473,13 @@ ceiling is documented, not measured; not verified in a deployment.** See
 
 ## R-007 — Next.js 15 migration
 
-**Status:** **IMPLEMENTED AND TECHNICALLY GATED 2026-10-24 (PR #49) — NOT released.** The exact
-application revision `ba0c765a26054c4004d223c457b58002b958b0e3` passed CI, the 19/19 deployed
+**Status:** **IMPLEMENTED AND TECHNICALLY GATED 2026-10-24 (PR #49) — NOT released.** The terminal
+candidate `294a1dc5d59e5873647696a2ba6449518466e0a7` passed exact-head CI, the **21/21** deployed
 authentication/session matrix, the Solana devnet fault suite, and adversarial reviews by independent
-OpenAI and Google model families. Independent **human** review (M8) remains **UNSATISFIED** and is
-**WAIVED, not satisfied, under owner decision D5**. The remaining release blocker is the owner's
-explicit approval, which has not yet been given. Evidence:
+OpenAI and Google model families (application tree byte-identical to `ba0c765a…`). Independent
+**human** review (M8) remains **UNSATISFIED** and is **WAIVED, not satisfied, under owner decision
+D5**. The remaining release blocker is the owner's explicit approval, which has not yet been given.
+Evidence:
 `evidence/r007-nextjs-15-migration-2026-10-24.md`,
 `evidence/r007-authenticated-verification-2026-10-24.md`,
 `evidence/r007-independent-review-2026-10-24.md`, and
@@ -502,13 +503,13 @@ as stated — removing the exclusion entirely and rebuilding gives **0** `.nft.j
 and that check cannot distinguish "excluded" from "never included". The placement fix stands on its
 own merits; it is not what is preventing exposure. See R-002.
 
-**Verified on the final reviewed application revision:** tsc 0 errors · **179/179 tests** · migration
-replay + 4 races in the successful exact-head GitHub check · build clean · no advisory directly
+**Verified on the terminal candidate `294a1dc…`:** tsc 0 errors · **179/179 tests** · migration
+replay + 4 races in the successful exact-head GitHub check · build exit 0 · no advisory directly
 targets `next` · **D4** staging isolation on `deploy-preview-49` (0 production refs, devnet mint) ·
-19/19 authenticated matrix · `test:staging` and `test:solana-fault` pass.
+**21/21** authenticated matrix · `test:staging` and `test:solana-fault` pass.
 
-**Verified in a deployment — the full authenticated matrix (§5.3): 19/19** (the gate has grown as
-review findings were closed; the earlier "12/12" was a smaller revision of it). Manual gate, **not
+**Verified in a deployment — the full authenticated matrix (§5.3): 21/21** (the gate has grown as
+review findings were closed; the earlier "12/12" and "19/19" were smaller revisions of it). Manual gate, **not
 wired into CI** (it needs a staging service-role credential and a live preview, neither of which CI
 has): `scripts/authz-matrix-verify.py`. A real session (minted against a staging-scoped preview; no password
 or one-time code handled) for a staging test user: unauthenticated → `/auth/login`; active member →
@@ -547,8 +548,9 @@ mutation-verified (removing the copy fails 2 tests; dropping attributes fails 1)
 | **Nested React 18** ships under `@fractalwagmi/solana-wallet-adapter` alongside React 19. Two React copies can produce "Invalid hook call", visible only in a browser | Wallet-stack dependency surgery is R-002 territory; out of scope for a migration whose job is to change nothing else. **The wallet path needs a browser exercise before launch.** |
 | **`sharp` and other native deps entered the tree** via Next 15, so "0 `.node` files" is no longer package-specific | R-002's check is documented as non-falsifying; a discriminating test is separate work. |
 | **Per-IP rate limiting is weak for IPv6 clients.** Re-measured on Next 15: counters carry the real client (so R-004's control holds), but the same host presented **two different IPv6 privacy addresses within a minute** — each gets its own bucket | Inherent to IP-based limiting; the fix is to key on the authenticated user. Out of scope. |
-| **The auth matrix's state PATCH helper does not independently verify exact row count and returned values** | Later route behaviour detects most failures, but the deactivated phase could pass while still suspended. Recorded as harness hardening, not an observed application defect. |
-| **The redirect refresh probe checks auth-cookie presence/attributes but does not merge deletion/chunk semantics and replay the exact redirected jar** | Focused helper tests and the deployed auth-cookie response pass, but this is weaker than the 200-response refresh replay. |
+| **RESOLVED 2026-10-24** — the auth matrix now asserts every authorisation PATCH affects exactly one row with the expected values | Fixed in the harness after review; the deactivated phase can no longer pass against a still-suspended account. |
+| **The redirect refresh probe decodes the auth cookie and matches the user, but does not merge deletion/chunk semantics into the original jar** | Strengthened after review (decodes the cookie, requires the same user, adds a second redirect branch); still weaker than full browser-equivalent jar merging. |
+| **Refreshed *request*-cookie forwarding has no adapter-level regression test, and repeated-`setAll` preservation has no direct executable coverage** | Closing it requires refactoring the middleware adapter — a shipped-code change that would re-trigger the review. Recorded for the next iteration. |
 | **The page-level refresh check cannot uniquely prove whether middleware or the downstream page performed the last refresh inside the provider's reuse window** | It proves a usable authenticated rendered page, not the precise refreshing layer. No production defect was reproduced. |
 | **No browser sign-in exercised** (client cookie write, PKCE verifier, `/auth/callback` exchange) | Recorded in the authenticated-verification evidence. The server adapter and legacy-cookie compatibility were tested directly. |
 | **Cookie writes outside middleware / the PKCE callback** are not marked `no-store` | `cookies()` gives no access to response headers. |

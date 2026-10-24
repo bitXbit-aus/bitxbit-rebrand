@@ -1,11 +1,12 @@
 # R-007 — authenticated authorisation matrix and session verification (2026-10-24)
 
-All results below were measured against deployed preview `deploy-preview-49`, built from exact reviewed
-application revision `ba0c765a26054c4004d223c457b58002b958b0e3` and scoped to staging Supabase plus
-Solana devnet. Production was not targeted or changed.
+All results below were measured against deployed preview `deploy-preview-49`, built from terminal
+candidate `294a1dc5d59e5873647696a2ba6449518466e0a7` (application tree byte-identical to
+`ba0c765a26054c4004d223c457b58002b958b0e3`) and scoped to staging Supabase plus Solana devnet.
+Production was not targeted or changed.
 
 **Gate:** `scripts/authz-matrix-verify.py`
-**Result:** **19/19 passed**, exit 0, verified clean teardown.
+**Result:** **21/21 passed**, exit 0, verified clean teardown.
 
 The gate contains an explicit refusal for the known production app host and production Supabase
 project.
@@ -36,6 +37,10 @@ project.
 
 The middleware re-read authorisation state on each request. The admin page also performs
 `requireActiveAdmin()` before constructing the privileged service-role client.
+
+**Added after the terminal review:** every authorisation `PATCH` is now asserted to affect **exactly
+one row** with the expected values. Previously the "deactivated" phase could pass against an account
+that was still merely suspended, because both states redirect to `error=account_inactive`.
 
 ## Session refresh — 200 response path
 
@@ -68,6 +73,10 @@ On the final preview the same class of request produced:
 - the expected auth-cookie name in `Set-Cookie`;
 - cookie attributes retained;
 - the focused helper tests fail if cookie copying or attributes are removed.
+- **added after the terminal review:** the redirect response's auth cookie is now **decoded** and
+  required to be a **usable same-user session** (`[decoded, same user]`), and a **second redirect
+  branch** — an expired session on a denied route (`/admin` → `/dashboard`) — is exercised and also
+  carries the refreshed cookie.
 
 **Precision limit from the final GPT review:** the manual redirect check confirms presence and helper
 semantics but does not yet merge deletion/chunk transitions into the original jar, decode that exact
