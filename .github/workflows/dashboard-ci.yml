@@ -1,6 +1,16 @@
 name: Dashboard CI
 
 on:
+  # Runs on PRs whose BASE is main or any security/* branch. The filter matches
+  # the base branch, not the head, so `security/**` is what gives a *stacked* PR
+  # (one that targets another security branch rather than main) the same CI as a
+  # PR to main. Without it a stacked PR runs no CI at all — the residual recorded
+  # under NA-6 and first hit on PR #45.
+  #
+  # Deliberately NOT added to `push`: a push to a security branch that has a PR
+  # already triggers CI via the pull_request event, so a push filter would double
+  # every run. `push` stays minimal (post-merge verification on the default
+  # branch, plus the one legacy long-lived branch).
   push:
     branches:
       - main
@@ -8,6 +18,7 @@ on:
   pull_request:
     branches:
       - main
+      - "security/**"
 
 jobs:
   dashboard-ci:
