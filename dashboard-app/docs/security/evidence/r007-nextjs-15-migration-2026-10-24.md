@@ -33,17 +33,29 @@ the build reported:
 ⚠ Unrecognized key(s) in object: 'outputFileTracingExcludes' at "experimental"
 ```
 
-That is not cosmetic. That exclusion is **R-002's structural backstop** — it keeps
-`bigint-buffer`'s vulnerable **native addon** out of the traced server bundle so the safe pure-JS
-fallback is what runs. Unrecognized means **silently ignored**, i.e. the addon would have been
-traced back in. Moved to top level; verified:
+The placement fix is correct and worth making: `outputFileTracingExcludes` is a **top-level** key in
+Next 15, and under `experimental` it is unrecognized — which means **silently ignored**, not merely
+warned about.
 
-| Check | Result |
-|---|---|
-| `Unrecognized key(s)` warnings in a fresh build | **0** |
-| `.node` files in `.next` | **0** |
-| `bigint-buffer` directories in `.next` | **0** |
-| native addon present in `node_modules` (so the exclusion is meaningful) | **yes** |
+**Correction (2026-10-24) — found by independent review, then re-measured.** The impact originally
+claimed here, that the addon "would have been traced back in", is **overstated**. Removing the
+exclusion entirely and rebuilding produced **0** traces mentioning `bigint-buffer` and **0** `.node`
+files — **identical to the build with it in place**. The exclusion is currently **inert**: nothing in
+this app's traced server graph pulls the native addon, so the `0 .node files` check cannot
+distinguish "exclusion working" from "exclusion unnecessary". The original check was non-falsifying.
+
+| Check | With exclusion | Exclusion removed |
+|---|---|---|
+| `Unrecognized key(s)` warnings | 0 | 0 |
+| `.nft.json` traces mentioning `bigint-buffer` | **0** | **0** |
+| `.node` files in `.next` | 0 | 0 |
+| `bigint-buffer` dirs in `.next` | 0 | 0 |
+| addon present in `node_modules` (control) | yes | yes |
+
+**What this means for R-002:** the protection is that no traced server path reaches the addon, not the
+exclusion. Keeping the exclusion correctly placed is still right — it is the belt to that braces and
+would matter if a future import path pulled the module in — but it must not be recorded as the thing
+currently preventing exposure.
 
 ## 3. Automated gate — all green
 
@@ -54,7 +66,13 @@ traced back in. Moved to top level; verified:
 | `npm run test:migration` | replay + **4 race tests** pass |
 | **`npm ci`** (the exact CI install, no `--legacy-peer-deps`) | **exit 0** — after the fix in §3a; this is what caught the defect |
 | production build (dummy env) | **exit 0**, no unrecognized-config warnings |
-| `npm audit` | **`next` advisories 25 → 0** |
+| `npm audit` | **no advisory targets `next` directly** (was 25) — but `next` is still listed transitively via `postcss`; see the correction below |
+
+**Correction (2026-10-24, independent review).** "`next` advisories 25 → 0" is imprecise. Measured:
+`npm audit` **still lists a `next` node** (moderate), because `next` depends on a vulnerable
+`postcss` — but **zero advisories target `next` itself** (its `via` array holds only the string
+`postcss`, no GHSA entry). Accurate wording: *no advisory targets `next` directly, down from 25;
+`next` remains flagged transitively via `postcss`.*
 
 `npm audit` remaining criticals are `protobufjs` and `tar` in the **wallet-adapter tree** — recorded
 under R-002 and explicitly out of scope for this migration (plan §8).
@@ -133,22 +151,36 @@ Middleware security headers intact (`x-frame-options: DENY`, `x-content-type-opt
 `referrer-policy`, CSP) and `/api/health/rate-limit` served with `cache-control: no-store` and
 `x-ratelimit-degraded: false`.
 
-## 5. NOT verified — release blockers
+## 5. Verification status
 
-**1. The authenticated session path — the plan's highest-risk item.** The `setAll` cookie branch
-in the adapter is **not exercised** by any of the above: nothing above signs a user in. The plan
-warns (§3.3) that a subtly wrong adapter here causes **silent session loss rather than an error**,
-which no build and no unauthenticated probe can detect. It needs a **real sign-in on the preview**
-followed by a session-refresh and a protected-route load.
+**Resolved since this document was written.** The authenticated half was verified on 2026-10-24; see
+`evidence/r007-authenticated-verification-2026-10-24.md`. Both items listed here as blockers are now
+measured: the session `setAll` refresh path (on the 200 branch) and the full role/status matrix —
+**12/12, twice, on a deployed preview**.
 
-**2. The remaining authorisation-matrix rows**, which all require a session: active member →
-`/dashboard` allowed; suspended member → redirect with `error=account_inactive`; active member →
-`/admin` → `/dashboard`; active admin → `/admin` allowed; authenticated → `/auth/login` → `/dashboard`;
-capability denial on privileged actions.
+**1. Independent human review (M8) remains outstanding.** The register's division of authority is
+explicit: self-review by the implementing agent does not satisfy independent review — and this agent
+cannot approve its own PR (GitHub returns `422 "Review Can not approve your own pull request"`).
 
-**3. Independent human review (M8).** The register's division of authority is explicit: self-review
-by the implementing agent does not satisfy independent review. This migration cannot be approved by
-the agent that wrote it.
+**2. A gap the authenticated verification did NOT cover — found by independent review, confirmed by
+measurement 2026-10-24.** That verification exercised the refresh path on the **200 branch only**. On
+the four middleware **redirect** branches the adapter's refreshed cookies are **discarded**: `setAll`
+writes them onto `response`, but each redirect branch returns a freshly constructed
+`NextResponse.redirect(...)` that never receives those `Set-Cookie` headers. Measured with an
+expired-access cookie and a suspended user: `/dashboard` → `307 → /auth/login?error=account_inactive`
+with **`Set-Cookie: NONE`**, versus **`Set-Cookie` present** on the 200 branch.
+
+**Pre-existing, not a migration regression.** `origin/main` has the identical structure (the old
+`set`/`remove` also wrote onto `response`, and the same four bare redirects), so the migration
+preserved behaviour exactly as it set out to. **Recorded, not fixed.**
+
+**Consequence — measured, and narrower than first reported.** Replaying the same cookie 16 s later
+still authenticated and refreshed again, so **no immediate logout reproduced** in this configuration.
+The real effect: on any redirect path the browser is never given the refreshed session, so it keeps an
+expired access token and re-refreshes on every request, surviving only while the refresh token remains
+valid. Whether a stricter rotation setting could end the session has **not** been measured. The fix —
+carry `response.cookies` onto the redirect response — is small and is recommended as its own change
+rather than smuggled into this PR.
 
 **Also recorded:** no production deployment; **no schema change** (plan §6 — if that ever changes it
 stops being a single-PR migration); `images.unoptimized: true` unchanged, so R-001's Condition 1

@@ -87,6 +87,21 @@ Test user deleted across all three surfaces and the deletion confirmed by re-rea
 cookie sets) shredded with 4-pass random overwrite and removed. The gate script performs this teardown
 itself and reports `teardown: user_authorizations rows=0 -> clean`.
 
+## Limits of this verification — found by independent review
+
+**Only the 200 branch was exercised for the refresh path.** The four middleware **redirect** branches
+discard the refreshed cookies (measured: `Set-Cookie: NONE` on a redirect; present on a 200). So the
+claim above is precise only as: *the refreshed session is delivered on the branch that returns 200.*
+It is **not** true that every path delivers it. Pre-existing on `main`; recorded, not fixed. Full
+detail in §5 of `r007-nextjs-15-migration-2026-10-24.md`.
+
+**The redirect rows of the matrix used a valid session**, so no refresh occurred on them — which is
+exactly why this gate did not surface the gap above. A future revision should pair an **expired cookie
+with a redirect branch**.
+
+**Not covered, stated plainly (again):** the *browser* client's own cookie writing, and the
+`response`-reassignment behaviour when `setAll` is invoked more than once in a single request.
+
 ## What this does and does not close
 
 - **Closes:** the authenticated half of §5.3 (session persistence and the full role/status matrix).

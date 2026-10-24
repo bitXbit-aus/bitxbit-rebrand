@@ -472,15 +472,20 @@ ceiling is documented, not measured; not verified in a deployment.** See
 
 ## R-007 — Next.js 15 migration
 
-**Status:** **IMPLEMENTED AND FULLY VERIFIED 2026-10-24 (PR #49) — NOT released.** Every technical
-verification in the migration plan is now done, including the authenticated matrix and the session
-`setAll` path. **One blocker remains: independent review (M8)**, which the implementing agent cannot
-supply. Evidence: `evidence/r007-nextjs-15-migration-2026-10-24.md`,
-`evidence/r007-authenticated-verification-2026-10-24.md`.
+**Status:** **IMPLEMENTED 2026-10-24 (PR #49) — NOT released.** The plan's technical verifications are
+done — the authenticated matrix, and the session `setAll` path **on the 200 branch** — with one gap
+that independent review found and measurement confirmed (below). **Blockers:** independent review
+(M8), which the implementing agent cannot supply (GitHub returns `422` on self-approval), and a
+decision on the redirect-branch cookie defect. Evidence:
+`evidence/r007-nextjs-15-migration-2026-10-24.md`,
+`evidence/r007-authenticated-verification-2026-10-24.md`,
+`evidence/r007-independent-review-2026-10-24.md`.
 **Owner:** Shri — interim accountable owner.
 
 **What landed:** `next@15.5.28` · `react`/`react-dom` 19.1.10 · `@supabase/ssr` 0.12.7 ·
-`@supabase/supabase-js` ^2.114 (2.117.1). `npm audit`: **`next` advisories 25 → 0**. Async request
+`@supabase/supabase-js` ^2.114 (2.117.1). `npm audit`: **no advisory targets `next` directly** (was
+25) — it is still listed transitively via a vulnerable `postcss`, so "0 next advisories" would be
+imprecise. Async request
 APIs (`await cookies()`, async `createClient()` + 24 awaited call sites, awaited `searchParams`);
 `getAll`/`setAll` cookie adapters in `lib/supabase/server.ts` and `middleware.ts`.
 
@@ -493,8 +498,9 @@ into the server bundle. Moved and re-verified (`.next`: **0** `.node` files).
 absent from the audit · **D4** staging isolation on `deploy-preview-49` (0 production refs,
 devnet mint) · `test:staging` and `test:solana-fault` all pass.
 
-**Verified in a deployment — the full authenticated matrix (§5.3): 12/12, twice.** Re-runnable gate:
-`scripts/authz-matrix-verify.py`. A real session (minted against a staging-scoped preview; no password
+**Verified in a deployment — the full authenticated matrix (§5.3): 12/12, twice.** Manual gate, **not
+wired into CI** (it needs a staging service-role credential and a live preview, neither of which CI
+has): `scripts/authz-matrix-verify.py`. A real session (minted against a staging-scoped preview; no password
 or one-time code handled) for a staging test user: unauthenticated → `/auth/login`; active member →
 `/dashboard` 200; member → `/admin` → `/dashboard`; active → `/auth/login` → `/dashboard`;
 **suspended** and **deactivated** → `/auth/login?error=account_inactive`; **admin** → `/admin` 200.
@@ -507,6 +513,18 @@ onto the *response*, not merely the request — and replaying that returned cook
 second request: **no silent session loss**. Decoded, the access token changed and the refresh token
 **rotated**, with the expiry in the future. `@supabase/ssr` treats an undecodable cookie as **absent**
 (i.e. a silent logout), which is precisely what this rules out.
+
+**Recorded, not fixed — found by independent review 2026-10-24, confirmed by measurement.** The
+refresh verification covers the **200 branch only**. On the four middleware **redirect** branches the
+adapter's refreshed cookies are **discarded** — `setAll` writes them onto `response`, but each redirect
+returns a fresh `NextResponse.redirect(...)` that never receives them. Measured with an expired cookie
+and a suspended user: `307 → /auth/login?error=account_inactive` with **`Set-Cookie: NONE`**, against
+`Set-Cookie` present on the 200 branch. **Pre-existing** — `origin/main` is structurally identical, so
+this is not a migration regression — but the "no silent session loss" claim must be read as scoped to
+the 200 branch. **Consequence measured and narrower than first reported:** a replay 16 s later still
+authenticated, so no immediate logout reproduced; the browser simply never receives the refreshed
+session on a redirect path and re-refreshes each request. The fix (carry `response.cookies` onto the
+redirect response) is small and is recommended as its own change.
 
 **Remaining blocker:** **independent review (M8)** — not a technical gap.
 
