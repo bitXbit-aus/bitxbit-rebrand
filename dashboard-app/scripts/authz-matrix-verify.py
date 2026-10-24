@@ -202,8 +202,12 @@ class Probe:
         h = {"Accept": "text/html"}
         if cookies:
             h["Cookie"] = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+
+        class NoRedir(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k): return None
+        op = urllib.request.build_opener(NoRedir)
         try:
-            r = OP.open(urllib.request.Request(self.base + path, headers=h, method="GET"))
+            r = op.open(urllib.request.Request(self.base + path, headers=h, method="GET"))
             return r.status, r.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode("utf-8", "replace")

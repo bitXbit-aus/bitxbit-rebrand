@@ -70,10 +70,16 @@ requirement, and `main` auto-deploys. Discipline, not tooling, is what holds thi
   battery.
 - It **does not apply** where an AI reviewer is unavailable, or where a **critical** finding is
   unresolved.
-- **Reviewed revision vs release commit.** The reviewed revision is the **code** at a named SHA. A
-  documentation-only commit after it (evidence, register, this policy) does **not** invalidate the
-  review. Any change to **code, dependencies or configuration** does, and re-triggers condition 3 —
-  including a change that only *looks* cosmetic.
+- **Reviewed revision vs release commit.** The reviewed artifact is the **deployed application**:
+  everything under `dashboard-app/` that ships — application code, dependencies
+  (`package.json`/`package-lock.json`) and build configuration. A documentation-only commit after the
+  review (`docs/**`) does **not** invalidate it. Neither does a change confined to a **verification
+  harness** (`scripts/**`, which is not bundled), provided the change makes the gate *stricter* or
+  repairs the harness itself and is recorded here. Any change to shipped code, dependencies or build
+  configuration **does** re-trigger condition 3, including a change that only *looks* cosmetic.
+- **Harness changes are recorded, not assumed.** The gate is part of the evidence, so a post-review
+  harness change must be named in the review record with its reason, and the gate re-run against the
+  reviewed revision afterwards.
 - A **critical** finding cannot be waived by this exception; only the owner can accept it, separately
   and explicitly, with its impact recorded.
 - **Reassessment:** this exception must be re-affirmed, or replaced by human review, at the next
