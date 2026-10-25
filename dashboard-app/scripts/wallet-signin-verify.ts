@@ -33,6 +33,13 @@
  * Run from dashboard-app/ via `npm run test:wallet-signin`.
  * Exit 0 only when every assertion passes AND teardown is proven clean.
  *
+ * NOTE ON THE COMPILED PATH: this file imports only packages, never `../lib`, so
+ * tsc infers `rootDir` = scripts/ and emits `.staging-dist/wallet-signin-verify.js`.
+ * (The B2 harness DOES import `../lib/wallet-crypto`, which moves its output to
+ * `.staging-dist/scripts/` — the two npm scripts therefore differ deliberately.)
+ * Adding a `../lib` import here will move this output too; update the npm script
+ * with it, or `node` fails with MODULE_NOT_FOUND.
+ *
  * NOTE ON TEARDOWN: `security_audit_log` is append-only by trigger, so the audit
  * rows this run creates CANNOT be removed and are deliberately left behind. Every
  * other artefact (the disposable auth user, its public.users row, and every
