@@ -119,3 +119,54 @@ describe("R-002 bigint-buffer exposure", () => {
     assert.ok(covered, `the exclusion ${JSON.stringify(patterns)} must cover ${addonRel}`);
   });
 });
+
+/**
+ * Single React runtime — guards the wallet-adapter dependency narrowing.
+ *
+ * `@solana/wallet-adapter-wallets` is a barrel that bundles EVERY wallet,
+ * including `@solana/wallet-adapter-fractal`, which pins a nested React 18 under
+ * this React 19 application. Two React copies in one client bundle is a runtime
+ * hazard (hooks resolved against the wrong dispatcher) that no type check can
+ * see, and it is what the `as any` casts on the providers were papering over.
+ * The app only uses Phantom, Solflare and Coinbase, so it imports those three
+ * packages directly.
+ *
+ * These assert the INSTALLED tree (package-lock.json), not the source — a
+ * re-introduced barrel dependency fails here even if no import mentions it.
+ */
+describe("single React runtime", () => {
+  const lock = JSON.parse(read("package-lock.json")) as {
+    packages?: Record<string, { version?: string; dependencies?: Record<string, string> }>;
+  };
+  const packages = lock.packages ?? {};
+
+  const reactInstalls = Object.entries(packages).filter(
+    ([path]) => path === "node_modules/react" || path.endsWith("/node_modules/react")
+  );
+
+  it("installs exactly one copy of react", () => {
+    assert.deepEqual(
+      reactInstalls.map(([path]) => path),
+      ["node_modules/react"],
+      "a nested react copy means two runtimes in one bundle — find which dependency pulled it in"
+    );
+  });
+
+  it("resolves react to a single major version", () => {
+    const majors = [...new Set(reactInstalls.map(([, meta]) => String(meta.version).split(".")[0]))];
+    assert.deepEqual(majors, ["19"], "the app is React 19; a second major is a dual-subtree hazard");
+  });
+
+  it("does not install the Fractal wallet adapter", () => {
+    const fractal = Object.keys(packages).filter((path) => path.toLowerCase().includes("fractal"));
+    assert.deepEqual(fractal, [], "Fractal pins React 18 — it must not return to the tree");
+  });
+
+  it("does not depend on the wallet-adapter-wallets barrel", () => {
+    const rootDeps = packages[""]?.dependencies ?? {};
+    assert.ok(
+      !("@solana/wallet-adapter-wallets" in rootDeps),
+      "import the specific adapters (phantom/solflare/coinbase) instead of the barrel that bundles every wallet"
+    );
+  });
+});
