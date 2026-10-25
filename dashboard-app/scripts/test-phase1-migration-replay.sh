@@ -22,6 +22,7 @@ MIGRATION_024="$ROOT_DIR/supabase/migrations/024_atomic_reward_approval_and_payo
 MIGRATION_025="$ROOT_DIR/supabase/migrations/025_exact_payout_amount_reads.sql"
 MIGRATION_026="$ROOT_DIR/supabase/migrations/026_harden_payout_confirmation_evidence.sql"
 MIGRATION_027="$ROOT_DIR/supabase/migrations/027_shared_rate_limit_counter.sql"
+MIGRATION_028="$ROOT_DIR/supabase/migrations/028_wallet_signin.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -78,6 +79,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_024" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_027" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_028" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -101,6 +103,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_024" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_027" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_028" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -514,14 +517,17 @@ BEGIN
     v_cc_user UUID := '11111111-1111-4111-8111-111111111112';
     v_cc_period UUID := '33333333-3333-4333-8333-333333333334';
     v_cc_reward UUID := '44444444-4444-4444-8444-444444444445';
+    -- Own wallet: migration 028 makes a wallet unique across accounts, so fixtures
+    -- that used to share test_wallet must not collide with one another.
+    v_cc_wallet TEXT := 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH7';
     v_cc_other_wallet TEXT := '11111111111111111111111111111111111111111112';
     v_cc_op TEXT;
     v_cc_op_status TEXT;
   BEGIN
     INSERT INTO auth.users (id, email) VALUES (v_cc_user, 'create-claim-test@example.test');
     INSERT INTO public.users (id, email, wallet_address)
-    VALUES (v_cc_user, 'create-claim-test@example.test', test_wallet)
-    ON CONFLICT (id) DO UPDATE SET wallet_address = test_wallet;
+    VALUES (v_cc_user, 'create-claim-test@example.test', v_cc_wallet)
+    ON CONFLICT (id) DO UPDATE SET wallet_address = v_cc_wallet;
     UPDATE public.users SET wallet_verified = TRUE WHERE id = v_cc_user;
     INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
     VALUES (v_cc_period, '2026-07-01', '2026-07-31', '55555555-5555-4555-8555-555555555555', 'approved');
@@ -530,7 +536,7 @@ BEGIN
 
     -- Creates and claims a new operation when none exists.
     SELECT public.create_or_claim_payout_operation(
-      v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
+      v_cc_period, v_cc_reward, v_cc_user, v_cc_wallet, 1500000000, 9, v_cc_user
     ) INTO v_cc_op;
 
     IF v_cc_op IS NULL THEN
@@ -551,7 +557,7 @@ BEGIN
     WHERE operation_id = v_cc_op;
 
     SELECT public.create_or_claim_payout_operation(
-      v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
+      v_cc_period, v_cc_reward, v_cc_user, v_cc_wallet, 1500000000, 9, v_cc_user
     ) INTO v_cc_op;
 
     SELECT status INTO v_cc_op_status
@@ -569,7 +575,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, v_cc_wallet, 1500000000, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'superseded reward was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -585,7 +591,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 999999999, 9, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, v_cc_wallet, 999999999, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'amount mismatch was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -601,7 +607,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, v_cc_wallet, 1500000000, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'non-approved reward was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -634,7 +640,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, v_cc_wallet, 1500000000, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'unverified wallet was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -654,7 +660,7 @@ BEGIN
 
     BEGIN
       SELECT public.create_or_claim_payout_operation(
-        v_cc_period, v_cc_reward, v_cc_user, test_wallet, 1500000000, 9, v_cc_user
+        v_cc_period, v_cc_reward, v_cc_user, v_cc_wallet, 1500000000, 9, v_cc_user
       ) INTO v_cc_op;
       RAISE EXCEPTION 'non-approved period was accepted for payout';
     EXCEPTION WHEN OTHERS THEN
@@ -1197,7 +1203,7 @@ BEGIN
     v_operation_amount TEXT;
   BEGIN
     INSERT INTO auth.users (id, email) VALUES (v_exact_user, 'exact-read@example.test');
-    UPDATE public.users SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5' WHERE id = v_exact_user;
+    UPDATE public.users SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH8' WHERE id = v_exact_user;
     UPDATE public.users SET wallet_verified = TRUE WHERE id = v_exact_user;
 
     INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
@@ -1332,6 +1338,117 @@ SQL
 printf 'migration replay verification passed (first apply + validated constraint + second apply)\n'
 
 # ------------------------------------------------------------------------------
+# Migration 028 (wallet sign-in) verification
+# The unique index is the invariant sign-in depends on: a wallet must map to at
+# most one account, or "find the account by wallet" is ambiguous. The consume
+# RPC must be single-use and must resolve ONLY a verified owner -- possessing an
+# address is not proof of ownership until a signature has been verified.
+# ------------------------------------------------------------------------------
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE
+  v_owner UUID := '31313131-3131-4131-8131-313131313131';
+  v_other UUID := '32323232-3232-4232-8232-323232323232';
+  v_unverified UUID := '33333333-3333-4333-8333-333333333332';
+  v_wallet TEXT := 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UHA';
+  v_other_wallet TEXT := 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UHB';
+  v_signed_in UUID;
+  v_rejected BOOLEAN;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname = 'public' AND tablename = 'users'
+      AND indexname = 'users_wallet_address_unique'
+  ) THEN
+    RAISE EXCEPTION 'users_wallet_address_unique index is missing';
+  END IF;
+
+  -- The index must actually reject a second account claiming the same wallet.
+  INSERT INTO auth.users (id, email) VALUES (v_owner, 'signin-owner@example.test');
+  UPDATE public.users SET wallet_address = v_wallet WHERE id = v_owner;
+  UPDATE public.users SET wallet_verified = TRUE WHERE id = v_owner;
+
+  INSERT INTO auth.users (id, email) VALUES (v_other, 'signin-other@example.test');
+  BEGIN
+    UPDATE public.users SET wallet_address = v_wallet WHERE id = v_other;
+    RAISE EXCEPTION 'a second account was allowed to claim the same wallet';
+  EXCEPTION WHEN unique_violation THEN
+    NULL;
+  WHEN OTHERS THEN
+    IF SQLERRM = 'a second account was allowed to claim the same wallet' THEN
+      RAISE;
+    END IF;
+  END;
+
+  -- A fresh challenge resolves to the verified owner and is consumed.
+  INSERT INTO public.wallet_signin_challenges (wallet_address, nonce, message, expires_at)
+  VALUES (v_wallet, 'signin-nonce-ok', 'msg', NOW() + INTERVAL '5 minutes');
+
+  SELECT public.verify_wallet_signin(v_wallet, 'signin-nonce-ok') INTO v_signed_in;
+  IF v_signed_in IS DISTINCT FROM v_owner THEN
+    RAISE EXCEPTION 'verify_wallet_signin did not resolve the verified owner (got %)', v_signed_in;
+  END IF;
+
+  -- Single-use: the same nonce must not work twice.
+  v_rejected := FALSE;
+  BEGIN
+    PERFORM public.verify_wallet_signin(v_wallet, 'signin-nonce-ok');
+  EXCEPTION WHEN OTHERS THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'verify_wallet_signin accepted a replayed nonce';
+  END IF;
+
+  -- An expired challenge must be refused.
+  INSERT INTO public.wallet_signin_challenges (wallet_address, nonce, message, expires_at)
+  VALUES (v_wallet, 'signin-nonce-expired', 'msg', NOW() - INTERVAL '1 minute');
+  v_rejected := FALSE;
+  BEGIN
+    PERFORM public.verify_wallet_signin(v_wallet, 'signin-nonce-expired');
+  EXCEPTION WHEN OTHERS THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'verify_wallet_signin accepted an expired challenge';
+  END IF;
+
+  -- An unregistered wallet must not resolve to anyone, and must still consume its
+  -- challenge so a failed attempt is not retryable against the same nonce.
+  INSERT INTO public.wallet_signin_challenges (wallet_address, nonce, message, expires_at)
+  VALUES (v_other_wallet, 'signin-nonce-unknown', 'msg', NOW() + INTERVAL '5 minutes');
+  SELECT public.verify_wallet_signin(v_other_wallet, 'signin-nonce-unknown') INTO v_signed_in;
+  IF v_signed_in IS NOT NULL THEN
+    RAISE EXCEPTION 'verify_wallet_signin resolved an unregistered wallet';
+  END IF;
+
+  -- An UNVERIFIED owner must not resolve either.
+  INSERT INTO auth.users (id, email) VALUES (v_unverified, 'signin-unverified@example.test');
+  UPDATE public.users SET wallet_address = v_other_wallet WHERE id = v_unverified;
+  UPDATE public.users SET wallet_verified = FALSE WHERE id = v_unverified;
+  INSERT INTO public.wallet_signin_challenges (wallet_address, nonce, message, expires_at)
+  VALUES (v_other_wallet, 'signin-nonce-unverified', 'msg', NOW() + INTERVAL '5 minutes');
+  SELECT public.verify_wallet_signin(v_other_wallet, 'signin-nonce-unverified') INTO v_signed_in;
+  IF v_signed_in IS NOT NULL THEN
+    RAISE EXCEPTION 'verify_wallet_signin resolved an unverified wallet';
+  END IF;
+
+  -- The challenge table and the RPC must be unreachable to client roles.
+  IF has_table_privilege('anon', 'public.wallet_signin_challenges', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.wallet_signin_challenges', 'SELECT') THEN
+    RAISE EXCEPTION 'wallet_signin_challenges is readable by a client role';
+  END IF;
+  IF has_function_privilege('anon', 'public.verify_wallet_signin(text,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.verify_wallet_signin(text,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'verify_wallet_signin is executable by a client role';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.verify_wallet_signin(text,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'service_role cannot execute verify_wallet_signin';
+  END IF;
+END $$;
+SQL
+
+printf 'wallet sign-in (028) verification passed (unique wallet per account, single-use challenge, unverified/unregistered refused, privileges locked)\n'
+
+# ------------------------------------------------------------------------------
 # Concurrent correction-vs-claim race test
 # Verifies that apply_reward_correction() and claim_payout_operation() serialize
 # on the same period lock. A correction that starts first must cancel all pending
@@ -1424,8 +1541,8 @@ RACE2_RESULT=$(mktemp)
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "
   INSERT INTO auth.users (id, email) VALUES ('$RACE2_USER', 'race2@example.test');
   INSERT INTO public.users (id, email, wallet_address)
-  VALUES ('$RACE2_USER', 'race2@example.test', 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5')
-  ON CONFLICT (id) DO UPDATE SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5';
+  VALUES ('$RACE2_USER', 'race2@example.test', 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH9')
+  ON CONFLICT (id) DO UPDATE SET wallet_address = 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH9';
   UPDATE public.users SET wallet_verified = TRUE WHERE id = '$RACE2_USER';
   INSERT INTO public.reward_periods (id, start_date, end_date, allocation_model_id, status)
   VALUES ('$RACE2_PERIOD', '2026-06-01', '2026-06-30', '55555555-5555-4555-8555-555555555555', 'approved');
@@ -1456,7 +1573,7 @@ done
 START2_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
 # The RPC is expected to raise; psql exits non-zero. Capture stdout and allow the
 # non-zero exit so we can verify no operation id was returned.
-psql -d "$DB_NAME" -t -A -c "SELECT create_or_claim_payout_operation('$RACE2_PERIOD'::UUID, '$RACE2_REWARD'::UUID, '$RACE2_USER'::UUID, 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH5', 7000000000, 9, '$RACE2_USER'::UUID);" > "$RACE2_RESULT" 2>/dev/null || true
+psql -d "$DB_NAME" -t -A -c "SELECT create_or_claim_payout_operation('$RACE2_PERIOD'::UUID, '$RACE2_REWARD'::UUID, '$RACE2_USER'::UUID, 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UH9', 7000000000, 9, '$RACE2_USER'::UUID);" > "$RACE2_RESULT" 2>/dev/null || true
 END2_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
 DURATION2=$((END2_MS - START2_MS))
 
