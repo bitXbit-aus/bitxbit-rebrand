@@ -41,3 +41,29 @@ export function resolveAuthRedirectBase(
   if (canonicalAppUrl) return canonicalAppUrl;
   return origin ?? "";
 }
+
+/** Last resort when neither the request nor the environment yields a usable host. */
+export const FALLBACK_SIGNIN_DOMAIN = "app.bitxbit.com.au";
+
+/**
+ * The domain shown in the "Sign in with your Solana account" message the user
+ * signs (SIWS) — the same decision as the redirect base, reduced to a hostname.
+ *
+ * `NEXT_PUBLIC_APP_URL` is the canonical PRODUCTION url in every context, so
+ * binding every signed message to it would make a deploy preview display — and
+ * have the user sign — production's domain. Reusing `resolveAuthRedirectBase`
+ * keeps one host allowlist rather than a second one that could drift from it.
+ */
+export function resolveSignInDomain(
+  requestUrl: string,
+  policy: HostPolicy,
+  canonicalAppUrl: string | undefined
+): string {
+  const base = resolveAuthRedirectBase(requestUrl, policy, canonicalAppUrl);
+  try {
+    const host = new URL(base).host;
+    return host || FALLBACK_SIGNIN_DOMAIN;
+  } catch {
+    return FALLBACK_SIGNIN_DOMAIN;
+  }
+}

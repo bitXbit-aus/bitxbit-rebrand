@@ -53,3 +53,48 @@ export async function writeSecurityAudit(
     throw new Error(`Failed to write security audit event: ${error.message}`);
   }
 }
+
+/**
+ * An audit entry for a request that has NOT been authenticated.
+ *
+ * `writeSecurityAudit` asserts a verified AuthorizationContext, which an
+ * unauthenticated sign-in does not have — so it cannot be reused here, and
+ * manufacturing a context to satisfy it would attribute an anonymous action to an
+ * identity that never proved anything. `security_audit_log.actor_id` is nullable
+ * for exactly this case, so anonymous events are recorded honestly instead.
+ *
+ * `actorId` is set only when the request resolved to a REAL account (a successful
+ * sign-in). Failed attempts leave it null. Never pass unverified caller input as
+ * the actor.
+ */
+export interface AnonymousAuditEntry extends AuditEntry {
+  actorId?: string | null;
+  actorRole?: string | null;
+  actorStatus?: string | null;
+}
+
+export async function writeAnonymousSecurityAudit(
+  entry: AnonymousAuditEntry
+): Promise<void> {
+  const serviceClient = createServiceClient();
+  const { actorId, actorRole, actorStatus, ...audit } = entry;
+  const { error } = await serviceClient.from("security_audit_log").insert({
+    actor_id: actorId ?? null,
+    actor_role: actorRole ?? null,
+    actor_status: actorStatus ?? null,
+    actor_authorization: {},
+    action: audit.action,
+    target_table: audit.targetTable,
+    target_id: audit.targetId ?? null,
+    before_data: audit.before ?? null,
+    after_data: audit.after ?? null,
+    metadata: audit.metadata ?? {},
+    request_id: audit.requestId ?? null,
+    success: audit.success ?? true,
+    error_message: audit.errorMessage ?? null,
+  });
+
+  if (error) {
+    throw new Error(`Failed to write anonymous security audit event: ${error.message}`);
+  }
+}

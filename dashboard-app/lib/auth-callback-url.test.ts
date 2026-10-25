@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveAuthRedirectBase } from "./auth-callback-url";
+import {
+  resolveAuthRedirectBase,
+  resolveSignInDomain,
+  FALLBACK_SIGNIN_DOMAIN,
+} from "./auth-callback-url";
 import type { HostPolicy } from "./host-validation";
 
 const POLICY: HostPolicy = {
@@ -70,4 +74,64 @@ test("ignores a non-standard port only after normalisation", () => {
     resolveAuthRedirectBase("https://app.bitxbit.com.au:8443/auth/callback", POLICY, CANONICAL),
     "https://app.bitxbit.com.au:8443"
   );
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 (B3) — the SIWS sign-in message names a DOMAIN, so this reduces the
+// same decision to a hostname. The point of these tests is the preview case: a
+// sign-in on a deploy preview must not display, and have the user sign,
+// production's hostname.
+// ---------------------------------------------------------------------------
+
+test("sign-in domain keeps a deploy-preview host instead of collapsing to production", () => {
+  assert.equal(
+    resolveSignInDomain(
+      "https://deploy-preview-58--bitxbit-dashboard.netlify.app/api/auth/wallet/challenge",
+      POLICY,
+      CANONICAL
+    ),
+    "deploy-preview-58--bitxbit-dashboard.netlify.app"
+  );
+});
+
+test("sign-in domain keeps the production host", () => {
+  assert.equal(
+    resolveSignInDomain(
+      "https://app.bitxbit.com.au/api/auth/wallet/challenge",
+      POLICY,
+      CANONICAL
+    ),
+    "app.bitxbit.com.au"
+  );
+});
+
+test("sign-in domain falls back to the canonical host for a disallowed host", () => {
+  assert.equal(
+    resolveSignInDomain("https://evil.example/api/auth/wallet/challenge", POLICY, CANONICAL),
+    "app.bitxbit.com.au"
+  );
+});
+
+test("sign-in domain rejects a lookalike Netlify suffix host", () => {
+  assert.equal(
+    resolveSignInDomain(
+      "https://x--bitxbit-dashboard.netlify.app.evil.com/api/auth/wallet/challenge",
+      POLICY,
+      CANONICAL
+    ),
+    "app.bitxbit.com.au"
+  );
+});
+
+test("sign-in domain falls back when the URL is malformed and nothing is canonical", () => {
+  assert.equal(resolveSignInDomain("not a url", POLICY, undefined), FALLBACK_SIGNIN_DOMAIN);
+  assert.equal(resolveSignInDomain("not a url", POLICY, "also not a url"), FALLBACK_SIGNIN_DOMAIN);
+});
+
+test("sign-in domain is never empty", () => {
+  // The message is built by concatenation; an empty domain would produce a SIWS
+  // message with no origin at all, which the user cannot meaningfully approve.
+  for (const url of ["", "://", "not a url", "https://app.bitxbit.com.au"]) {
+    assert.notEqual(resolveSignInDomain(url, POLICY, undefined), "");
+  }
 });
