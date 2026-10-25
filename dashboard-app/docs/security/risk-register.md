@@ -674,6 +674,17 @@ falls through to the keyless Dexscreener fallback, and D4 asserts only a 200 on 
 D4 checks pass**; the prior preview returned `holders: 0` for a devnet mint, which reads like real
 data and is not — so the change improves legibility rather than removing working functionality.
 
+**ROTATED 2026-10-25 — the residual is now closed.** The production value was rotated at
+Birdeye and replaced on the Netlify site; the previously exposed value (`4faa22abd2`) is
+gone from every context. **Verified by use, not by presence:** the new production key
+(`44eaadeb17`, 32 chars) was sent to `public-api.birdeye.so/defi/token_overview` for the
+production mint and returned **HTTP 200 / `success: true`** with live data (price, holders,
+liquidity, market cap); a USDC control call also returned 200, isolating key validity from
+token indexing. **Preview/branch-deploy re-confirmed unset** — `env:list --context` shows
+`BIRDEYE_API_KEY` absent from both, present only in production. Note: `netlify env:get
+--context <ctx>` returns a **stale local value** after an unset and must not be used to
+confirm removal; use `env:list --context` or `env:list --json --context`.
+
 **RECLASSIFIED — `NEXT_PUBLIC_APP_URL`.** It is identical across contexts, but it is a
 `NEXT_PUBLIC_*` value compiled into the client bundle and therefore **public by design**, and the
 sharing is **deliberate** (`app/auth/callback/route.ts:15` — "always redirect to the canonical app
@@ -726,7 +737,7 @@ Every variable present in the `production` context is **also present in
 | `AIRDROP_WALLET_PRIVATE_KEY` | production, branch-deploy, deploy-preview | **Production treasury signing key**, identical across all three |
 | `BITXBIT_TOKEN_MINT` | production, branch-deploy, deploy-preview | Production mint, identical across all three |
 | `NEXT_PUBLIC_APP_URL` | **all** | `https://app.bitxbit.com.au` — previews identify as production. **Reclassified 2026-10-22: public by design, deliberate, not a credential exposure.** |
-| `BIRDEYE_API_KEY` | *(missing from this audit)* | **Missed by the original audit; found 2026-10-22** — was identical across all three contexts, reachable from arbitrary branch code. **Closed 2026-10-22** (unset from preview/branch-deploy). |
+| `BIRDEYE_API_KEY` | *(missing from this audit)* | **Missed by the original audit; found 2026-10-22** — was identical across all three contexts, reachable from arbitrary branch code. **Closed 2026-10-22** (unset from preview/branch-deploy). **Rotated 2026-10-25** — the exposed production value replaced and verified by use (HTTP 200 against the production mint); preview/branch-deploy re-confirmed unset. |
 
 **Consequence:** a deploy preview or branch deploy executes **arbitrary branch
 code** with the **production treasury private key** and the **production
