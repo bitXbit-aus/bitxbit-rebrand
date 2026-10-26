@@ -1072,8 +1072,8 @@ authentication outage for every user with no degraded state in between.
 
 ## R-015 — No password-recovery route: a password-only account can be permanently locked out
 
-**Status:** **REMEDIATION IMPLEMENTED 2026-10-27 (branch `security/password-reset`) — not released,
-not browser-verified.** Identified 2026-10-27 while reading live state; see
+**Status:** **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68, branch `security/password-reset`) — not
+released, not browser-verified.** Identified 2026-10-27 while reading live state; see
 `evidence/password-reset-2026-10-27.md`.
 **Owner:** Shri — interim accountable owner. **Review:** on merge.
 
@@ -1238,7 +1238,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
-| **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (branch `security/password-reset`) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Unverified: the recovery link end-to-end in a browser** (Supabase redirect-allowlist behaviour not confirmable externally). | Shri (interim) | on merge |
+| **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Unverified: the recovery link end-to-end in a browser** (Supabase redirect-allowlist behaviour not confirmable externally). | Shri (interim) | on merge |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
