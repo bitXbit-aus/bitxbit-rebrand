@@ -50,6 +50,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Cross-origin requests are NOT ours to handle. Intercepting them put the
+  // third-party URL under this page's CSP `connect-src`, so a blocked fetch (e.g.
+  // fonts.googleapis.com) rejected and the handler resolved to `undefined` -
+  // respondWith(undefined) throws "Failed to convert value to 'Response'", and a
+  // throwing fetch handler can surface as ERR_FAILED on the page. Let the browser
+  // fetch them directly.
+  if (url.origin !== self.location.origin) return;
+
   // Static assets: stale-while-revalidate.
   event.respondWith(
     caches.match(request).then((cached) => {
@@ -61,8 +69,11 @@ self.addEventListener('fetch', (event) => {
           }
           return response;
         })
-        .catch(() => cached);
-      return cached || fetchPromise;
+        .catch(() => null);
+      // NEVER resolve to undefined: respondWith() requires a real Response.
+      // Previously `return cached || fetchPromise` could yield undefined when a
+      // request was neither cached nor fetchable, throwing inside the handler.
+      return cached || fetchPromise.then((r) => r || new Response('', { status: 504 }));
     })
   );
 });
