@@ -14,7 +14,7 @@ import {
   verifyWalletSignature,
   getWalletVerificationStatus,
 } from "@/lib/wallet-verification";
-import { saveWalletAddress, getTokenBalanceAction } from "@/lib/actions";
+import { getTokenBalanceAction } from "@/lib/actions";
 import bs58 from "bs58";
 import { Coins, History, Wallet, AlertCircle, Shield, ShieldAlert } from "lucide-react";
 
@@ -69,22 +69,20 @@ export default function WalletPage() {
   }, []);
 
   useEffect(() => {
-    async function handleConnectedWallet() {
-      if (!connectedAddress) return;
-
-      // If the connected wallet matches the saved verified wallet, allow an
-      // idempotent save so the UI reflects the latest connection. Otherwise
-      // prompt the user to verify ownership before it becomes the payout address.
-      try {
-        await saveWalletAddress(connectedAddress);
-        await loadSavedWallet();
-      } catch {
-        // Expected when the connected wallet differs from the saved address or
-        // when no wallet has been verified yet. The verify button handles this.
-      }
-    }
-
-    handleConnectedWallet();
+    // Connecting a wallet changes NO persisted state. verifyWalletSignature() is
+    // the only path that writes wallet_address and wallet_verified, and
+    // getWalletVerificationStatus() - called by loadSavedWallet - is the source
+    // of truth for what is stored.
+    //
+    // This effect used to call the address-save action on every connect. That
+    // action could only ever "succeed" by no-op'ing (re-saving an address equal
+    // to the already-verified one), so on a normal connect it threw instead -
+    // and it wrote a `success: false` audit row BEFORE throwing, with empty
+    // metadata. Four ordinary connects logged four fabricated security
+    // failures, indistinguishable from real ones. Re-reading the status gives
+    // the same UI result without any write.
+    if (!connectedAddress) return;
+    loadSavedWallet();
   }, [connectedAddress]);
 
   useEffect(() => {
