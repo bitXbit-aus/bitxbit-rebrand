@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/use-toast";
+import { WalletSignInButton } from "@/components/auth/wallet-signin-button";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -104,6 +105,10 @@ export default function LoginPage() {
           GitHub
         </Button>
       </div>
+
+      {/* Wallet sign-in (Phase 2 / B3). The wallet provider is mounted in the root
+          layout, so this needs no additional provider here. */}
+      <WalletSignInButton />
 
       <p className="text-center text-sm text-muted-foreground">
         No account?{" "}
