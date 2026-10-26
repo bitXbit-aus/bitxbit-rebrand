@@ -500,14 +500,28 @@ Evidence:
 `evidence/r007-nextjs-15-migration-2026-10-24.md`,
 `evidence/r007-authenticated-verification-2026-10-24.md`,
 `evidence/r007-browser-verification-2026-10-24.md`,
+`evidence/wallet-signin-browser-verification-2026-10-26.md`,
 `evidence/r002-trace-control-2026-10-24.md`, and
 `evidence/r007-independent-review-2026-10-24.md` (superseded historical leads).
 
-**Verification scope, stated precisely — the browser/client paths are NOT verified.** What is
-verified is the server-side authentication, authorisation, session-refresh, cache-safety and payout
-paths, plus authenticated *rendering* in a real browser from an injected session cookie. Application
-sign-in/PKCE cookie writing and wallet connect/sign/disconnect remain **unverified residuals**, as
-does the preview-only callback-destination behaviour. Do not read this entry as "fully verified".
+**Verification scope, stated precisely.** The server-side authentication, authorisation,
+session-refresh, cache-safety and payout paths are verified, plus authenticated *rendering* in a real
+browser from an injected session cookie.
+
+**Wallet SIWS sign-in is now verified END-TO-END IN A REAL BROWSER (2026-10-26, production
+`04321bb`)** — challenge → Solflare extension `signMessage` → Ed25519 verified → session minted on
+the cookie-backed SSR client → redirect → authenticated dashboard page, by a human with a real
+wallet, with a clean audit trail and zero failed rows. Evidence:
+`evidence/wallet-signin-browser-verification-2026-10-26.md`. This corrects the previous blanket
+statement that the wallet paths were unverified.
+
+**Still unverified residuals:** passwordless (magic-link/PKCE) sign-in cookie writing in a real
+browser; wallet **disconnect**; and wallet **unlink/replace**, for which no path exists at all. The
+preview callback-destination behaviour is corrected in `lib/auth-callback-url.ts` but has not been
+browser-exercised. Wallet sign-in also cannot be exercised on a preview deployment with a real
+identity, because previews point at the staging Supabase project while real users' wallets are linked
+on production (measured 2026-10-26: three preview attempts, `wallet_not_linked`, 0 matching users in
+staging). Do not read this entry as "fully verified".
 **Owner:** Shri — interim accountable owner.
 
 **What landed:** `next@15.5.28` · `react`/`react-dom` **^19.1.10 (lockfile resolves 19.3.1)** · `@supabase/ssr` 0.12.7 ·
@@ -1172,7 +1186,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
 | R-005 | Server Actions not rate limited | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per authenticated user; enforcement observed on a deployed preview (6 allowed, #7 refused with a returned, legible `{error}`); counter seen in the shared store keyed on the user id | Shri (interim) | NA-3 done |
 | R-006 | No explicit request-size limits | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; a deployed preview refused a genuine 4 MB file with a returned, legible `{error}` (HTTP 200, not 500) | Shri (interim) | NA-4 done |
-| R-007 | Next.js 15 migration | **IMPLEMENTED 2026-10-24 (PR #49) — not released.** `next@15.5.28` + React 19 + Supabase SSR 0.12.7; **no advisory targets `next` directly** (was 25); tsc/tests/migration replay/build green; D4 staging regression passed. **Authenticated gate 21/21 on a deployed preview** (`scripts/authz-matrix-verify.py`), incl. the session `setAll` refresh path on the **200 and redirect** branches, a decoded same-user redirect cookie, and a page-level check that the refreshed session renders. **Not "fully verified":** the browser sign-in/wallet paths are untested and the residuals in the R-007 entry remain open. **Blockers: owner release approval; human review waived — not satisfied — under D5** | Shri (interim) | PR #49 |
+| R-007 | Next.js 15 migration | **IMPLEMENTED 2026-10-24 (PR #49) — not released.** `next@15.5.28` + React 19 + Supabase SSR 0.12.7; **no advisory targets `next` directly** (was 25); tsc/tests/migration replay/build green; D4 staging regression passed. **Authenticated gate 21/21 on a deployed preview** (`scripts/authz-matrix-verify.py`), incl. the session `setAll` refresh path on the **200 and redirect** branches, a decoded same-user redirect cookie, and a page-level check that the refreshed session renders. **Wallet SIWS sign-in verified end-to-end in a real browser 2026-10-26** (production `04321bb`; see `evidence/wallet-signin-browser-verification-2026-10-26.md`). **Still unverified:** magic-link/PKCE browser sign-in, wallet disconnect, wallet unlink (no path exists); previews cannot exercise wallet sign-in against real identities (staging split). The remaining residuals in the R-007 entry stay open. **Blockers: owner release approval; human review waived — not satisfied — under D5** | Shri (interim) | PR #49 |
 | R-008 | Production pre-010, no ledger | ✅ **RESOLVED** — `010`–`026` applied and verified; ledger backfilled. **Re-measured 2026-10-23:** production ledger is complete `001`–`027`, all Phase 1 landmarks present, and the code is **deployed** (PR #1 merged 2026-10-20) — the "window remains open" text was stale | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). **Leaked service-role key rotated 2026-10-23** — new key live, old key revoked, production re-verified after revocation. | Shri (interim) | **NA-8** ✅ |
 | R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Rotation of the exposed service-role key **completed 2026-10-23** — new key live, leaked key revoked, production re-verified after revocation. | Shri (interim) | NA-9 |
