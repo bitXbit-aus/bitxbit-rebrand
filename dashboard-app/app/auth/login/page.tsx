@@ -106,9 +106,24 @@ export default function LoginPage() {
         </Button>
       </div>
 
-      {/* Wallet sign-in (Phase 2 / B3). The wallet provider is mounted in the root
-          layout, so this needs no additional provider here. */}
-      <WalletSignInButton />
+      {/* Wallet sign-in is deliberately NOT part of the "Or continue with" group
+          above. That group promises a method anyone can use, and this one is not:
+          it works only for a member who has ALREADY linked and verified a wallet.
+          Sitting there it read as "sign up with your wallet", which the link-only
+          model does not support — so it gets its own labelled block and an explicit
+          route for someone who arrives without an account.
+          The wallet provider is mounted in the root layout, so none is needed here. */}
+      <div className="space-y-3 rounded-lg border border-border p-4">
+        <WalletSignInButton />
+        <p className="text-center text-xs leading-relaxed text-muted-foreground">
+          Wallet sign-in is for existing members whose wallet is already linked and
+          verified. There is no wallet-only sign-up:{" "}
+          <Link href="/auth/signup" className="text-primary hover:underline">
+            create an account with email
+          </Link>{" "}
+          first, then link your wallet from Dashboard → Wallet.
+        </p>
+      </div>
 
       <p className="text-center text-sm text-muted-foreground">
         No account?{" "}

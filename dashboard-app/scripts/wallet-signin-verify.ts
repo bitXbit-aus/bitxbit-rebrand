@@ -214,19 +214,37 @@ async function main() {
   check("challenge carries a nonce", nonce.length > 0);
   check("challenge carries a message", message.length > 0);
 
-  // The message must name the host the user is ACTUALLY on. NEXT_PUBLIC_APP_URL is
-  // production in every context, so a naive implementation binds every preview
-  // sign-in to the production hostname.
+  // The message must name a host that belongs to THIS deployment.
+  //
+  // Measured: on a Netlify preview the app does NOT see the requesting alias.
+  // Netlify rewrites `request.url` to the deploy's own host, so a request to
+  // `deploy-preview-60--<site>.netlify.app` produces a message naming
+  // `6ade9bbf…--<site>.netlify.app` — a different hostname for the SAME deploy.
+  // Asserting the alias literally is therefore wrong; the real property is that
+  // the domain is an allowed host for this site and never someone else's.
+  const requestedHost = new URL(baseUrl).host;
+  const messageHost = message.split("\n")[0].split(" wants")[0].trim();
+  const isHostOfThisSite = (candidate: string): boolean =>
+    candidate === requestedHost ||
+    candidate === "bitxbit-dashboard.netlify.app" ||
+    /^[a-z0-9][a-z0-9-]*--bitxbit-dashboard\.netlify\.app$/.test(candidate) ||
+    candidate === "app.bitxbit.com.au";
+
   check(
-    `SIWS message names the deployment's own host (${expectedHost})`,
-    message.includes(expectedHost),
-    message.split("\n")[0]
+    `SIWS message names a host belonging to this deployment (${messageHost})`,
+    isHostOfThisSite(messageHost),
+    messageHost
   );
   if (expectedHost !== "app.bitxbit.com.au") {
     check(
       "preview sign-in is NOT bound to the production hostname",
       !message.includes("app.bitxbit.com.au"),
       message.split("\n")[0]
+    );
+    check(
+      "preview sign-in does NOT name an unrelated host",
+      !/\bevil\b|example\.com/i.test(messageHost),
+      messageHost
     );
   }
 
@@ -274,8 +292,16 @@ async function main() {
   );
 
   // ------------------------------------------------------------ 3. negatives
-  console.log("\n3. negative cases (must all be identical)");
-  const failuresSeen: Array<{ label: string; status: number; raw: string }> = [];
+  //
+  // Two classes, split by what the caller PROVED:
+  //   * without a valid signature the response must be generic, so the endpoint
+  //     cannot be asked "does this wallet have an account?";
+  //   * with a valid signature the caller has demonstrated control of that wallet,
+  //     so naming the case discloses nothing new and is what makes the failure
+  //     actionable instead of a dead end.
+  console.log("\n3. negative cases");
+  const noSignature: Array<{ label: string; status: number; raw: string }> = [];
+  const withSignature: Array<{ label: string; status: number; raw: string }> = [];
 
   // (a) same challenge, signed by a different key
   const c1 = await postChallenge(registered.publicKey.toBase58());
@@ -284,7 +310,7 @@ async function main() {
     signature: sign(String(c1.body?.message ?? ""), attacker),
     nonce: String(c1.body?.nonce ?? ""),
   });
-  failuresSeen.push({ label: "wrong signer", status: wrongSigner.status, raw: wrongSigner.raw });
+  noSignature.push({ label: "wrong signer", status: wrongSigner.status, raw: wrongSigner.raw });
 
   check("wrong signer is refused", wrongSigner.status === 401, `got ${wrongSigner.status}`);
 
@@ -294,7 +320,7 @@ async function main() {
     signature,
     nonce,
   });
-  failuresSeen.push({ label: "replayed nonce", status: replay.status, raw: replay.raw });
+  noSignature.push({ label: "replayed nonce", status: replay.status, raw: replay.raw });
   check("replayed nonce is refused", replay.status === 401, `got ${replay.status}`);
 
   // (c) valid signature, but the account's wallet is NOT verified
@@ -304,7 +330,7 @@ async function main() {
     signature: sign(String(c3.body?.message ?? ""), unverifiedKp),
     nonce: String(c3.body?.nonce ?? ""),
   });
-  failuresSeen.push({ label: "unverified wallet", status: unverified.status, raw: unverified.raw });
+  withSignature.push({ label: "unverified wallet", status: unverified.status, raw: unverified.raw });
   check(
     "a VALID signature over an UNVERIFIED wallet is refused",
     unverified.status === 401,
@@ -318,14 +344,46 @@ async function main() {
     signature: sign(String(c4.body?.message ?? ""), unregistered),
     nonce: String(c4.body?.nonce ?? ""),
   });
-  failuresSeen.push({ label: "unregistered wallet", status: unreg.status, raw: unreg.raw });
+  withSignature.push({ label: "unregistered wallet", status: unreg.status, raw: unreg.raw });
   check("an unregistered wallet is refused", unreg.status === 401, `got ${unreg.status}`);
 
-  const distinct = new Set(failuresSeen.map((f) => `${f.status}|${f.raw}`));
+  // --- the unauthenticated half must stay indistinguishable -------------------
+  const noSigDistinct = new Set(noSignature.map((f) => `${f.status}|${f.raw}`));
   check(
-    "all four failures are byte-identical (no enumeration)",
-    distinct.size === 1,
-    failuresSeen.map((f) => `${f.label}=${f.status}:${f.raw}`).join(" | ")
+    "failures reachable WITHOUT a valid signature are byte-identical (no enumeration)",
+    noSigDistinct.size === 1,
+    noSignature.map((f) => `${f.label}=${f.status}:${f.raw}`).join(" | ")
+  );
+
+  // --- the signed half must name the case ------------------------------------
+  const genericBody = noSignature[0]?.raw ?? "";
+  const unverifiedRaw = withSignature.find((f) => f.label === "unverified wallet")?.raw ?? "";
+  const unlinkedRaw = withSignature.find((f) => f.label === "unregistered wallet")?.raw ?? "";
+
+  check(
+    "an unverified-but-linked wallet is told it is not verified",
+    /verif/i.test(unverifiedRaw) && unverifiedRaw !== genericBody,
+    unverifiedRaw
+  );
+  check(
+    "an unlinked wallet is told it is not linked",
+    /link/i.test(unlinkedRaw) && unlinkedRaw !== genericBody,
+    unlinkedRaw
+  );
+  check(
+    "the two signed failures differ from each other",
+    unverifiedRaw !== unlinkedRaw && unverifiedRaw.length > 0 && unlinkedRaw.length > 0,
+    `${unverifiedRaw} | ${unlinkedRaw}`
+  );
+  check(
+    "both signed failures direct the user to sign in with email",
+    /email/i.test(unverifiedRaw) && /email/i.test(unlinkedRaw),
+    `${unverifiedRaw} | ${unlinkedRaw}`
+  );
+  check(
+    "neither signed failure leaks the account identity",
+    !/millsy|@|\b[0-9a-f]{8}-[0-9a-f]{4}/i.test(unverifiedRaw + unlinkedRaw),
+    `${unverifiedRaw} | ${unlinkedRaw}`
   );
 
   // ------------------------------------------------------------- 4. teardown

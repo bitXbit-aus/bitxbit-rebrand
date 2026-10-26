@@ -46,8 +46,24 @@ const VERIFY_RATE_LIMIT = {
   keyPrefix: "api:wallet-signin-verify",
 };
 
-/** Identical for every failure reason — see note 1 above. */
+/** Identical for every failure reachable WITHOUT a verified signature. */
 const GENERIC_FAILURE = { error: "Sign-in failed. Please try again." };
+
+/**
+ * Guidance for the failures that are only reachable AFTER a valid signature.
+ *
+ * The caller has proved control of the wallet at this point, so telling them which
+ * case they are in discloses nothing they do not already know — and it converts a
+ * dead end ("make sure it's the wallet linked to your account") into an instruction
+ * they can actually follow. Both messages name the same route, because the fix for
+ * both is the same: sign in with email, then use Dashboard → Wallet.
+ */
+const FAILURE_GUIDANCE: Partial<Record<string, string>> = {
+  wallet_not_linked:
+    "That wallet isn't linked to a bitXbit account yet. Sign in with your email, then link it from Dashboard → Wallet.",
+  wallet_not_verified:
+    "That wallet is linked to your account but hasn't been verified yet. Sign in with your email, then finish verification from Dashboard → Wallet.",
+};
 
 export async function POST(request: NextRequest) {
   const identifier = getClientIdentifier(request);
@@ -91,7 +107,11 @@ export async function POST(request: NextRequest) {
       success: false,
       metadata: { wallet_address: walletAddress, reason: result.outcome },
     });
-    return withAuthNoStore(NextResponse.json(GENERIC_FAILURE, { status: 401 }));
+
+    const guidance = FAILURE_GUIDANCE[result.outcome];
+    return withAuthNoStore(
+      NextResponse.json(guidance ? { error: guidance } : GENERIC_FAILURE, { status: 401 })
+    );
   }
 
   const userId = result.userId;

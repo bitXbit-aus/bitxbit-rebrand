@@ -82,7 +82,14 @@ export function WalletSignInButton() {
       });
 
       if (!result.ok) {
-        toast({ title: "Sign-in failed", description: WALLET_SIGNIN_GENERIC_ERROR, variant: "destructive" });
+        // Prefer the server's guidance when it gave one (wallet not linked / not
+        // verified — both only reachable after a valid signature). Otherwise stay
+        // generic, exactly as the server does for the cases that prove nothing.
+        toast({
+          title: "Sign-in failed",
+          description: result.error ?? WALLET_SIGNIN_GENERIC_ERROR,
+          variant: "destructive",
+        });
         return;
       }
 
@@ -98,7 +105,7 @@ export function WalletSignInButton() {
     ? busy
       ? "Signing you in…"
       : `Sign in with ${shorten(publicKey.toBase58())}`
-    : "Sign in with a Solana wallet";
+    : "Sign in with your linked wallet";
 
   return (
     <Button

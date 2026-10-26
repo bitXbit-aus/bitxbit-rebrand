@@ -55,10 +55,23 @@ export async function requestWalletSignInChallenge(
   }
 }
 
+export interface WalletSignInFailure {
+  ok: false;
+  /**
+   * A server-supplied, actionable message, when the server chose to give one.
+   *
+   * The server only does so for failures reachable AFTER a valid signature (wallet
+   * not linked / not verified) and returns one generic message for everything else.
+   * The client passes that decision through rather than trying to infer it — it
+   * cannot tell the cases apart and must not appear to.
+   */
+  error?: string;
+}
+
 export async function submitWalletSignIn(
   params: { walletAddress: string; signature: string; nonce: string },
   fetcher: Fetcher = fetch
-): Promise<{ ok: true; redirectTo: string } | { ok: false }> {
+): Promise<{ ok: true; redirectTo: string } | WalletSignInFailure> {
   try {
     const response = await fetcher("/api/auth/wallet/verify", {
       method: "POST",
@@ -66,9 +79,23 @@ export async function submitWalletSignIn(
       body: JSON.stringify(params),
     });
 
-    if (!response.ok) return { ok: false };
+    let data: Record<string, unknown> | null = null;
+    try {
+      data = (await response.json()) as Record<string, unknown>;
+    } catch {
+      data = null;
+    }
 
-    const data = (await response.json()) as Record<string, unknown>;
+    if (!response.ok) {
+      // Bounded and type-checked: this string is rendered to the user.
+      const message =
+        typeof data?.error === "string" && data.error.length <= 300 ? data.error : undefined;
+      // Only carry the key when there IS a message — an `error: undefined`
+      // property is a phantom key that makes `{ok:false}` and
+      // `{ok:false, error:undefined}` non-equal, which is a trap for callers.
+      return message ? { ok: false, error: message } : { ok: false };
+    }
+
     if (data?.ok !== true) return { ok: false };
 
     const redirectTo =
