@@ -65,9 +65,11 @@ describe("Server Action authorization guards (R-005)", () => {
     // sole caller (the wallet page's connect effect) was removed with it, and it
     // was the source of fabricated `success: false` audit rows on every connect.
     // Re-checked for a guard: the deleted action did call requireActiveUser().
+    // Back to 30 on 2026-10-26 with `unlinkWallet` (wallet unlink path), which
+    // calls requireActiveUser() before constructing the service client.
     assert.equal(
       exportedActions(SOURCE).length,
-      29,
+      30,
       "the action set changed — re-check each action for an authorization guard"
     );
   });
