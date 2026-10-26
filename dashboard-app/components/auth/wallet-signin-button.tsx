@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import bs58 from "bs58";
+import { toSignatureBytes } from "@/lib/wallet-signature-format";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
@@ -65,13 +66,32 @@ export function WalletSignInButton() {
         return;
       }
 
+      let signed: unknown;
+      try {
+        signed = await signMessage(new TextEncoder().encode(challenge.message));
+      } catch {
+        // The wallet prompt was dismissed, or the wallet refused. Not a security
+        // outcome, and nothing reached the server.
+        toast({
+          title: "Signature cancelled",
+          description: "You can try again whenever you're ready.",
+        });
+        return;
+      }
+
       let signature: string;
       try {
-        const signatureBytes = await signMessage(new TextEncoder().encode(challenge.message));
-        signature = bs58.encode(signatureBytes);
+        signature = bs58.encode(toSignatureBytes(signed));
       } catch {
-        // The user dismissed the wallet prompt. Not a security outcome.
-        toast({ title: "Signature cancelled", description: "You can try again whenever you're ready." });
+        // DISTINCT from a cancellation, and previously misreported as one. If the
+        // wallet returned an unreadable shape, telling the user "you dismissed the
+        // prompt" sends them — and anyone debugging — after the wrong cause.
+        toast({
+          title: "Unsupported wallet response",
+          description:
+            "This wallet returned a signature bitxbit could not read. Please try Solflare, or update the wallet extension.",
+          variant: "destructive",
+        });
         return;
       }
 

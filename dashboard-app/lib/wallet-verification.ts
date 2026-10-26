@@ -7,9 +7,58 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { requireActiveUser } from "@/lib/authz";
 import { writeSecurityAudit } from "@/lib/audit";
 import { isValidSolanaAddress } from "@/lib/solana";
-import { buildSiwsMessage, verifyEd25519Signature } from "@/lib/wallet-crypto";
+import {
+  buildSiwsMessage,
+  verifyEd25519Signature,
+  siwsUriForDomain,
+  SIWS_VERSION,
+  SIWS_CHAIN_ID,
+} from "@/lib/wallet-crypto";
 
 const CHALLENGE_TTL_SECONDS = 300; // 5 minutes
+
+/**
+ * Closed set of verification failure reasons, so the audit trail is queryable
+ * rather than free text.
+ *
+ * WHY EVERY PATH AUDITS: previously only the invalid-signature case wrote a row;
+ * the other six failure paths threw into silence. A user's report of "verification
+ * failed" left the server with NO record of which path was taken, which makes the
+ * failure impossible to diagnose from evidence. A failure that leaves no trace is
+ * a failure that cannot be fixed.
+ */
+type VerificationFailureReason =
+  | "invalid_address"
+  | "missing_signature"
+  | "missing_nonce"
+  | "challenge_not_found"
+  | "challenge_already_used"
+  | "challenge_expired"
+  | "signature_unverifiable"
+  | "signature_invalid"
+  | "persist_failed";
+
+async function failVerification(
+  context: Awaited<ReturnType<typeof requireActiveUser>>,
+  reason: VerificationFailureReason,
+  walletAddress: string,
+  nonce: string | null,
+  message: string
+): Promise<never> {
+  try {
+    await writeSecurityAudit(context, {
+      action: "wallet.verification_failed",
+      targetTable: "public.wallet_verification_challenges",
+      targetId: nonce ?? undefined,
+      success: false,
+      metadata: { reason, wallet_address: walletAddress },
+    });
+  } catch {
+    // An audit failure must never mask the failure being reported. Losing the
+    // original error here would be strictly worse than losing the record.
+  }
+  throw new Error(message);
+}
 
 export interface WalletChallenge {
   nonce: string;
@@ -40,18 +89,29 @@ export async function requestWalletVerificationChallenge(
   const context = await requireActiveUser();
 
   if (!isValidSolanaAddress(walletAddress)) {
-    throw new Error("Invalid Solana wallet address.");
+    return failVerification(
+      context,
+      "invalid_address",
+      walletAddress,
+      null,
+      "Invalid Solana wallet address."
+    );
   }
 
   const supabase = createServiceClient();
   const nonce = randomUUID();
   const issuedAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000).toISOString();
+  const domain = getAppDomain();
   const message = buildSiwsMessage({
-    domain: getAppDomain(),
+    domain,
     walletAddress,
+    statement:
+      "Verify wallet ownership for bitxbit rewards. Signing proves you own this wallet and costs no fee or transaction.",
+    uri: siwsUriForDomain(domain),
+    version: SIWS_VERSION,
+    chainId: SIWS_CHAIN_ID,
     nonce,
-    purpose: "Verify wallet ownership for bitxbit rewards",
     issuedAt,
     expiresAt,
   });
@@ -86,13 +146,31 @@ export async function verifyWalletSignature(
   const context = await requireActiveUser();
 
   if (!isValidSolanaAddress(walletAddress)) {
-    throw new Error("Invalid Solana wallet address.");
+    return failVerification(
+      context,
+      "invalid_address",
+      walletAddress,
+      nonce,
+      "Invalid Solana wallet address."
+    );
   }
   if (!signatureBase58 || signatureBase58.length === 0) {
-    throw new Error("Signature is required.");
+    return failVerification(
+      context,
+      "missing_signature",
+      walletAddress,
+      nonce,
+      "Signature is required."
+    );
   }
   if (!nonce || nonce.length === 0) {
-    throw new Error("Verification nonce is required.");
+    return failVerification(
+      context,
+      "missing_nonce",
+      walletAddress,
+      nonce,
+      "Verification nonce is required."
+    );
   }
 
   const supabase = createServiceClient();
@@ -108,34 +186,57 @@ export async function verifyWalletSignature(
     .maybeSingle();
 
   if (challengeError || !challenge) {
-    throw new Error("Verification challenge not found.");
+    return failVerification(
+      context,
+      "challenge_not_found",
+      walletAddress,
+      nonce,
+      "Verification challenge not found."
+    );
   }
 
   if (challenge.used_at) {
-    throw new Error("Verification challenge has already been used.");
+    return failVerification(
+      context,
+      "challenge_already_used",
+      walletAddress,
+      nonce,
+      "Verification challenge has already been used."
+    );
   }
 
   if (new Date(challenge.expires_at) <= new Date()) {
-    throw new Error("Verification challenge has expired.");
+    return failVerification(
+      context,
+      "challenge_expired",
+      walletAddress,
+      nonce,
+      "Verification challenge has expired."
+    );
   }
 
   // Verify the Ed25519 signature.
   let isValid = false;
   try {
     isValid = verifyEd25519Signature(challenge.message, signatureBase58, walletAddress);
-  } catch (error) {
-    throw new Error("Could not verify signature.");
+  } catch {
+    return failVerification(
+      context,
+      "signature_unverifiable",
+      walletAddress,
+      nonce,
+      "Could not verify signature."
+    );
   }
 
   if (!isValid) {
-    await writeSecurityAudit(context, {
-      action: "wallet.verification_signature_invalid",
-      targetTable: "public.wallet_verification_challenges",
-      targetId: nonce,
-      success: false,
-      metadata: { wallet_address: walletAddress },
-    });
-    throw new Error("Signature verification failed.");
+    return failVerification(
+      context,
+      "signature_invalid",
+      walletAddress,
+      nonce,
+      "Signature verification failed."
+    );
   }
 
   // Atomic database-controlled verification: consume the signed challenge and
@@ -150,7 +251,13 @@ export async function verifyWalletSignature(
   });
 
   if (verifyError || verified !== true) {
-    throw new Error(`Failed to record wallet verification: ${verifyError?.message ?? "unknown error"}`);
+    return failVerification(
+      context,
+      "persist_failed",
+      walletAddress,
+      nonce,
+      `Failed to record wallet verification: ${verifyError?.message ?? "unknown error"}`
+    );
   }
 
   const verifiedAt = new Date().toISOString();
