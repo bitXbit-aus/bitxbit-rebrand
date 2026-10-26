@@ -1016,44 +1016,6 @@ export async function trackOfferClick(offerId: string, referralUrl: string) {
   }
 }
 
-export async function saveWalletAddress(walletAddress: string) {
-  const context = await requireActiveUser();
-  const { user } = context;
-  const supabase = createServiceClient();
-
-  if (!isValidSolanaAddress(walletAddress)) {
-    throw new Error("Invalid Solana wallet address.");
-  }
-
-  try {
-    const { data: current, error: readError } = await supabase
-      .from("users")
-      .select("wallet_address, wallet_verified")
-      .eq("id", user.id)
-      .single();
-    if (readError) throw readError;
-
-    const currentAddress = current?.wallet_address ?? null;
-    const isSameAddress = currentAddress?.toLowerCase() === walletAddress.toLowerCase();
-
-    // Wallet address changes must go through cryptographic verification
-    // (verifyWalletSignature). This action only permits idempotent re-saving
-    // of the currently verified address.
-    if (!isSameAddress) {
-      throw new Error(
-        "Wallet address changes require ownership verification. Please verify the new wallet before saving it as your payout address."
-      );
-    }
-
-    revalidatePath("/dashboard/wallet");
-    revalidatePath("/dashboard/profile");
-    return { walletAddress, verified: current?.wallet_verified ?? false };
-  } catch (error) {
-    await auditMutationFailure(context, "wallet.address_save", "public.users", user.id, error);
-    throw error;
-  }
-}
-
 export async function getAirdropWalletBalanceAction() {
   const context = await requireCapability("manage_rewards");
   try {
