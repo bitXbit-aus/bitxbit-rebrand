@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,20 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const supabase = createClient();
+
+  // Surface the reason a redirect landed here rather than swallowing it. A
+  // dropped recovery session is the common case: the user followed a reset link
+  // that had already been used or expired.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("error");
+    if (code === "reset_required") {
+      setNotice(
+        "That password reset link has expired or was already used. Request a new one below."
+      );
+    }
+  }, []);
 
   const appUrl = typeof window !== "undefined"
     ? (process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin)
@@ -60,6 +73,15 @@ export default function LoginPage() {
         <p className="text-muted-foreground">Sign in to access the dashboard.</p>
       </div>
 
+      {notice && (
+        <div
+          className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground"
+          role="status"
+        >
+          {notice}
+        </div>
+      )}
+
       <form onSubmit={handleLogin} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
@@ -73,7 +95,15 @@ export default function LoginPage() {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Password</Label>
+            <Link
+              href="/auth/forgot-password"
+              className="text-sm text-primary hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
           <Input
             id="password"
             type="password"

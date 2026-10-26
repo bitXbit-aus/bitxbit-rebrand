@@ -1070,6 +1070,50 @@ authentication outage for every user with no degraded state in between.
 
 ---
 
+## R-015 — No password-recovery route: a password-only account can be permanently locked out
+
+**Status:** **REMEDIATION IMPLEMENTED 2026-10-27 (branch `security/password-reset`) — not released,
+not browser-verified.** Identified 2026-10-27 while reading live state; see
+`evidence/password-reset-2026-10-27.md`.
+**Owner:** Shri — interim accountable owner. **Review:** on merge.
+
+### What was found
+
+The dashboard shipped **no password-recovery route at all** — no `Forgot password?` affordance,
+no `/auth/forgot-password`, no `/auth/reset-password`, and no magic-link sign-in. Measured on
+production (`flasgvendiiasuixeqzu`) 2026-10-27: **8 accounts, 7 with an email identity + password,
+1 Google-only**. For those seven, a forgotten password was an **unrecoverable lockout** — there was
+no path back into the account, and no support-side path either.
+
+This is the recovery half of the auth surface, which is easy to omit because sign-in works without
+it and nothing in the build, type-check, test suite or CI notices its absence.
+
+### Remediation (this branch)
+
+- `Forgot password?` link on `/auth/login`; new `/auth/forgot-password` and `/auth/reset-password`.
+- The recovery email redirects through the **existing `/auth/callback`**, so it reuses
+  `safeAuthNextPath` and the deployment host policy (R-003) rather than a second callback that
+  could drift from them. `next` is a constant and is re-validated on arrival.
+- **Identical response whether or not the address has an account.** `resolveResetRequestOutcome`
+  collapses every non-rate-limit outcome — including an error that names the user — to one generic
+  message, so the page cannot become an account-existence oracle. Unit-tested, and the guard was
+  **mutation-verified**: reinstating the raw `error.message` produced 3 failures.
+- A **wallet is not a recovery credential.** Reset requires the recovery-code session; nothing here
+  lets a held wallet key reset a password, so sign-in is not silently promoted to account takeover.
+- New password validation is client-side (minimum 8 characters, confirmation match) and the actual
+  change runs against the current session only, so it can only alter the signed-in user's password.
+
+### Not verified — stated explicitly
+
+- **The recovery link has not been exercised in a browser.** Whether Supabase's redirect allowlist
+  preserves the `?next=` parameter at click time could not be confirmed from outside the dashboard,
+  and the send-time probe proved nothing (GoTrue returned HTTP 200 for a deliberately disallowed
+  host, so it does not validate `redirect_to` when sending). This must be confirmed by requesting a
+  reset for a real account and following the emailed link — item 2 in the outstanding work, the
+  real-browser CI smoke test.
+- No rate limiting is applied by this application to the reset request; Supabase Auth's built-in
+  email send limits are the only bound. Recorded rather than claimed.
+
 ## D4 status
 
 **D4 is SATISFIED — verified in deployments on 2026-10-19, re-verified 2026-10-22.**
@@ -1194,6 +1238,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
+| **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (branch `security/password-reset`) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Unverified: the recovery link end-to-end in a browser** (Supabase redirect-allowlist behaviour not confirmable externally). | Shri (interim) | on merge |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
