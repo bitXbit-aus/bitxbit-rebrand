@@ -16,6 +16,7 @@ import {
 } from "@/lib/wallet-verification";
 import { getTokenBalanceAction, unlinkWallet } from "@/lib/actions";
 import bs58 from "bs58";
+import { toSignatureBytes } from "@/lib/wallet-signature-format";
 import { Coins, History, Wallet, AlertCircle, Shield, ShieldAlert } from "lucide-react";
 
 interface RewardTx {
@@ -140,8 +141,12 @@ export default function WalletPage() {
     try {
       const challenge = await requestWalletVerificationChallenge(connectedAddress);
       const messageBytes = new TextEncoder().encode(challenge.message);
-      const signatureBytes = await signMessage(messageBytes);
-      const signatureBase58 = bs58.encode(signatureBytes);
+      const signed = await signMessage(messageBytes);
+      // Normalised, not assumed: some wallets resolve signMessage to
+      // `{ signature: Uint8Array }`. Encoding the wrapper throws here, client-side,
+      // where the server cannot see it — which is how this failure class stayed
+      // invisible. See lib/wallet-signature-format.ts.
+      const signatureBase58 = bs58.encode(toSignatureBytes(signed));
 
       await verifyWalletSignature(connectedAddress, signatureBase58, challenge.nonce);
       await loadSavedWallet();

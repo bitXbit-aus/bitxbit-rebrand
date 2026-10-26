@@ -3,7 +3,13 @@ import "server-only";
 import { randomUUID } from "crypto";
 import { createServiceClient } from "@/lib/supabase/service";
 import { isValidSolanaAddress } from "@/lib/solana";
-import { buildSiwsMessage, verifyEd25519Signature } from "@/lib/wallet-crypto";
+import {
+  buildSiwsMessage,
+  verifyEd25519Signature,
+  siwsUriForDomain,
+  SIWS_VERSION,
+  SIWS_CHAIN_ID,
+} from "@/lib/wallet-crypto";
 import { resolveSignInDomain } from "@/lib/auth-callback-url";
 
 // Re-exported so callers of the sign-in surface need one import. The resolver
@@ -110,8 +116,11 @@ export async function createWalletSignInChallenge(
   const message = buildSiwsMessage({
     domain,
     walletAddress,
+    statement: WALLET_SIGNIN_PURPOSE,
+    uri: siwsUriForDomain(domain),
+    version: SIWS_VERSION,
+    chainId: SIWS_CHAIN_ID,
     nonce,
-    purpose: WALLET_SIGNIN_PURPOSE,
     issuedAt,
     expiresAt,
   });

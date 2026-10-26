@@ -31,7 +31,13 @@ import { createClient } from "@supabase/supabase-js";
 import { Keypair } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
-import { buildSiwsMessage, verifyEd25519Signature } from "../lib/wallet-crypto";
+import {
+  buildSiwsMessage,
+  verifyEd25519Signature,
+  siwsUriForDomain,
+  SIWS_VERSION,
+  SIWS_CHAIN_ID,
+} from "../lib/wallet-crypto";
 
 const url = process.env.STAGING_SUPABASE_URL;
 const serviceKey = process.env.STAGING_SUPABASE_SERVICE_ROLE_KEY;
@@ -82,7 +88,10 @@ function buildChallengeMessage(walletAddress: string, nonce: string, expiresAt: 
     domain: DOMAIN,
     walletAddress,
     nonce,
-    purpose: PURPOSE,
+    statement: PURPOSE,
+    uri: siwsUriForDomain(DOMAIN),
+    version: SIWS_VERSION,
+    chainId: SIWS_CHAIN_ID,
     issuedAt: new Date().toISOString(),
     expiresAt,
   });
