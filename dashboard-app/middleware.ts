@@ -31,6 +31,12 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
       "font-src 'self' https://fonts.gstatic.com; " +
       "img-src 'self' data: https:; " +
+      // frame-src governs which origins THIS page may embed. It is not
+      // frame-ancestors (who may embed us), so this does not weaken clickjacking
+      // protection. Without it, default-src 'self' blocks the wallet connect
+      // iframe: connect.solflare.com for Solflare, keys.coinbase.com for Coinbase,
+      // which broke sign-in with a white "content is blocked" screen.
+      "frame-src 'self' https://connect.solflare.com https://keys.coinbase.com; " +
       "connect-src 'self' https://*.supabase.co https://api.mainnet-beta.solana.com https://api.devnet.solana.com https://public-api.birdeye.so https://api.dexscreener.com https://plausible.io; " +
       "frame-ancestors 'none'; " +
       "base-uri 'self'; " +
