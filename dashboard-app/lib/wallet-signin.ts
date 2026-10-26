@@ -3,13 +3,7 @@ import "server-only";
 import { randomUUID } from "crypto";
 import { createServiceClient } from "@/lib/supabase/service";
 import { isValidSolanaAddress } from "@/lib/solana";
-import {
-  buildSiwsMessage,
-  verifyEd25519Signature,
-  siwsUriForDomain,
-  SIWS_VERSION,
-  SIWS_CHAIN_ID,
-} from "@/lib/wallet-crypto";
+import { buildWalletChallengeMessage, verifyEd25519Signature } from "@/lib/wallet-crypto";
 import { resolveSignInDomain } from "@/lib/auth-callback-url";
 
 // Re-exported so callers of the sign-in surface need one import. The resolver
@@ -25,7 +19,7 @@ export { resolveSignInDomain };
  * accounts: the account must already exist and its wallet must be `wallet_verified`.
  *
  * This module owns the sign-in half. It deliberately REUSES
- * `buildSiwsMessage` / `verifyEd25519Signature` from `lib/wallet-crypto` — the same
+ * `buildWalletChallengeMessage` / `verifyEd25519Signature` from `lib/wallet-crypto` — the same
  * functions the existing wallet-verification flow uses. Forking the message format
  * would silently stop already-verified wallets from being able to sign in, which is
  * a failure that no unit test of either half would catch.
@@ -113,16 +107,13 @@ export async function createWalletSignInChallenge(
     Date.now() + WALLET_SIGNIN_CHALLENGE_TTL_SECONDS * 1000
   ).toISOString();
 
-  const message = buildSiwsMessage({
-    domain,
+  const message = buildWalletChallengeMessage({
+    site: `https://${domain}`,
     walletAddress,
-    statement: WALLET_SIGNIN_PURPOSE,
-    uri: siwsUriForDomain(domain),
-    version: SIWS_VERSION,
-    chainId: SIWS_CHAIN_ID,
     nonce,
     issuedAt,
     expiresAt,
+    purpose: WALLET_SIGNIN_PURPOSE,
   });
 
   const supabase = createServiceClient();
