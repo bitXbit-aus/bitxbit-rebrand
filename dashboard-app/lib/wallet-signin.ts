@@ -54,16 +54,25 @@ export interface WalletSignInChallenge {
 }
 
 /**
- * Internal outcomes. They are deliberately NOT exposed to the caller: the route
- * handler maps every non-success outcome to one generic failure so the endpoint
- * cannot be used to distinguish "unknown wallet" from "wrong signature" from
- * "wallet not verified".
+ * Internal outcomes.
+ *
+ * Two classes, and the split is the point:
+ *
+ * - `unknown_challenge` and `invalid_signature` are reachable WITHOUT proving
+ *   anything, so the caller maps them to one generic message. Distinguishing them
+ *   would be an enumeration oracle.
+ * - `wallet_not_linked` and `wallet_not_verified` are only ever produced AFTER the
+ *   Ed25519 signature has verified, which proves the caller holds the private key
+ *   for that wallet. Naming which case it is therefore reveals nothing the caller
+ *   does not already know (that they own this wallet), and it is the difference
+ *   between a dead end and an actionable instruction.
  */
 export type WalletSignInOutcome =
   | "signed_in"
   | "unknown_challenge"
   | "invalid_signature"
-  | "no_verified_wallet";
+  | "wallet_not_linked"
+  | "wallet_not_verified";
 
 export interface WalletSignInResult {
   outcome: WalletSignInOutcome;
@@ -190,8 +199,23 @@ export async function verifyWalletSignIn(params: {
   if (error) {
     return { outcome: "unknown_challenge", userId: null };
   }
+
   if (!data) {
-    return { outcome: "no_verified_wallet", userId: null };
+    // The signature verified, so the caller provably holds this wallet's private
+    // key. That is what makes it safe to name which case this is — and this lookup
+    // deliberately lives HERE, after the signature check: performed any earlier it
+    // would answer "does this wallet have an account?" for anybody who asked, which
+    // is exactly the oracle the generic messages exist to deny.
+    const { data: owner } = await supabase
+      .from("users")
+      .select("wallet_verified")
+      .eq("wallet_address", walletAddress)
+      .maybeSingle();
+
+    return {
+      outcome: owner ? "wallet_not_verified" : "wallet_not_linked",
+      userId: null,
+    };
   }
 
   return { outcome: "signed_in", userId: data as string };

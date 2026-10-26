@@ -102,16 +102,41 @@ describe("submitWalletSignIn", () => {
     assert.deepEqual(JSON.parse(String(calls[0].init?.body)), params);
   });
 
-  it("collapses every failure into { ok: false }", async () => {
+  it("never reports success for any failure", async () => {
     for (const response of [
       jsonResponse({ error: "Sign-in failed." }, 401),
       jsonResponse({ error: "Sign-in failed." }, 400),
       jsonResponse({ ok: false }),
       jsonResponse({}),
+      // A body claiming success behind a failure status must NOT be trusted.
+      jsonResponse({ ok: true, redirectTo: "/dashboard" }, 500),
     ]) {
       const { fetcher } = capturingFetcher(response);
-      assert.deepEqual(await submitWalletSignIn(params, fetcher), { ok: false });
+      assert.equal((await submitWalletSignIn(params, fetcher)).ok, false);
     }
+  });
+
+  it("passes the server's guidance through when the server gives one", async () => {
+    // Reachable only after a valid signature, so the server names the case.
+    const guidance =
+      "That wallet isn't linked to a bitXbit account yet. Sign in with your email, then link it from Dashboard → Wallet.";
+    const { fetcher } = capturingFetcher(jsonResponse({ error: guidance }, 401));
+    assert.deepEqual(await submitWalletSignIn(params, fetcher), {
+      ok: false,
+      error: guidance,
+    });
+  });
+
+  it("omits the error when the server sent none, or sent a non-string", async () => {
+    for (const body of [{}, { error: 123 }, { error: null }, { error: { nested: true } }]) {
+      const { fetcher } = capturingFetcher(jsonResponse(body, 401));
+      assert.deepEqual(await submitWalletSignIn(params, fetcher), { ok: false }, JSON.stringify(body));
+    }
+  });
+
+  it("refuses an oversized error string instead of rendering it", async () => {
+    const { fetcher } = capturingFetcher(jsonResponse({ error: "x".repeat(301) }, 401));
+    assert.deepEqual(await submitWalletSignIn(params, fetcher), { ok: false });
   });
 
   it("does NOT follow an absolute redirect target", async () => {
