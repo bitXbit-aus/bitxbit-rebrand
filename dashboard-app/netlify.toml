@@ -7,6 +7,28 @@
   NPM_FLAGS = "--legacy-peer-deps"
   NEXT_TELEMETRY_DISABLED = "1"
 
+  # --- Skew protection (do NOT remove) ---------------------------------------
+  # Fixes a real production incident: a deploy that renamed a page's JS chunk
+  # left every browser holding pre-deploy HTML requesting a chunk that Netlify
+  # had purged, which 404'd and killed hydration. The page still rendered from
+  # server HTML, so it looked fine but NOTHING was clickable — and it produced
+  # zero console errors. Measured twice on 2026-10-26: a blank /auth/login, then
+  # "no buttons are working" on Safari.
+  #
+  # With this set, each page load carries a deployment identifier and Next
+  # appends it to subsequent asset requests (?dpl=<id>); Netlify's CDN then
+  # serves from the MATCHING deployment — current OR previous. Verified:
+  # the previously-404ing chunk returns 200 with a valid ?dpl and stays 404 with
+  # a bogus one, and WebKit hydrates even when every un-versioned chunk path is
+  # dead. See docs/security/evidence/skew-protection-2026-10-26.md.
+  #
+  # Also set in the Netlify UI for all contexts, so this survives an accidental
+  # UI unset and the UI setting survives an accidental edit here. Keep both.
+  # Requires no next.config flags: Netlify needs them only below Next 14.1.4,
+  # and this app is on 15.5.28. A REDEPLOY is required for a change here to
+  # take effect — the adapter wires the identifier up at build time.
+  NETLIFY_NEXT_SKEW_PROTECTION = "true"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
