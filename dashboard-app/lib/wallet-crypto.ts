@@ -3,133 +3,124 @@ import nacl from "tweetnacl";
 import bs58 from "bs58";
 
 /**
- * Sign-In With Solana (SIWS) message construction.
+ * Wallet challenge message construction, and Ed25519 verification.
  *
- * WHY THIS FILE IS SO PARTICULAR
+ * WHY THIS IS DELIBERATELY **NOT** SIWS (Sign-In With Solana)
  *
- * Phantom recognises any message beginning with
- *
- *   "<domain> wants you to sign in with your Solana account:"
- *
- * as SIWS, and **validates it before it will show the user a prompt**. A message it
- * cannot parse is refused outright: the user sees nothing, and the dApp receives
+ * This messenger previously emitted the CAIP-122 / EIP-4361 SIWS wire format,
+ * byte-for-byte identical to Phantom's own reference `createSignInMessageText`.
+ * Phantom still refused EVERY such message with
  *
  *   "the app's signature request cannot be shown due to invalid formatting"
  *
- * That is a HARD block, distinct from the bypassable warning Phantom shows when a
- * field VALUE is wrong (bad domain, future issued-at).
+ * without ever rendering a prompt — while signing plain messages from the same
+ * wallet, in the same browser, in the same session. Measured on 2026-10-27 with a
+ * controlled probe (four diagnostics, seven variants):
  *
- * Solflare does not parse SIWS at all — it signs whatever it is handed. So a
- * malformed message works, silently, for every Solflare user and fails for every
- * Phantom user. That asymmetry is how the bug this file fixes survived: the message
- * previously omitted `URI`, `Version` and `Chain ID` (all required by the spec) and
- * put a non-standard `Purpose:` field where `URI:` belongs.
+ *   plain message                                  -> PASS
+ *   SIWS prefix + address, NO field block           -> PASS
+ *   SIWS prefix + address + any field block         -> FAIL, no prompt
+ *   SIWS with a non-matching domain                 -> FAIL, "…the domain in the
+ *                                                      sign-in message does not
+ *                                                      match the requesting app's
+ *                                                      origin"   (named explicitly)
+ *   Solflare, any of the above                      -> PASS (it parses nothing)
  *
- * The serialisation below mirrors Phantom's own reference implementation,
- * `createSignInMessageText` (github.com/phantom/sign-in-with-solana), byte for byte.
- * `wallet-crypto.test.ts` asserts that equality against a verbatim copy of the
- * reference function, so the test encodes the SPEC rather than our implementation.
+ * So the rejection is Phantom's SIWS validator refusing our field block, not the
+ * domain, not the call convention (`display`), not CSP. When the DOMAIN is the
+ * problem Phantom says so by name; here it did not, which is what ruled the domain
+ * out. This matches independent reports of the same error appearing inconsistently
+ * across browsers — a wallet-side defect we cannot satisfy from our side.
+ *
+ * DROPPING SIWS COSTS US NOTHING, AND HERE IS THE ARGUMENT
+ *
+ * SIWS exists so that a THIRD PARTY can parse and validate a message it did not
+ * create. No third party ever parses ours: we mint the nonce, store the message,
+ * check its expiry, and verify the Ed25519 signature over the exact stored text.
+ * Every property SIWS claims is already held by something stronger —
+ *
+ *   replay protection : a single-use nonce, consumed atomically in Postgres
+ *   freshness         : `Expires` here plus a 5-minute challenge TTL, server-checked
+ *   domain binding    : the server minted the challenge; the Site line is for the
+ *                       USER's benefit, so they can see what they are signing for
+ *   integrity         : Ed25519 over the stored bytes, not over anything the client
+ *                       says it signed
+ *
+ * The security boundary was never the message text. A hostile site could induce a
+ * signature over a message that merely SAYS "app.bitxbit.com.au" — but it would
+ * carry that site's nonce, which does not exist in our challenge table, so our
+ * server refuses it. Trust comes from the nonce we minted and stored, not from a
+ * string a wallet helpfully pattern-matched.
+ *
+ * ONE THING THAT IS STILL LOAD-BEARING: the message must not resemble an SIWS
+ * message. A near-miss phrasing was enough to trigger Phantom's validator and a
+ * hard refusal, so this builder deliberately avoids the phrase "wants you to sign
+ * in with your … account:" entirely. `wallet-crypto.test.ts` asserts its absence
+ * so a future well-meaning "let's be spec-compliant again" change cannot silently
+ * reintroduce it.
  */
 
-/** SIWS `version` field. "1" is the only value the spec defines. */
-export const SIWS_VERSION = "1";
-
-/**
- * Chain IDs the SIWS spec recognises. A wallet validates this field, so an
- * unrecognised value is rejected the same way a missing field is.
- */
-export const SIWS_ALLOWED_CHAIN_IDS = [
-  "mainnet",
-  "testnet",
-  "devnet",
-  "localnet",
-  "solana:mainnet",
-  "solana:testnet",
-  "solana:devnet",
-] as const;
-
-export type SiwsChainId = (typeof SIWS_ALLOWED_CHAIN_IDS)[number];
-
-/** Chain this app binds its sessions to. */
-export const SIWS_CHAIN_ID: SiwsChainId = "mainnet";
-
-export interface SiwsMessageInput {
-  domain: string;
+export interface WalletChallengeInput {
+  /** The site the user is on, shown to them so they can see what they are signing for. */
+  site: string;
   walletAddress: string;
-  /** Human-readable assertion. MUST NOT contain a newline (spec requirement). */
-  statement: string;
-  /** Must share an origin with `domain`: Phantom validates this. */
-  uri: string;
-  version: string;
-  chainId: string;
   nonce: string;
   issuedAt: string;
   expiresAt: string;
-}
-
-/** The `uri` a message for `domain` should claim. */
-export function siwsUriForDomain(domain: string): string {
-  return `https://${domain}`;
+  /** One line of intent, e.g. "Link this wallet to your bitxbit account." */
+  purpose: string;
 }
 
 /**
- * Serialise a SIWS message.
+ * Serialise the message a wallet is asked to sign.
  *
- * Throws rather than emitting a message a validating wallet would refuse. A
- * malformed message is indistinguishable from a broken feature at the user's end,
- * so failing here — server-side, with a reason — is strictly better than shipping
- * something that works for one wallet and silently fails for another.
+ * Throws rather than emitting something a strict wallet would refuse. A message
+ * that silently fails on one wallet but not another is the most expensive kind of
+ * defect in this area, so an invalid input fails loudly here instead.
  */
-export function buildSiwsMessage(input: SiwsMessageInput): string {
-  const domain = input.domain.trim();
-  const statement = input.statement.trim();
+export function buildWalletChallengeMessage(input: WalletChallengeInput): string {
+  const site = input.site.trim();
+  const purpose = input.purpose.trim();
 
-  if (!domain) throw new Error("SIWS domain is required.");
-  if (!input.walletAddress) throw new Error("SIWS address is required.");
-  if (!input.nonce) throw new Error("SIWS nonce is required.");
-  if (!input.issuedAt) throw new Error("SIWS issued-at is required.");
+  if (!site) throw new Error("Challenge site is required.");
+  if (!input.walletAddress) throw new Error("Challenge wallet address is required.");
+  if (!input.nonce) throw new Error("Challenge nonce is required.");
+  if (!input.issuedAt) throw new Error("Challenge issued-at is required.");
+  if (!purpose) throw new Error("Challenge purpose is required.");
 
-  // The spec forbids a newline in the statement: the field block that follows is
-  // newline-delimited, so a newline here would shift every subsequent field.
-  if (statement.includes("\n") || statement.includes("\r")) {
-    throw new Error("SIWS statement must be a single line.");
+  const message = [
+    "bitXbit wallet verification",
+    "",
+    `Site:    ${site}`,
+    `Wallet:  ${input.walletAddress}`,
+    `Nonce:   ${input.nonce}`,
+    `Issued:  ${input.issuedAt}`,
+    `Expires: ${input.expiresAt}`,
+    `Purpose: ${purpose}`,
+    "",
+    "Signing this proves you control this wallet. It is not a transaction:",
+    "nothing is sent on-chain and no fee is charged.",
+  ].join("\n");
+
+  // Guard the one property that is load-bearing for wallet compatibility. See the
+  // file comment: an SIWS-shaped message is refused outright by Phantom.
+  if (looksLikeSiws(message)) {
+    throw new Error("Challenge message must not be SIWS-shaped.");
   }
-
-  if (!(SIWS_ALLOWED_CHAIN_IDS as readonly string[]).includes(input.chainId)) {
-    throw new Error(`Unrecognised SIWS chain id: ${input.chainId}`);
-  }
-
-  // Phantom compares the uri origin against the requesting page's origin and
-  // returns -32000 without prompting on a mismatch.
-  let uriOrigin: string;
-  try {
-    uriOrigin = new URL(input.uri).origin;
-  } catch {
-    throw new Error("SIWS uri must be an absolute URL.");
-  }
-  if (uriOrigin !== new URL(siwsUriForDomain(domain)).origin) {
-    throw new Error("SIWS uri origin must match the signing domain.");
-  }
-
-  // --- serialisation: mirrors Phantom's createSignInMessageText exactly ---
-  let message = `${domain} wants you to sign in with your Solana account:\n`;
-  message += input.walletAddress;
-
-  if (statement) {
-    message += `\n\n${statement}`;
-  }
-
-  const fields: string[] = [];
-  fields.push(`URI: ${input.uri}`);
-  fields.push(`Version: ${input.version}`);
-  fields.push(`Chain ID: ${input.chainId}`);
-  fields.push(`Nonce: ${input.nonce}`);
-  fields.push(`Issued At: ${input.issuedAt}`);
-  if (input.expiresAt) fields.push(`Expiration Time: ${input.expiresAt}`);
-
-  message += `\n\n${fields.join("\n")}`;
 
   return message;
+}
+
+/**
+ * True if `message` would trigger a wallet's SIWS parser.
+ *
+ * Kept deliberately broad: Phantom refused both the exact phrase and a near-miss
+ * ("bitXbit wants you to sign in with your Solana account:"), so matching loosely
+ * is the safer direction — a false positive here costs a clear server-side error,
+ * a false negative costs a silent, unprompting refusal in the user's browser.
+ */
+export function looksLikeSiws(message: string): boolean {
+  return /wants you to sign in with your\s+\S+\s+account:/i.test(message);
 }
 
 export function verifyEd25519Signature(

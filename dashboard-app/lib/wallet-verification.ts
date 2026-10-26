@@ -7,13 +7,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { requireActiveUser } from "@/lib/authz";
 import { writeSecurityAudit } from "@/lib/audit";
 import { isValidSolanaAddress } from "@/lib/solana";
-import {
-  buildSiwsMessage,
-  verifyEd25519Signature,
-  siwsUriForDomain,
-  SIWS_VERSION,
-  SIWS_CHAIN_ID,
-} from "@/lib/wallet-crypto";
+import { buildWalletChallengeMessage, verifyEd25519Signature } from "@/lib/wallet-crypto";
 
 const CHALLENGE_TTL_SECONDS = 300; // 5 minutes
 
@@ -103,17 +97,13 @@ export async function requestWalletVerificationChallenge(
   const issuedAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000).toISOString();
   const domain = getAppDomain();
-  const message = buildSiwsMessage({
-    domain,
+  const message = buildWalletChallengeMessage({
+    site: `https://${domain}`,
     walletAddress,
-    statement:
-      "Verify wallet ownership for bitxbit rewards. Signing proves you own this wallet and costs no fee or transaction.",
-    uri: siwsUriForDomain(domain),
-    version: SIWS_VERSION,
-    chainId: SIWS_CHAIN_ID,
     nonce,
     issuedAt,
     expiresAt,
+    purpose: "Link this wallet to your bitxbit account.",
   });
 
   const { error } = await supabase.from("wallet_verification_challenges").insert({
