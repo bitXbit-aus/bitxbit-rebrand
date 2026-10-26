@@ -214,19 +214,37 @@ async function main() {
   check("challenge carries a nonce", nonce.length > 0);
   check("challenge carries a message", message.length > 0);
 
-  // The message must name the host the user is ACTUALLY on. NEXT_PUBLIC_APP_URL is
-  // production in every context, so a naive implementation binds every preview
-  // sign-in to the production hostname.
+  // The message must name a host that belongs to THIS deployment.
+  //
+  // Measured: on a Netlify preview the app does NOT see the requesting alias.
+  // Netlify rewrites `request.url` to the deploy's own host, so a request to
+  // `deploy-preview-60--<site>.netlify.app` produces a message naming
+  // `6ade9bbf…--<site>.netlify.app` — a different hostname for the SAME deploy.
+  // Asserting the alias literally is therefore wrong; the real property is that
+  // the domain is an allowed host for this site and never someone else's.
+  const requestedHost = new URL(baseUrl).host;
+  const messageHost = message.split("\n")[0].split(" wants")[0].trim();
+  const isHostOfThisSite = (candidate: string): boolean =>
+    candidate === requestedHost ||
+    candidate === "bitxbit-dashboard.netlify.app" ||
+    /^[a-z0-9][a-z0-9-]*--bitxbit-dashboard\.netlify\.app$/.test(candidate) ||
+    candidate === "app.bitxbit.com.au";
+
   check(
-    `SIWS message names the deployment's own host (${expectedHost})`,
-    message.includes(expectedHost),
-    message.split("\n")[0]
+    `SIWS message names a host belonging to this deployment (${messageHost})`,
+    isHostOfThisSite(messageHost),
+    messageHost
   );
   if (expectedHost !== "app.bitxbit.com.au") {
     check(
       "preview sign-in is NOT bound to the production hostname",
       !message.includes("app.bitxbit.com.au"),
       message.split("\n")[0]
+    );
+    check(
+      "preview sign-in does NOT name an unrelated host",
+      !/\bevil\b|example\.com/i.test(messageHost),
+      messageHost
     );
   }
 
