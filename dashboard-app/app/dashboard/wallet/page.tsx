@@ -14,7 +14,7 @@ import {
   verifyWalletSignature,
   getWalletVerificationStatus,
 } from "@/lib/wallet-verification";
-import { getTokenBalanceAction } from "@/lib/actions";
+import { getTokenBalanceAction, unlinkWallet } from "@/lib/actions";
 import bs58 from "bs58";
 import { Coins, History, Wallet, AlertCircle, Shield, ShieldAlert } from "lucide-react";
 
@@ -44,6 +44,7 @@ export default function WalletPage() {
   const [savedWallet, setSavedWallet] = useState<SavedWalletState | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isUnlinking, setIsUnlinking] = useState(false);
 
   const connectedAddress = publicKey?.toBase58() ?? null;
   const walletName = wallet?.adapter.name ?? "Wallet";
@@ -160,6 +161,42 @@ export default function WalletPage() {
     }
   }
 
+  async function handleUnlink() {
+    if (!savedWallet?.address) return;
+
+    // The confirmation states what actually changes. It is NOT a vague "are you
+    // sure": unlinking cannot lock anyone out (email sign-in always remains) and
+    // cannot strand money (payout_operations snapshots its own address at claim
+    // time), so saying so is more useful than a generic warning.
+    const confirmed = window.confirm(
+      "Unlink this wallet?\n\n" +
+        savedWallet.address +
+        "\n\nYou will no longer be able to sign in with this wallet. " +
+        "Email sign-in still works, and you can verify this or another wallet again at any time."
+    );
+    if (!confirmed) return;
+
+    setIsUnlinking(true);
+    try {
+      const result = await unlinkWallet();
+      await loadSavedWallet();
+      toast({
+        title: result.unlinked ? "Wallet unlinked" : "No wallet was linked",
+        description: result.unlinked
+          ? "That wallet can no longer sign in to this account."
+          : undefined,
+      });
+    } catch (error) {
+      toast({
+        title: "Could not unlink wallet",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUnlinking(false);
+    }
+  }
+
   const isConnectedSaved =
     !!connectedAddress &&
     !!savedWallet?.address &&
@@ -213,6 +250,21 @@ export default function WalletPage() {
                         Verified {formatDate(savedWallet.verifiedAt)}
                       </p>
                     )}
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <p className="text-xs text-muted-foreground">
+                        {savedWallet.verified
+                          ? "Unlinking stops wallet sign-in for this account."
+                          : "Not verified, so it cannot sign in."}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleUnlink}
+                        disabled={isUnlinking}
+                      >
+                        {isUnlinking ? "Unlinking…" : "Unlink"}
+                      </Button>
+                    </div>
                   </div>
                 )}
 

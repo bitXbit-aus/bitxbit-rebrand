@@ -1016,6 +1016,85 @@ export async function trackOfferClick(offerId: string, referralUrl: string) {
   }
 }
 
+/**
+ * Remove the wallet linked to the signed-in user's account.
+ *
+ * DESIGN DECISIONS, all deliberate:
+ *
+ * 1. NO signature from the wallet being removed. The situation this exists for is
+ *    "that wallet is lost or compromised" — where proving control of it is
+ *    precisely what the user cannot do. Requiring its signature would make the
+ *    feature unusable exactly when it is needed. The bar is an authenticated
+ *    session, supplied by requireActiveUser().
+ *
+ * 2. It cannot lock anyone out. Every account has a NOT NULL UNIQUE email, and
+ *    wallet sign-in is link-only, so email sign-in always remains available.
+ *
+ * 3. It cannot strand money. payout_operations stores its OWN wallet_address
+ *    snapshot at claim time, so an operation already created still pays to the
+ *    address it was created with. Only FUTURE claims are blocked, which is the
+ *    intended effect of having no verified payout address.
+ *
+ * 4. Only wallet_address is written. The BEFORE UPDATE OF wallet_address trigger
+ *    sync_wallet_verification_status() nulls wallet_verified and
+ *    wallet_verified_at, so that invariant keeps a single owner rather than being
+ *    restated (and potentially contradicted) here.
+ */
+export async function unlinkWallet() {
+  const context = await requireActiveUser();
+  const { user } = context;
+  const supabase = createServiceClient();
+
+  try {
+    const { data: current, error: readError } = await supabase
+      .from("users")
+      .select("wallet_address")
+      .eq("id", user.id)
+      .single();
+    if (readError) throw readError;
+
+    const previousAddress = current?.wallet_address ?? null;
+
+    // Idempotent: nothing linked means nothing to do. Return a no-op WITHOUT
+    // writing, so an unlink of an already-empty wallet cannot produce an audit
+    // row that looks like a change happened.
+    if (!previousAddress) {
+      return { unlinked: false, previousAddress: null };
+    }
+
+    // The second predicate is the concurrency guard: if the stored address changed
+    // between the read and this write (a verify or link landed), no row matches,
+    // and we refuse rather than silently clobber the newly-linked wallet.
+    const { data: updated, error: writeError } = await supabase
+      .from("users")
+      .update({ wallet_address: null })
+      .eq("id", user.id)
+      .eq("wallet_address", previousAddress)
+      .select("id");
+    if (writeError) throw writeError;
+    if (!updated || updated.length !== 1) {
+      throw new Error("The wallet changed while unlinking. Reload and try again.");
+    }
+
+    // Recorded with its own action name so the removal is legible in the audit
+    // trail, rather than appearing only as the generic `update` row the
+    // audit_users_security_changes trigger also writes.
+    await writeSecurityAudit(context, {
+      action: "wallet.unlinked",
+      targetTable: "public.users",
+      metadata: { wallet_address: previousAddress },
+    });
+
+    revalidatePath("/dashboard/wallet");
+    revalidatePath("/dashboard/profile");
+
+    return { unlinked: true, previousAddress };
+  } catch (error) {
+    await auditMutationFailure(context, "wallet.unlink", "public.users", user.id, error);
+    throw error;
+  }
+}
+
 export async function getAirdropWalletBalanceAction() {
   const context = await requireCapability("manage_rewards");
   try {
