@@ -1097,6 +1097,105 @@ authentication outage for every user with no degraded state in between.
 
 ---
 
+## R-015 — No password-recovery route: a password-only account can be permanently locked out
+
+**Status:** **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68, branch `security/password-reset`) — not
+released.** Identified 2026-10-27 while reading live state; see
+`evidence/password-reset-2026-10-27.md`.
+**Owner:** Shri — interim accountable owner. **Review:** on merge.
+
+### What was found
+
+The dashboard shipped **no password-recovery route at all** — no `Forgot password?` affordance,
+no `/auth/forgot-password`, no `/auth/reset-password`, and no magic-link sign-in. Measured on
+production (`flasgvendiiasuixeqzu`) 2026-10-27: **8 accounts, 7 with an email identity + password,
+1 Google-only**. For those seven, a forgotten password was an **unrecoverable lockout** — there was
+no path back into the account, and no support-side path either.
+
+This is the recovery half of the auth surface, which is easy to omit because sign-in works without
+it and nothing in the build, type-check, test suite or CI notices its absence.
+
+### Remediation (this branch)
+
+- `Forgot password?` link on `/auth/login`; new `/auth/forgot-password` and `/auth/reset-password`.
+- The recovery email redirects through the **existing `/auth/callback`**, so it reuses
+  `safeAuthNextPath` and the deployment host policy (R-003) rather than a second callback that
+  could drift from them. `next` is a constant and is re-validated on arrival.
+- **Identical response whether or not the address has an account.** `resolveResetRequestOutcome`
+  collapses every non-rate-limit outcome — including an error that names the user — to one generic
+  message, so the page cannot become an account-existence oracle. Unit-tested, and the guard was
+  **mutation-verified**: reinstating the raw `error.message` produced 3 failures.
+- A **wallet is not a recovery credential.** Reset requires the recovery-code session; nothing here
+  lets a held wallet key reset a password, so sign-in is not silently promoted to account takeover.
+- New password validation is client-side (minimum 8 characters, confirmation match) and the actual
+  change runs against the current session only, so it can only alter the signed-in user's password.
+
+### Browser verification — 2026-10-27
+
+Verified in a real Chromium on the PR's deploy preview (`deploy-preview-68`, head `0e354f8a`,
+against **staging**): the login link, the forgot-password page and its **generic message for an
+unknown address** (no "user not found"), the session-guard redirect + notice, the callback failure
+path, and the reset form. Signing in a throwaway user and submitting a new password redirected to
+`/dashboard`, and a password grant then **rejected the old password and accepted the new one**.
+Teardown deleted the user; staging returned to 20 users with no orphan row.
+
+### Still unverified — stated explicitly
+
+- **The emailed-link hop on a production-allowlisted host with a real mailbox.** The segment left is
+  Supabase's (verify token → redirect with `?code=`), landing on the same `exchangeCodeForSession`
+  path OAuth uses. Not performed: no mailbox available.
+- **The `?next=` allowlist question is answered, and it surfaced a config gap.** A query string on
+  the callback **is** honoured when the origin is allowlisted. But **staging's redirect allowlist
+  contains only its SiteURL (`http://localhost:3000`), not deploy-preview hosts** — so a reset
+  requested from a preview is silently redirected to `localhost:3000`. This is the same
+  missing-allowlist root cause that blocks wallet flows on staging.
+- **Production redirect behaviour — CONFIRMED 2026-10-27.** Measured on production via the verify
+  endpoint (invalid token, no user created, no email sent): `…/auth/callback?next=…` is preserved
+  exactly, as is any path on `app.bitxbit.com.au`; a foreign host is substituted. The recovery link
+  therefore works on production. Remaining owner action is **staging only** — add
+  `https://*--bitxbit-dashboard.netlify.app/**` so previews can exercise the emailed link.
+- No rate limiting is applied by this application to the reset request; Supabase Auth's built-in
+  email send limits are the only bound. Recorded rather than claimed.
+
+## R-016 — The browser-facing surface is not exercised by CI
+
+**Status:** **CONTROL IMPLEMENTED AND PROVEN IN CI 2026-10-27 (merged into PR #68 via #69) — not
+released to production.** Identified while reviewing the nine wallet
+defects found on 2026-10-26; see `evidence/browser-smoke-ci-2026-10-27.md`.
+**Owner:** Shri — interim accountable owner. **Review:** on merge.
+
+### What was found
+
+Nine wallet defects were found in one session on 2026-10-26. **Not one was caught by `tsc`, `npm
+test`, the build, or CI.** Each surfaced only in a real browser: a CSP that blocked a wallet's
+connect iframe, a service worker whose fetch handler threw, deploy/asset skew between a cached
+document and chunks a newer build had deleted, and a wallet handshake that only died once a real
+extension was involved.
+
+Those gates verify the **server**; they are structurally blind to the browser. That blindness is the
+dominant defect class in this project, and it is a process gap, not a code bug — which is why the fix
+is a test that runs against a **deployment**, on every PR.
+
+### Control implemented
+
+A Playwright suite (`dashboard-app/e2e/browser-smoke.spec.ts`) run by
+`.github/workflows/dashboard-browser-smoke.yml` against the PR's **actual Netlify deploy preview**
+(never a local build). It asserts: page-specific rendering with no Next global error shell, no CSP
+violations, no console/page errors, every referenced `/_next/**` asset returning 200 (asset skew),
+the forgot-password enumeration property, the reset-page session guard, and the wallet challenge API
+reached from the page.
+
+### What it does and does not prove
+
+- **Proven (locally, against `deploy-preview-68`):** 7/7 pass; and 7/7 **fail** against a control page,
+  so the suite is capable of failing rather than passing regardless of its target.
+- **Proven in CI:** the dispatched run `40445056002` (supplied URL) and the **automatic** PR run
+  `40445727437` on head `9ef5601e` (deploy-preview wait) both completed **success**.
+- **Not covered:** the wallet **signature** step — driving the official wallet adapters needs a real
+  extension, which CI cannot install. That remains a manual procedure.
+- **Deliberately not a required status check.** Making it required is an owner decision and presumes a
+  Netlify preview exists for every PR (fork PRs do not receive one).
+
 ## D4 status
 
 **D4 is SATISFIED — verified in deployments on 2026-10-19, re-verified 2026-10-22.**
@@ -1221,6 +1320,8 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
+| **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox; **production redirect behaviour is confirmed** — `?next=` preserved on the site host). | Shri (interim) | on merge |
+| **R-016** | **Browser-facing integration untested by CI** | **CONTROL IMPLEMENTED 2026-10-27 (stacked on PR #68) — not released.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See

@@ -7,13 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "rm -rf .test-dist && tsc lib/action-rate-limit.ts lib/action-rate-limit.test.ts lib/action-result.ts lib/action-result.test.ts lib/action-authz.test.ts lib/asset-policy.ts lib/asset-policy.test.ts lib/auth-callback-url.ts lib/auth-callback-url.test.ts lib/auth-redirect.ts lib/auth-redirect.test.ts lib/authz-decision.ts lib/authz-decision.test.ts lib/client-ip.ts lib/client-ip.test.ts lib/host-validation.ts lib/host-validation.test.ts lib/csp-policy.test.ts lib/middleware-redirect.ts lib/middleware-redirect.test.ts lib/supabase/middleware-cookies.ts lib/supabase/middleware-cookies.test.ts lib/supabase/middleware-forwarding.ts lib/supabase/middleware-forwarding.test.ts lib/supabase/response-cache.ts lib/supabase/response-cache.test.ts lib/dependency-exposure.test.ts lib/security-mutations.ts lib/security-mutations.test.ts lib/supabase/cookie-write.ts lib/supabase/cookie-write.test.ts lib/payout.ts lib/payout.test.ts lib/payout-transfer.test.ts lib/rate-limit-store.ts lib/rate-limit.ts lib/rate-limit.test.ts lib/rate-limit-health.ts lib/rate-limit-health.test.ts lib/rate-limit-redis.ts lib/wallet-crypto.ts lib/wallet-crypto.test.ts lib/wallet-signin-client.ts lib/wallet-signin-client.test.ts lib/rate-limit-supabase.ts lib/rate-limit-supabase.test.ts --outDir .test-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --types node && node --test .test-dist/*.test.js .test-dist/supabase/*.test.js && rm -rf .test-dist",
+    "test": "rm -rf .test-dist && tsc lib/action-rate-limit.ts lib/action-rate-limit.test.ts lib/action-result.ts lib/action-result.test.ts lib/action-authz.test.ts lib/asset-policy.ts lib/asset-policy.test.ts lib/auth-callback-url.ts lib/auth-callback-url.test.ts lib/auth-redirect.ts lib/auth-redirect.test.ts lib/authz-decision.ts lib/authz-decision.test.ts lib/client-ip.ts lib/client-ip.test.ts lib/host-validation.ts lib/host-validation.test.ts lib/password-reset.ts lib/password-reset.test.ts lib/csp-policy.test.ts lib/middleware-redirect.ts lib/middleware-redirect.test.ts lib/supabase/middleware-cookies.ts lib/supabase/middleware-cookies.test.ts lib/supabase/middleware-forwarding.ts lib/supabase/middleware-forwarding.test.ts lib/supabase/response-cache.ts lib/supabase/response-cache.test.ts lib/dependency-exposure.test.ts lib/security-mutations.ts lib/security-mutations.test.ts lib/supabase/cookie-write.ts lib/supabase/cookie-write.test.ts lib/payout.ts lib/payout.test.ts lib/payout-transfer.test.ts lib/rate-limit-store.ts lib/rate-limit.ts lib/rate-limit.test.ts lib/rate-limit-health.ts lib/rate-limit-health.test.ts lib/rate-limit-redis.ts lib/wallet-crypto.ts lib/wallet-crypto.test.ts lib/wallet-signin-client.ts lib/wallet-signin-client.test.ts lib/rate-limit-supabase.ts lib/rate-limit-supabase.test.ts --outDir .test-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --types node && node --test .test-dist/*.test.js .test-dist/supabase/*.test.js && rm -rf .test-dist",
     "test:migration": "bash scripts/test-phase1-migration-replay.sh",
     "test:staging": "tsc scripts/staging-smoke-test.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/staging-smoke-test.js && rm -rf .staging-dist",
     "test:solana-fault": "tsc scripts/staging-solana-fault-test.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/scripts/staging-solana-fault-test.js && rm -rf .staging-dist",
     "test:wallet-verify": "tsc scripts/wallet-verification-verify.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/scripts/wallet-verification-verify.js && rm -rf .staging-dist",
     "test:wallet-signin": "tsc scripts/wallet-signin-verify.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/wallet-signin-verify.js && rm -rf .staging-dist",
-    "db:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID --schema public > types/supabase.ts"
+    "db:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID --schema public > types/supabase.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.0.4",
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@netlify/plugin-nextjs": "^5.16.0",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
