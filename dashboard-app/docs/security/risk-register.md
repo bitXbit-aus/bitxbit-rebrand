@@ -91,10 +91,17 @@ review control; it does not satisfy a single one of the three blockers above.
 
 ## R-001 — Residual Next.js 14.2.35 vulnerabilities
 
-**Decision A — conditional temporary risk acceptance.**
-**Status:** ACCEPTED — conditional. **Expires:** **2026-11-18 (30 days).**
-**Owner:** Shri — interim accountable owner. **Not accepted or closed by this
-ownership assignment.**
+**Decision A — conditional temporary risk acceptance. CLOSED AS REMEDIATED 2026-10-27.**
+**Status:** **CLOSED AS REMEDIATED 2026-10-27** — this is the closure Condition 5 anticipated, **not a
+renewal**. The Next.js 15 migration landed (R-007, released 2026-10-24) and the subject of this entry
+no longer exists: on `next@15.5.28`, `npm audit` reports **zero advisories naming `next` directly**
+(was 25 against `14.2.35`). `next` still appears in audit output only as a carrier for a transitive
+`postcss` advisory.
+**Expires:** n/a — closed ahead of the 2026-11-18 expiry.
+**Owner:** Shri — interim accountable owner.
+**Evidence:** `evidence/r001-closure-2026-10-27.md`. The advisories the tree *does* carry are now
+recorded separately as **R-018** — closing this entry is not a claim that the dependency surface is
+clean.
 
 ### Condition 1 — deployment remains Netlify/Linux with the image-optimisation path disabled
 
@@ -1345,11 +1352,40 @@ here; removing it needs hydration proven in a real browser. See
 
 ---
 
+## R-018 — Advisories present in the tree after the Next 15 migration
+
+**Status:** **OPEN — recorded 2026-10-27.** Not accepted, not dismissed. **Severity:** mixed (1 critical,
+7 high, 20 moderate per `npm audit`).
+**Owner:** Shri — interim accountable owner.
+
+R-001 closed as remediated on the Next 15 migration, and its closure is deliberately narrow: it says the
+25 `next` advisories are gone, **not** that the dependency surface is clean. `npm audit` on
+`next@15.5.28` / `react@19.3.1` reports **28** advisories — a different set, previously unrecorded.
+
+| Package | Sev | Direct? | Reachability | Action |
+|---|---|---|---|---|
+| `tar` | **critical** (npm aggregate; advisory high) | no | **dev only** — sole dependent is the `supabase` **devDependency** CLI | Not in the deployed bundle. Track. |
+| `zod` | high | **yes** | **unused — imported nowhere** | **Remove the dependency** (not a semver-major upgrade). |
+| `@solana/spl-token` → `bigint-buffer` | high | yes | runtime | Tracked as **R-002**; unchanged. |
+| `postcss`, `postcss-selector-parser` | high / mod | no | build-time only | Build tooling; not the request path. |
+| `source-map-js` | high | no | build-time | Via the postcss chain. |
+| `jayson` → `stream-json` | mod | no | **runtime** via `@solana/web3.js` | O(depth²) filter DoS on crafted JSON. |
+| `uuid` | mod | **yes** (`^9.0.1`) | runtime + transitive | **Unassessed** — not dismissed. |
+| `@solana/*` wallet adapters | mod | mostly yes | runtime | Several report **no fix available**. |
+
+**Two things this entry does not claim.** No advisory here was reproduced by running a trigger — the
+table is a reachability classification from the dependency graph, unlike R-002, which was characterised
+experimentally. And `uuid`'s reachability is genuinely unassessed rather than judged harmless.
+
+Evidence: `evidence/r001-closure-2026-10-27.md`.
+
+---
+
 ## Summary
 
 | ID | Risk | Status | Owner | Review |
 |---|---|---|---|---|
-| R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** — Condition 3 now satisfied in fact (host validation released; rate limiting live and verified; request limits explicit). Formally contingent only on **R-003's closure** (independent review waived). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`). **Re-measured 2026-10-23:** the advisory set has grown — **25** advisories via `next`, **3 criticals** (new: GHSA-2464-fhr4-w9xw, SVG image-optimizer RCE, `<=15.5.27`); all criticals still neutralised by Condition 1; minimum clearing version is now **15.5.28** (= approved D1 target) | Shri (interim) | **2026-11-18 (expires)** |
+| R-001 | Next.js 14.2.35 residual advisories | ✅ **CLOSED AS REMEDIATED 2026-10-27** — the Next 15 migration landed (R-007); `npm audit` on `next@15.5.28` reports **0 advisories naming `next` directly** (was 25). Closed ahead of the 2026-11-18 expiry, as Condition 5 provided — not renewed. Current tree's advisories tracked as **R-018**. | Shri (interim) | closed |
 | R-002 | `bigint-buffer`, no fix | Accepted, conditional — **re-assessed by measurement 2026-10-22**: the trigger is **non-Buffer input** to the native addon, and the tree's **only** caller wraps in `Buffer.from`; the native build is additionally excluded from the deployed bundle. Guarded by 4 mutation-verified tests. *(Prior justification argued the wrong axis and was replaced.)* **Not cleared by R-007** — `bigint-buffer` remains either way. | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | ✅ **CLOSED 2026-10-27** — control verified in production and re-measured with an app-layer probe (forged `Host`/`X-Forwarded-Host` → **400**); the edge normalises ahead of the app, so production answers 200 to a forged header without the app ever seeing it. **M8 review waived under D5 — not satisfied.** | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
@@ -1366,6 +1402,7 @@ here; removing it needs hydration proven in a real browser. See
 | **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **RELEASED 2026-10-27 (PR #68, `04221a5`).** Verified live on production (route 404→200, forgot/reset pages behave, browser suite 6/6) and **owner-confirmed end to end** with a real account. `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox; **production redirect behaviour is confirmed** — `?next=` preserved on the site host). | Shri (interim) | on merge |
 | **R-016** | **Browser-facing integration untested by CI** | **RELEASED 2026-10-27 (PR #68, `04221a5`); workflow now runs on every PR to `main`.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
 | **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | ✅ **RELEASED 2026-10-27** (PR #71, `4b37746`). One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Production verified: one header, devnet gone. Static assets carry no CSP (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | closed |
+| **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 28 advisories (1 critical, 7 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` is a **direct, unused** dependency carrying a high advisory — recommended action is **removal**, not an upgrade. `uuid` unassessed. No advisory reproduced experimentally. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
