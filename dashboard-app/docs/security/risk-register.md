@@ -1354,8 +1354,9 @@ here; removing it needs hydration proven in a real browser. See
 
 ## R-018 — Advisories present in the tree after the Next 15 migration
 
-**Status:** **OPEN — recorded 2026-10-27.** Not accepted, not dismissed. **Severity:** mixed (1 critical,
-7 high, 20 moderate per `npm audit`).
+**Status:** **OPEN — recorded 2026-10-27**, with one item already actioned: the unused `zod`
+dependency was **removed** (see below), taking the tree from 28 advisories to 27. Not accepted, not
+dismissed. **Severity:** mixed (1 critical, 6 high, 20 moderate per `npm audit`).
 **Owner:** Shri — interim accountable owner.
 
 R-001 closed as remediated on the Next 15 migration, and its closure is deliberately narrow: it says the
@@ -1365,7 +1366,7 @@ R-001 closed as remediated on the Next 15 migration, and its closure is delibera
 | Package | Sev | Direct? | Reachability | Action |
 |---|---|---|---|---|
 | `tar` | **critical** (npm aggregate; advisory high) | no | **dev only** — sole dependent is the `supabase` **devDependency** CLI | Not in the deployed bundle. Track. |
-| `zod` | high | **yes** | **unused — imported nowhere** | **Remove the dependency** (not a semver-major upgrade). |
+| `zod` | ~~high~~ | **was yes** | **unused — imported nowhere** | ✅ **REMOVED 2026-10-27** — dependency deleted, not upgraded. `npm audit` 28 → 27, high 7 → 6. See `evidence/zod-removal-2026-10-27.md`. |
 | `@solana/spl-token` → `bigint-buffer` | high | yes | runtime | Tracked as **R-002**; unchanged. |
 | `postcss`, `postcss-selector-parser` | high / mod | no | build-time only | Build tooling; not the request path. |
 | `source-map-js` | high | no | build-time | Via the postcss chain. |
@@ -1377,7 +1378,11 @@ R-001 closed as remediated on the Next 15 migration, and its closure is delibera
 table is a reachability classification from the dependency graph, unlike R-002, which was characterised
 experimentally. And `uuid`'s reachability is genuinely unassessed rather than judged harmless.
 
-Evidence: `evidence/r001-closure-2026-10-27.md`.
+**Actioned 2026-10-27:** the `zod` removal described above. `npm audit` on the tree after the change
+reports **27** advisories (0 info, 0 low, 20 moderate, **6** high, 1 critical) — the high count fell by
+exactly the one advisory removed, and no other version moved.
+
+Evidence: `evidence/r001-closure-2026-10-27.md`, `evidence/zod-removal-2026-10-27.md`.
 
 ---
 
@@ -1402,7 +1407,7 @@ Evidence: `evidence/r001-closure-2026-10-27.md`.
 | **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **RELEASED 2026-10-27 (PR #68, `04221a5`).** Verified live on production (route 404→200, forgot/reset pages behave, browser suite 6/6) and **owner-confirmed end to end** with a real account. `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox; **production redirect behaviour is confirmed** — `?next=` preserved on the site host). | Shri (interim) | on merge |
 | **R-016** | **Browser-facing integration untested by CI** | **RELEASED 2026-10-27 (PR #68, `04221a5`); workflow now runs on every PR to `main`.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
 | **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | ✅ **RELEASED 2026-10-27** (PR #71, `4b37746`). One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Production verified: one header, devnet gone. Static assets carry no CSP (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | closed |
-| **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 28 advisories (1 critical, 7 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` is a **direct, unused** dependency carrying a high advisory — recommended action is **removal**, not an upgrade. `uuid` unassessed. No advisory reproduced experimentally. | Shri (interim) | open |
+| **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories after the `zod` removal (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` — a direct, unused dependency with a high advisory — was **removed**, not upgraded. `uuid` unassessed. No advisory reproduced experimentally. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
