@@ -108,10 +108,31 @@ not a defect, and the toolbar does not exist on production. It is filtered as be
 target host matches `*.netlify.app`** — the same URI on a production run still fails. Recorded here
 because a smoke suite that hides a real `frame-src` regression on production would be worse than none.
 
+## The workflow has run on GitHub — green
+
+Netlify builds a deploy preview only for a PR whose base is the **production branch**. A stacked PR
+(this one) therefore never receives one, and the automatic wait step cannot resolve a URL — it waits
+and then fails with a clear message rather than passing silently.
+
+Two fixes, both applied:
+
+1. `workflow_dispatch` accepts an optional `base_url` that skips the wait.
+2. The job is now **skipped (neutral)** on any PR whose base is not the default branch, instead of
+   waiting 20 minutes to fail.
+
+Using (1), the suite was run from GitHub Actions against `deploy-preview-68`:
+
+| | |
+|---|---|
+| Run | `40445056002` (event `workflow_dispatch`, head `f8c4a92`) |
+| Result | **success** — every step green, including "Run browser smoke suite" |
+
+So the workflow is proven end-to-end in CI, not only locally.
+
 ## Not verified
 
-- **The workflow has not run on GitHub yet** for this branch. It is validated only by running the
-  same command locally against a real preview. The first CI run is the proof.
+- **A PR-into-`main` run** of the automatic path (the deploy-preview wait). It is the same job and the
+  same command; only the URL-resolution branch differs. The first such PR will confirm it.
 - **Not a required status check.** Making it required is an owner decision, and it presumes a Netlify
   preview exists for every PR (fork PRs do not get one).
 - The wallet **signature** step, as above.
