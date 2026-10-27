@@ -1,0 +1,106 @@
+name: Dashboard browser smoke
+
+# WHY THIS EXISTS
+# ---------------
+# Nine wallet defects were found in one session, and not one was caught by `tsc`,
+# `npm test`, the build, or CI. Every one surfaced only in a real browser: a CSP
+# that blocked a wallet's connect iframe, a service worker whose fetch handler
+# threw, deploy/asset skew between a cached document and chunks the new build had
+# deleted, a wallet handshake that only died once a real extension was involved.
+# Those gates verify the server; they are structurally blind to the browser.
+#
+# This job runs a Playwright suite against the PR's ACTUAL Netlify deploy preview
+# (not a local build), so the browser-facing surface is exercised on every PR.
+#
+# COVERAGE / NON-COVERAGE
+#   Covered: page rendering and the Next global error shell, CSP violations,
+#   console/page errors, chunk-reference integrity (asset skew), the
+#   forgot-password enumeration property, the reset-page session guard, and the
+#   wallet challenge API reached from the page.
+#   NOT covered: the wallet SIGNATURE step. Driving the official wallet adapters
+#   needs a real extension, which CI cannot install. That remains a manual
+#   procedure.
+#
+# Deliberately NOT (yet) a required status check on `main`. Making it required is
+# an owner decision, and it depends on a Netlify preview existing for every PR —
+# including from forks, which do not receive previews.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - "security/**"
+  workflow_dispatch:
+
+jobs:
+  browser-smoke:
+    name: Browser smoke against the deploy preview
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard-app
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for the Netlify deploy preview on the head SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SHA:-}" ]; then
+            echo "::error::No pull_request head SHA (workflow_dispatch?)"; exit 1
+          fi
+          echo "Waiting for netlify/bitxbit-dashboard/deploy-preview success on $SHA"
+          PREVIEW_URL=""
+          for i in $(seq 1 40); do
+            statuses=$(curl -sS \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPO/commits/$SHA/statuses")
+            state=$(echo "$statuses" | jq -r '[.[] | select(.context=="netlify/bitxbit-dashboard/deploy-preview")][0].state // "none"')
+            url=$(echo "$statuses" | jq -r '[.[] | select(.context=="netlify/bitxbit-dashboard/deploy-preview" and .state=="success")][0].target_url // ""')
+            echo "tick $i: state=$state url=${url:-none}"
+            if [ -n "$url" ]; then PREVIEW_URL="$url"; break; fi
+            if [ "$state" = "failure" ] || [ "$state" = "error" ]; then
+              echo "::error::Netlify deploy preview failed for $SHA"; exit 1
+            fi
+            sleep 30
+          done
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "::error::No successful Netlify deploy preview appeared within 20 minutes"; exit 1
+          fi
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+
+      - name: Run browser smoke suite
+        env:
+          E2E_BASE_URL: ${{ env.PREVIEW_URL }}
+        run: npx playwright test
+
+      - name: Upload Playwright report and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            dashboard-app/playwright-report/
+            dashboard-app/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

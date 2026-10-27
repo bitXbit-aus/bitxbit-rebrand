@@ -13,7 +13,8 @@
     "test:solana-fault": "tsc scripts/staging-solana-fault-test.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/scripts/staging-solana-fault-test.js && rm -rf .staging-dist",
     "test:wallet-verify": "tsc scripts/wallet-verification-verify.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/scripts/wallet-verification-verify.js && rm -rf .staging-dist",
     "test:wallet-signin": "tsc scripts/wallet-signin-verify.ts --outDir .staging-dist --module commonjs --target es2020 --esModuleInterop --skipLibCheck --moduleResolution node --types node && node .staging-dist/wallet-signin-verify.js && rm -rf .staging-dist",
-    "db:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID --schema public > types/supabase.ts"
+    "db:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID --schema public > types/supabase.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.0.4",
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@netlify/plugin-nextjs": "^5.16.0",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

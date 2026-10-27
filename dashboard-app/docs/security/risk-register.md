@@ -1128,6 +1128,44 @@ Teardown deleted the user; staging returned to 20 users with no orphan row.
 - No rate limiting is applied by this application to the reset request; Supabase Auth's built-in
   email send limits are the only bound. Recorded rather than claimed.
 
+## R-016 — The browser-facing surface is not exercised by CI
+
+**Status:** **CONTROL IMPLEMENTED 2026-10-27 (branch `security/browser-smoke`, stacked on PR #68) —
+not released; the workflow has not yet run on GitHub.** Identified while reviewing the nine wallet
+defects found on 2026-10-26; see `evidence/browser-smoke-ci-2026-10-27.md`.
+**Owner:** Shri — interim accountable owner. **Review:** on merge.
+
+### What was found
+
+Nine wallet defects were found in one session on 2026-10-26. **Not one was caught by `tsc`, `npm
+test`, the build, or CI.** Each surfaced only in a real browser: a CSP that blocked a wallet's
+connect iframe, a service worker whose fetch handler threw, deploy/asset skew between a cached
+document and chunks a newer build had deleted, and a wallet handshake that only died once a real
+extension was involved.
+
+Those gates verify the **server**; they are structurally blind to the browser. That blindness is the
+dominant defect class in this project, and it is a process gap, not a code bug — which is why the fix
+is a test that runs against a **deployment**, on every PR.
+
+### Control implemented
+
+A Playwright suite (`dashboard-app/e2e/browser-smoke.spec.ts`) run by
+`.github/workflows/dashboard-browser-smoke.yml` against the PR's **actual Netlify deploy preview**
+(never a local build). It asserts: page-specific rendering with no Next global error shell, no CSP
+violations, no console/page errors, every referenced `/_next/**` asset returning 200 (asset skew),
+the forgot-password enumeration property, the reset-page session guard, and the wallet challenge API
+reached from the page.
+
+### What it does and does not prove
+
+- **Proven (locally, against `deploy-preview-68`):** 7/7 pass; and 7/7 **fail** against a control page,
+  so the suite is capable of failing rather than passing regardless of its target.
+- **Not proven:** the workflow has not run on GitHub yet for this branch.
+- **Not covered:** the wallet **signature** step — driving the official wallet adapters needs a real
+  extension, which CI cannot install. That remains a manual procedure.
+- **Deliberately not a required status check.** Making it required is an owner decision and presumes a
+  Netlify preview exists for every PR (fork PRs do not receive one).
+
 ## D4 status
 
 **D4 is SATISFIED — verified in deployments on 2026-10-19, re-verified 2026-10-22.**
@@ -1253,6 +1291,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
 | **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox) and production's redirect allowlist. | Shri (interim) | on merge |
+| **R-016** | **Browser-facing integration untested by CI** | **CONTROL IMPLEMENTED 2026-10-27 (stacked on PR #68) — not released.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Not covered: the wallet signature step (needs a real extension). The workflow has not yet run on GitHub.** | Shri (interim) | on merge |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See

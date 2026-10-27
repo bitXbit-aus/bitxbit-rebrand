@@ -47,3 +47,9 @@ dashboard-app/supabase/.temp/
 # compiled test/harness output (tsc --outDir targets; never commit)
 .test-dist/
 .staging-dist/
+
+# Playwright browser-smoke output (never commit)
+dashboard-app/test-results/
+dashboard-app/playwright-report/
+dashboard-app/blob-report/
+dashboard-app/.playwright/
