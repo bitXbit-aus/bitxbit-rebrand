@@ -5,6 +5,7 @@ import { resolveClientIp } from "@/lib/client-ip";
 import { redirectWithCookies } from "@/lib/middleware-redirect";
 import { createMiddlewareCookieAdapter } from "@/lib/supabase/middleware-cookies";
 import { buildForwardingResponse } from "@/lib/supabase/middleware-forwarding";
+import { CSP_HEADER, CONTENT_SECURITY_POLICY } from "@/lib/csp";
 
 interface MiddlewareAuthorization {
   role: "member" | "admin";
@@ -24,24 +25,10 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   if (response.headers.get("set-cookie")) {
     response.headers.set("Cache-Control", "private, no-store");
   }
-  response.headers.set(
-    "Content-Security-Policy",
-    "default-src 'self'; " +
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://plausible.io; " +
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-      "font-src 'self' https://fonts.gstatic.com; " +
-      "img-src 'self' data: https:; " +
-      // frame-src governs which origins THIS page may embed. It is not
-      // frame-ancestors (who may embed us), so this does not weaken clickjacking
-      // protection. Without it, default-src 'self' blocks the wallet connect
-      // iframe: connect.solflare.com for Solflare, keys.coinbase.com for Coinbase,
-      // which broke sign-in with a white "content is blocked" screen.
-      "frame-src 'self' https://connect.solflare.com https://keys.coinbase.com; " +
-      "connect-src 'self' https://*.supabase.co https://api.mainnet-beta.solana.com https://api.devnet.solana.com https://public-api.birdeye.so https://api.dexscreener.com https://plausible.io; " +
-      "frame-ancestors 'none'; " +
-      "base-uri 'self'; " +
-      "form-action 'self';"
-  );
+  // The policy is defined once in lib/csp.ts, which also records why frame-src names the
+  // wallet origins. It used to be duplicated here and in netlify.toml; a policy split
+  // across two emitters is how a control regresses on one path only.
+  response.headers.set(CSP_HEADER, CONTENT_SECURITY_POLICY);
   return response;
 }
 
