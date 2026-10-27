@@ -59,6 +59,14 @@ const SOURCE = readFileSync(join(process.cwd(), "lib/actions.ts"), "utf8");
 
 describe("Server Action authorization guards (R-005)", () => {
   it("enumerates every exported Server Action", () => {
+    // 30 -> 29 on 2026-10-26: `saveWalletAddress` was deleted. It could only ever
+    // "succeed" by no-op'ing (re-saving an address equal to the already-verified
+    // one) — verification is the only path that writes wallet_address — so its
+    // sole caller (the wallet page's connect effect) was removed with it, and it
+    // was the source of fabricated `success: false` audit rows on every connect.
+    // Re-checked for a guard: the deleted action did call requireActiveUser().
+    // Back to 30 on 2026-10-26 with `unlinkWallet` (wallet unlink path), which
+    // calls requireActiveUser() before constructing the service client.
     assert.equal(
       exportedActions(SOURCE).length,
       30,

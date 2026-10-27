@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 
 export default async function AdminAllocationsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: models } = await supabase.from("allocation_models").select("*").order("effective_date", { ascending: false });
 
   return (

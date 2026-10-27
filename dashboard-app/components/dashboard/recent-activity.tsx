@@ -11,7 +11,7 @@ const activityLabels: Record<string, string> = {
 };
 
 export async function RecentActivity() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   const { data: recentActivities } = await supabase

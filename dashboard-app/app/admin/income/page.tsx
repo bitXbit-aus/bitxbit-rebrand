@@ -5,7 +5,7 @@ import { FormWithToast } from "@/components/dashboard/form-with-toast";
 import { createIncome, updateIncome, deleteIncome } from "@/lib/actions";
 
 export default async function AdminIncomePage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: income } = await supabase
     .from("affiliate_income")
     .select("*")

@@ -7,7 +7,7 @@ import { createTransparencyReport, publishTransparencyReport, unpublishTranspare
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export default async function AdminTransparencyPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: reports } = await supabase
     .from("transparency_reports")
     .select("*")

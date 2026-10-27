@@ -11,10 +11,12 @@ import {
 import { MemoryRateLimitStore, RateLimitResult, RateLimitStore } from "./rate-limit-store";
 import { rateLimitHealthSnapshot, resetRateLimitHealth } from "./rate-limit-health";
 
-function makeRequest(headers: Record<string, string>, ip?: string): any {
+function makeRequest(headers: Record<string, string>): any {
+  // No `ip` field: Next.js 15 removed `NextRequest.ip`, so `getClientIdentifier`
+  // has no request-level address to fall back to. Modelling one here would assert
+  // a property the framework no longer provides.
   return {
     headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
-    ip: ip ?? null,
   };
 }
 
@@ -135,23 +137,17 @@ describe("client identifier", () => {
   it("keys on the real client, not on Netlify's edge address", () => {
     // The regression this guards: the anchor holds an edge-node address, so
     // keying on it made every client behind an edge node share one bucket.
-    const req = makeRequest(
-      { "x-nf-client-connection-ip": ANCHOR, "x-forwarded-for": CHAIN },
-      "7.7.7.7"
-    );
+    const req = makeRequest({ "x-nf-client-connection-ip": ANCHOR, "x-forwarded-for": CHAIN });
     assert.equal(getClientIdentifier(req as any), CLIENT);
   });
 
   it("is NOT fooled by a forged forwarded chain", () => {
     // Netlify preserves and PREPENDS a client-supplied chain, so the leftmost
     // entry is attacker-chosen. Using it would hand callers their own bucket.
-    const req = makeRequest(
-      {
+    const req = makeRequest({
         "x-nf-client-connection-ip": ANCHOR,
         "x-forwarded-for": `1.2.3.4, ${CLIENT}, ${ANCHOR}, 16.176.74.16`,
-      },
-      "7.7.7.7"
-    );
+      });
     assert.equal(getClientIdentifier(req as any), CLIENT);
     assert.notEqual(getClientIdentifier(req as any), "1.2.3.4");
   });
@@ -160,34 +156,37 @@ describe("client identifier", () => {
     // This header was meant to carry the middleware's value, but it is absent at
     // the origin (measured), so nothing may be read from it: a forged copy must
     // not become the rate-limit key.
-    const req = makeRequest(
-      {
+    const req = makeRequest({
         "x-bitxbit-client-ip": "9.9.9.9",
         "x-nf-client-connection-ip": ANCHOR,
         "x-forwarded-for": CHAIN,
-      },
-      "7.7.7.7"
-    );
+      });
     assert.equal(getClientIdentifier(req as any), CLIENT);
     assert.notEqual(getClientIdentifier(req as any), "9.9.9.9");
   });
 
   it("rejects a non-IP anchor rather than keying on it", () => {
-    const req = makeRequest({ "x-nf-client-connection-ip": "not-an-ip" }, "7.7.7.7");
-    assert.equal(getClientIdentifier(req as any), "7.7.7.7");
+    // A present-but-invalid anchor is refused, and there is no longer a
+    // request-level address to fall back to (Next 15 removed `request.ip`), so
+    // the identifier is the shared bucket.
+    const req = makeRequest({ "x-nf-client-connection-ip": "not-an-ip" });
+    assert.equal(getClientIdentifier(req as any), "anonymous");
   });
 
   it("uses X-Forwarded-For only when TRUST_PROXY is enabled, and the rightmost entry", () => {
     process.env.TRUST_PROXY = "true";
-    const req = makeRequest({ "x-forwarded-for": "5.5.5.5, 6.6.6.6" }, "7.7.7.7");
+    const req = makeRequest({ "x-forwarded-for": "5.5.5.5, 6.6.6.6" });
     assert.equal(getClientIdentifier(req as any), "6.6.6.6");
     delete process.env.TRUST_PROXY;
   });
 
-  it("falls back to request.ip when proxy headers are untrusted", () => {
+  it("falls back to the shared bucket when proxy headers are untrusted", () => {
+    // Previously fell back to `request.ip`; Next 15 removed that property, so an
+    // untrusted chain with no trusted anchor keys on "anonymous". Coarser, and
+    // never caller-chosen — so this is not a bucket-selection regression.
     delete process.env.TRUST_PROXY;
-    const req = makeRequest({ "x-forwarded-for": "5.5.5.5" }, "7.7.7.7");
-    assert.equal(getClientIdentifier(req as any), "7.7.7.7");
+    const req = makeRequest({ "x-forwarded-for": "5.5.5.5" });
+    assert.equal(getClientIdentifier(req as any), "anonymous");
   });
 
   it("returns anonymous when no IP is available", () => {
@@ -319,7 +318,7 @@ describe("rate-limit store selection (R-004 fallback visibility)", () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     resetRateLimitHealth();
     try {
-      const response = rateLimitResponse(Date.now() + 30_000);
+      const response = rateLimitResponse(Date.now() + 30_000, "203.0.113.7");
 
       assert.equal(response.status, 429);
       assert.ok(response.headers.get("retry-after"), "the existing contract must be intact");
@@ -342,8 +341,29 @@ describe("rate-limit store selection (R-004 fallback visibility)", () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
     resetRateLimitHealth();
     try {
-      const response = rateLimitResponse(Date.now() + 30_000);
+      const response = rateLimitResponse(Date.now() + 30_000, "203.0.113.7");
       assert.equal(response.headers.get("x-ratelimit-degraded"), "false");
+    } finally {
+      resetRateLimitHealth();
+      restore();
+    }
+  });
+
+  it("reports client attribution for THIS request, not cumulative process state", () => {
+    // Independent review: deriving this header from process-wide counters labelled
+    // correctly-resolved clients as `shared-bucket` as soon as any earlier request
+    // on the same instance had been unresolved — so the diagnostic was misleading.
+    resetRateLimitHealth();
+    try {
+      const anonymous = rateLimitResponse(Date.now() + 30_000, "anonymous");
+      assert.equal(anonymous.headers.get("x-ratelimit-client-resolution"), "shared-bucket");
+
+      const resolved = rateLimitResponse(Date.now() + 30_000, "203.0.113.7");
+      assert.equal(
+        resolved.headers.get("x-ratelimit-client-resolution"),
+        "ok",
+        "a resolved client must not inherit another request's shared-bucket label"
+      );
     } finally {
       resetRateLimitHealth();
       restore();

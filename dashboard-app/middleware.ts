@@ -1,7 +1,10 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { parseHostPolicy, validateRequestHost } from "@/lib/host-validation";
-import { resolveClientIp, withClientIp } from "@/lib/client-ip";
+import { resolveClientIp } from "@/lib/client-ip";
+import { redirectWithCookies } from "@/lib/middleware-redirect";
+import { createMiddlewareCookieAdapter } from "@/lib/supabase/middleware-cookies";
+import { buildForwardingResponse } from "@/lib/supabase/middleware-forwarding";
 
 interface MiddlewareAuthorization {
   role: "member" | "admin";
@@ -14,6 +17,13 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   // Enforce HTTPS and set baseline XSS/filter protections.
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  // A response that writes auth cookies must never be cached: a CDN or reverse proxy could
+  // then serve one user's session to a different user. @supabase/ssr says exactly this and
+  // passes its own cache headers to setAll (honoured below). Applied here so every return
+  // path — including all four redirect branches — gets it.
+  if (response.headers.get("set-cookie")) {
+    response.headers.set("Cache-Control", "private, no-store");
+  }
   response.headers.set(
     "Content-Security-Policy",
     "default-src 'self'; " +
@@ -21,6 +31,12 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
       "font-src 'self' https://fonts.gstatic.com; " +
       "img-src 'self' data: https:; " +
+      // frame-src governs which origins THIS page may embed. It is not
+      // frame-ancestors (who may embed us), so this does not weaken clickjacking
+      // protection. Without it, default-src 'self' blocks the wallet connect
+      // iframe: connect.solflare.com for Solflare, keys.coinbase.com for Coinbase,
+      // which broke sign-in with a white "content is blocked" screen.
+      "frame-src 'self' https://connect.solflare.com https://keys.coinbase.com; " +
       "connect-src 'self' https://*.supabase.co https://api.mainnet-beta.solana.com https://api.devnet.solana.com https://public-api.birdeye.so https://api.dexscreener.com https://plausible.io; " +
       "frame-ancestors 'none'; " +
       "base-uri 'self'; " +
@@ -66,38 +82,25 @@ export async function middleware(request: NextRequest) {
   // may still reach downstream code that can see it, but do NOT key the limiter
   // on it.
   const clientIp = resolveClientIp(request.headers);
-  // Built fresh at each use so cookies refreshed below are still forwarded.
-  const forwardHeaders = () => withClientIp(new Headers(request.headers), clientIp);
 
-  let response = NextResponse.next({
-    request: {
-      headers: forwardHeaders(),
-    },
-  });
+  // The response is rebuilt on every `setAll` call so it carries the refreshed request
+  // headers (the cookie header included). The adapter itself lives in
+  // lib/supabase/middleware-cookies.ts so its semantics are EXECUTED by unit tests —
+  // the deployed gate cannot tell "middleware forwarded the refreshed request cookies"
+  // from "the page refreshed the session itself". `state.response` is always the
+  // current response; never hold a stale reference to it.
+  const state = {
+    response: buildForwardingResponse(request, clientIp),
+  };
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value;
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          request.cookies.set({ name, value, ...options });
-          response = NextResponse.next({
-            request: { headers: forwardHeaders() },
-          });
-          response.cookies.set({ name, value, ...options });
-        },
-        remove(name: string, options: CookieOptions) {
-          request.cookies.set({ name, value: "", ...options });
-          response = NextResponse.next({
-            request: { headers: forwardHeaders() },
-          });
-          response.cookies.set({ name, value: "", ...options });
-        },
-      },
+      // @supabase/ssr 0.12.x interface — 0.1.0's get/set/remove is gone.
+      cookies: createMiddlewareCookieAdapter(request, state, () =>
+        buildForwardingResponse(request, clientIp)
+      ),
     }
   );
 
@@ -112,7 +115,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/auth/login") || pathname.startsWith("/auth/signup");
 
   if (!user && (isAdminRoute || isDashboardRoute)) {
-    return applySecurityHeaders(NextResponse.redirect(new URL("/auth/login", request.url)));
+    return applySecurityHeaders(redirectWithCookies(new URL("/auth/login", request.url), state.response));
   }
 
   let authorization: MiddlewareAuthorization | null = null;
@@ -131,18 +134,18 @@ export async function middleware(request: NextRequest) {
   if (user && (isAdminRoute || isDashboardRoute) && !isActive) {
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("error", "account_inactive");
-    return applySecurityHeaders(NextResponse.redirect(loginUrl));
+    return applySecurityHeaders(redirectWithCookies(loginUrl, state.response));
   }
 
   if (user && isAdminRoute && authorization?.role !== "admin") {
-    return applySecurityHeaders(NextResponse.redirect(new URL("/dashboard", request.url)));
+    return applySecurityHeaders(redirectWithCookies(new URL("/dashboard", request.url), state.response));
   }
 
   if (user && isAuthEntryRoute && isActive) {
-    return applySecurityHeaders(NextResponse.redirect(new URL("/dashboard", request.url)));
+    return applySecurityHeaders(redirectWithCookies(new URL("/dashboard", request.url), state.response));
   }
 
-  return applySecurityHeaders(response);
+  return applySecurityHeaders(state.response);
 }
 
 export const config = {

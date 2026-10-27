@@ -4,7 +4,7 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 import { Activity, DollarSign, Gift, Users } from "lucide-react";
 
 export async function StatsCards() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   const [{ data: activities }, { data: rewards }, { data: referrals }] = await Promise.all([

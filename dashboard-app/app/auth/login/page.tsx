@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/use-toast";
+import { WalletSignInButton } from "@/components/auth/wallet-signin-button";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -103,6 +104,25 @@ export default function LoginPage() {
         <Button variant="outline" onClick={() => handleOAuth("github")} disabled={loading}>
           GitHub
         </Button>
+      </div>
+
+      {/* Wallet sign-in is deliberately NOT part of the "Or continue with" group
+          above. That group promises a method anyone can use, and this one is not:
+          it works only for a member who has ALREADY linked and verified a wallet.
+          Sitting there it read as "sign up with your wallet", which the link-only
+          model does not support — so it gets its own labelled block and an explicit
+          route for someone who arrives without an account.
+          The wallet provider is mounted in the root layout, so none is needed here. */}
+      <div className="space-y-3 rounded-lg border border-border p-4">
+        <WalletSignInButton />
+        <p className="text-center text-xs leading-relaxed text-muted-foreground">
+          Wallet sign-in is for existing members whose wallet is already linked and
+          verified. There is no wallet-only sign-up:{" "}
+          <Link href="/auth/signup" className="text-primary hover:underline">
+            create an account with email
+          </Link>{" "}
+          first, then link your wallet from Dashboard → Wallet.
+        </p>
       </div>
 
       <p className="text-center text-sm text-muted-foreground">

@@ -17,7 +17,7 @@ interface Offer {
 }
 
 export default async function OffersPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const { data: categories } = await supabase
     .from("categories")

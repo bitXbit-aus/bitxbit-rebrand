@@ -43,3 +43,7 @@ Thumbs.db
 .netlify
 *.patch
 dashboard-app/supabase/.temp/
+
+# compiled test/harness output (tsc --outDir targets; never commit)
+.test-dist/
+.staging-dist/

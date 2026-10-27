@@ -14,8 +14,9 @@ import {
   verifyWalletSignature,
   getWalletVerificationStatus,
 } from "@/lib/wallet-verification";
-import { saveWalletAddress, getTokenBalanceAction } from "@/lib/actions";
+import { getTokenBalanceAction, unlinkWallet } from "@/lib/actions";
 import bs58 from "bs58";
+import { toSignatureBytes } from "@/lib/wallet-signature-format";
 import { Coins, History, Wallet, AlertCircle, Shield, ShieldAlert } from "lucide-react";
 
 interface RewardTx {
@@ -44,6 +45,7 @@ export default function WalletPage() {
   const [savedWallet, setSavedWallet] = useState<SavedWalletState | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isUnlinking, setIsUnlinking] = useState(false);
 
   const connectedAddress = publicKey?.toBase58() ?? null;
   const walletName = wallet?.adapter.name ?? "Wallet";
@@ -69,22 +71,20 @@ export default function WalletPage() {
   }, []);
 
   useEffect(() => {
-    async function handleConnectedWallet() {
-      if (!connectedAddress) return;
-
-      // If the connected wallet matches the saved verified wallet, allow an
-      // idempotent save so the UI reflects the latest connection. Otherwise
-      // prompt the user to verify ownership before it becomes the payout address.
-      try {
-        await saveWalletAddress(connectedAddress);
-        await loadSavedWallet();
-      } catch {
-        // Expected when the connected wallet differs from the saved address or
-        // when no wallet has been verified yet. The verify button handles this.
-      }
-    }
-
-    handleConnectedWallet();
+    // Connecting a wallet changes NO persisted state. verifyWalletSignature() is
+    // the only path that writes wallet_address and wallet_verified, and
+    // getWalletVerificationStatus() - called by loadSavedWallet - is the source
+    // of truth for what is stored.
+    //
+    // This effect used to call the address-save action on every connect. That
+    // action could only ever "succeed" by no-op'ing (re-saving an address equal
+    // to the already-verified one), so on a normal connect it threw instead -
+    // and it wrote a `success: false` audit row BEFORE throwing, with empty
+    // metadata. Four ordinary connects logged four fabricated security
+    // failures, indistinguishable from real ones. Re-reading the status gives
+    // the same UI result without any write.
+    if (!connectedAddress) return;
+    loadSavedWallet();
   }, [connectedAddress]);
 
   useEffect(() => {
@@ -141,8 +141,12 @@ export default function WalletPage() {
     try {
       const challenge = await requestWalletVerificationChallenge(connectedAddress);
       const messageBytes = new TextEncoder().encode(challenge.message);
-      const signatureBytes = await signMessage(messageBytes);
-      const signatureBase58 = bs58.encode(signatureBytes);
+      const signed = await signMessage(messageBytes);
+      // Normalised, not assumed: some wallets resolve signMessage to
+      // `{ signature: Uint8Array }`. Encoding the wrapper throws here, client-side,
+      // where the server cannot see it — which is how this failure class stayed
+      // invisible. See lib/wallet-signature-format.ts.
+      const signatureBase58 = bs58.encode(toSignatureBytes(signed));
 
       await verifyWalletSignature(connectedAddress, signatureBase58, challenge.nonce);
       await loadSavedWallet();
@@ -159,6 +163,42 @@ export default function WalletPage() {
       });
     } finally {
       setIsVerifying(false);
+    }
+  }
+
+  async function handleUnlink() {
+    if (!savedWallet?.address) return;
+
+    // The confirmation states what actually changes. It is NOT a vague "are you
+    // sure": unlinking cannot lock anyone out (email sign-in always remains) and
+    // cannot strand money (payout_operations snapshots its own address at claim
+    // time), so saying so is more useful than a generic warning.
+    const confirmed = window.confirm(
+      "Unlink this wallet?\n\n" +
+        savedWallet.address +
+        "\n\nYou will no longer be able to sign in with this wallet. " +
+        "Email sign-in still works, and you can verify this or another wallet again at any time."
+    );
+    if (!confirmed) return;
+
+    setIsUnlinking(true);
+    try {
+      const result = await unlinkWallet();
+      await loadSavedWallet();
+      toast({
+        title: result.unlinked ? "Wallet unlinked" : "No wallet was linked",
+        description: result.unlinked
+          ? "That wallet can no longer sign in to this account."
+          : undefined,
+      });
+    } catch (error) {
+      toast({
+        title: "Could not unlink wallet",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUnlinking(false);
     }
   }
 
@@ -215,6 +255,21 @@ export default function WalletPage() {
                         Verified {formatDate(savedWallet.verifiedAt)}
                       </p>
                     )}
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <p className="text-xs text-muted-foreground">
+                        {savedWallet.verified
+                          ? "Unlinking stops wallet sign-in for this account."
+                          : "Not verified, so it cannot sign in."}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleUnlink}
+                        disabled={isUnlinking}
+                      >
+                        {isUnlinking ? "Unlinking…" : "Unlink"}
+                      </Button>
+                    </div>
                   </div>
                 )}
 

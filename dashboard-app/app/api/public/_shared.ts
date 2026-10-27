@@ -13,7 +13,7 @@ export async function checkPublicRateLimit(request: NextRequest) {
   const identifier = getClientIdentifier(request);
   const result = await checkRateLimit(identifier, PUBLIC_RATE_LIMIT);
   if (!result.allowed) {
-    return rateLimitResponse(result.resetAt);
+    return rateLimitResponse(result.resetAt, identifier);
   }
   return null;
 }

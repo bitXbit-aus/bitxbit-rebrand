@@ -84,6 +84,7 @@ review control; it does not satisfy a single one of the three blockers above.
 | **D2** | Include **React 19** and the coupled **Supabase SSR + supabase-js** upgrades. Authentication, session persistence, middleware authorisation, and Solana financial operations must pass end-to-end regression tests. | Approved |
 | **D3** | Continue planning and isolated development, but **release in order: Phase 1 → interim Next.js security upgrade → full Next.js 15 migration.** Changes must be separately reviewable and independently approved. | Approved with sequencing |
 | **D4** | A **deployed Netlify staging HTTP test is mandatory**, on a deployment configured exclusively for staging Supabase and Solana devnet, verifying that **no production credentials or resources are involved.** | Approved |
+| **D5** | **Independent review of a release may be satisfied by a two-model independent AI security review**, as a **documented exception** to the independent-**human**-review requirement of M8. Conditions: two genuinely different models reviewing the exact release revision; findings, recommendations and concerns recorded; critical findings addressed and reviews/tests repeated after material changes; the mandatory CI, database-integrity, authentication and Solana-payout testing retained; the middleware redirect-cookie defect fixed in a separate PR; and final evidence presented to the owner for explicit approval. **The human-review condition is WAIVED, NOT SATISFIED** — no release may be described as human-reviewed under this decision. The owner accepts accountability for choosing the alternative. Scope: review step only; it does **not** authorise a merge, deployment or migration. Policy: `release-review-policy.md`. | Approved 2026-10-24 |
 | — | Decisions A (conditional temporary acceptance, R-001) and B (bigint-buffer, R-002) | Approved 2026-10-19 |
 
 ---
@@ -472,16 +473,141 @@ ceiling is documented, not measured; not verified in a deployment.** See
 
 ---
 
-## R-007 — Next.js 15 migration outstanding
+## R-007 — Next.js 15 migration
 
-**Status:** PLANNED — Decision C approved 2026-10-19; D1/D2/D3 resolved.
-**Owner:** Shri — interim accountable owner. Implementation ownership to be
-delegated.
+**Status:** **RELEASED 2026-10-24** by explicit owner approval. PR #51 merged to `main`
+(merge commit `eec9a343ded4af31f73418272ad3013e3d24f480`), then PR #49
+(merge commit `4821905b2ce319e68ebc4d328487fe3770df877a`, now `main`), and the production deploy
+for that commit reached `ready` at `https://app.bitxbit.com.au`. Production probes after the
+cutover: `/` 302 → `/dashboard`; `/auth/login` 200; `/dashboard` and `/admin` both 307 → `/auth/login`
+for an unauthenticated request, so middleware authorisation is live; `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy` and a CSP are all present. No database
+migration was run as part of this release.
 
-`next@15.5.26` is the **minimum version clearing all 34 `next` advisories**;
-`15.5.28` is the approved target (D1). Plan:
-`docs/security/nextjs-15-migration-plan.md`. Successor to R-001: when the migration
-lands and is independently approved, **R-001 is closed as remediated, not renewed.**
+**Reviewed artifact:** the reviewed application tree `299b99539539c03cc11e9fe30098fe66c9876a69`
+is byte-identical to the shipped application tree — the only diffs between it and `main` are
+documentation files and `scripts/authz-matrix-verify.py`, verified with
+`git diff --stat 299b995… HEAD -- dashboard-app`.
+
+**Prior state, retained for context:** the final
+candidate `299b99539539c03cc11e9fe30098fe66c9876a69` passed exact-head CI, the **24/24** deployed
+authentication/session matrix, the R-002 two-build tracing control, the Solana devnet fault suite,
+a real-browser pass bound to that revision, and adversarial reviews by two independent model labs
+(OpenAI and Google), neither of which reported a critical or high finding. Independent **human**
+review (M8) remains **UNSATISFIED** and is **WAIVED, not satisfied, under owner decision D5**.
+That waiver is unaffected by the release and must be re-affirmed or replaced at the next release
+review.
+Evidence:
+`evidence/r007-final-review-299b995-2026-10-24.md` (review of record),
+`evidence/r007-nextjs-15-migration-2026-10-24.md`,
+`evidence/r007-authenticated-verification-2026-10-24.md`,
+`evidence/r007-browser-verification-2026-10-24.md`,
+`evidence/wallet-signin-browser-verification-2026-10-26.md`,
+`evidence/r002-trace-control-2026-10-24.md`, and
+`evidence/r007-independent-review-2026-10-24.md` (superseded historical leads).
+
+**Verification scope, stated precisely.** The server-side authentication, authorisation,
+session-refresh, cache-safety and payout paths are verified, plus authenticated *rendering* in a real
+browser from an injected session cookie.
+
+**Wallet SIWS sign-in is now verified END-TO-END IN A REAL BROWSER (2026-10-26, production
+`04321bb`)** — challenge → Solflare extension `signMessage` → Ed25519 verified → session minted on
+the cookie-backed SSR client → redirect → authenticated dashboard page, by a human with a real
+wallet, with a clean audit trail and zero failed rows. Evidence:
+`evidence/wallet-signin-browser-verification-2026-10-26.md`. This corrects the previous blanket
+statement that the wallet paths were unverified.
+
+**Still unverified residuals:** passwordless (magic-link/PKCE) sign-in cookie writing in a real
+browser; wallet **disconnect**; and wallet **unlink/replace**, for which no path exists at all. The
+preview callback-destination behaviour is corrected in `lib/auth-callback-url.ts` but has not been
+browser-exercised. Wallet sign-in also cannot be exercised on a preview deployment with a real
+identity, because previews point at the staging Supabase project while real users' wallets are linked
+on production (measured 2026-10-26: three preview attempts, `wallet_not_linked`, 0 matching users in
+staging). Do not read this entry as "fully verified".
+**Owner:** Shri — interim accountable owner.
+
+**What landed:** `next@15.5.28` · `react`/`react-dom` **^19.1.10 (lockfile resolves 19.3.1)** · `@supabase/ssr` 0.12.7 ·
+`@supabase/supabase-js` ^2.114 (2.117.1). `npm audit`: **no advisory targets `next` directly** (was
+25) — it is still listed transitively via a vulnerable `postcss`, so "0 next advisories" would be
+imprecise. Async request
+APIs (`await cookies()`, async `createClient()` + 24 awaited call sites, awaited `searchParams`);
+`getAll`/`setAll` cookie adapters in `lib/supabase/server.ts` and `middleware.ts`.
+
+**A config placement error, corrected — with the impact re-measured down.** Next 15 moved
+`outputFileTracingExcludes` from `experimental` to top level; left in place it is **unrecognized and
+silently ignored**, so the exclusion would quietly stop applying. It was moved. **Correction
+(2026-10-24, from the AI review and then measured):** the original text here claimed the addon "would
+have been traced back in" and cited `.next` containing **0** `.node` files as proof. Both are wrong
+as stated — removing the exclusion entirely and rebuilding gives **0** `.nft.json` traces mentioning
+`bigint-buffer` and **0** `.node` files, i.e. **identical**, so that check cannot distinguish
+"excluded" from "never included" and was non-discriminating. **Superseded 2026-10-24 by a
+discriminating control** (`scripts/r002-trace-control.py`): with a synthetic traceable import of
+`bigint-buffer` and a routable probe route, the exclusion ON yields **0** trace entries naming
+`bigint_buffer.node` and the exclusion OFF yields **11**, and the probe route's own trace names the
+addon when the exclusion is off. The exclusion is therefore **effective**, and the control is proven
+capable of failing (it exits inconclusive if its positive fixture does not reach the tracer). See
+`evidence/r002-trace-control-2026-10-24.md`.
+
+**Verified on the terminal candidate `294a1dc…`:** tsc 0 errors · **179/179 tests** · migration
+replay + 4 races in the successful exact-head GitHub check · build exit 0 · no advisory directly
+targets `next` · **D4** staging isolation on `deploy-preview-49` (0 production refs, devnet mint) ·
+**21/21** authenticated matrix · `test:staging` and `test:solana-fault` pass.
+
+**Verified in a deployment — the full authenticated matrix (§5.3): 21/21** (the gate has grown as
+review findings were closed; the earlier "12/12" and "19/19" were smaller revisions of it). Manual gate, **not
+wired into CI** (it needs a staging service-role credential and a live preview, neither of which CI
+has): `scripts/authz-matrix-verify.py`. A real session (minted against a staging-scoped preview; no password
+or one-time code handled) for a staging test user: unauthenticated → `/auth/login`; active member →
+`/dashboard` 200; member → `/admin` → `/dashboard`; active → `/auth/login` → `/dashboard`;
+**suspended** and **deactivated** → `/auth/login?error=account_inactive`; **admin** → `/admin` 200.
+Authorisation rows were mutated between phases and the middleware re-read them each request.
+
+**Verified — the session `setAll` path, the migration's highest-risk change.** With `expires_at`
+forced 600 s into the past and the genuine refresh token, `/dashboard` still returned **200**, the
+response carried **`Set-Cookie: sb-luqrw…-auth-token`** — so `setAll` writes the refreshed session
+onto the *response*, not merely the request — and replaying that returned cookie gave **200** on a
+second request: **no silent session loss**. Decoded, the access token changed and the refresh token
+**rotated**, with the expiry in the future. `@supabase/ssr` treats an undecodable cookie as **absent**
+(i.e. a silent logout), which is precisely what this rules out.
+
+**FIXED 2026-10-24 (PR #51, carried into this branch) — found by independent review, confirmed by
+measurement.** The
+refresh verification covers the **200 branch only**. On the four middleware **redirect** branches the
+adapter's refreshed cookies are **discarded** — `setAll` writes them onto `response`, but each redirect
+returns a fresh `NextResponse.redirect(...)` that never receives them. Measured with an expired cookie
+and a suspended user: `307 → /auth/login?error=account_inactive` with **`Set-Cookie: NONE`**, against
+`Set-Cookie` present on the 200 branch. **Pre-existing** — `origin/main` is structurally identical, so
+this is not a migration regression — but the "no silent session loss" claim must be read as scoped to
+the 200 branch. **Consequence measured and narrower than first reported:** a replay 16 s later still
+authenticated, so no immediate logout reproduced; the browser simply never receives the refreshed
+session on a redirect path and re-refreshes each request. The fix — `lib/middleware-redirect.ts`, all four branches routed through it — landed in a **separate
+narrowly scoped PR (#51)** per D5, and is carried here because this branch rewrites `middleware.ts`
+and would otherwise revert it. Verified end-to-end: the same probe that returned `Set-Cookie: NONE`
+on a redirect now returns the refreshed cookie, and the session still authenticates. Unit tests are
+mutation-verified (removing the copy fails 2 tests; dropping attributes fails 1).
+
+**Residuals recorded by the AI review (D5), not fixed — each with its reason:**
+
+| Residual | Why it stands |
+|---|---|
+| **Nested React 18** ships under `@fractalwagmi/solana-wallet-adapter` alongside React 19. Two React copies can produce "Invalid hook call", visible only in a browser | Wallet-stack dependency surgery is R-002 territory; out of scope for a migration whose job is to change nothing else. **The wallet path needs a browser exercise before launch.** |
+| **`sharp` and other native deps entered the tree** via Next 15, so "0 `.node` files" is no longer package-specific | R-002's check is documented as non-falsifying; a discriminating test is separate work. |
+| **Per-IP rate limiting is weak for IPv6 clients.** Re-measured on Next 15: counters carry the real client (so R-004's control holds), but the same host presented **two different IPv6 privacy addresses within a minute** — each gets its own bucket | Inherent to IP-based limiting; the fix is to key on the authenticated user. Out of scope. |
+| **RESOLVED 2026-10-24** — the auth matrix now asserts every authorisation PATCH affects exactly one row with the expected values | Fixed in the harness after review; the deactivated phase can no longer pass against a still-suspended account. |
+| **The redirect refresh probe decodes the auth cookie and matches the user, but does not merge deletion/chunk semantics into the original jar** | Strengthened after review (decodes the cookie, requires the same user, adds a second redirect branch); still weaker than full browser-equivalent jar merging. |
+| **Refreshed *request*-cookie forwarding has no adapter-level regression test, and repeated-`setAll` preservation has no direct executable coverage** | Closing it requires refactoring the middleware adapter — a shipped-code change that would re-trigger the review. Recorded for the next iteration. |
+| **The page-level refresh check cannot uniquely prove whether middleware or the downstream page performed the last refresh inside the provider's reuse window** | It proves a usable authenticated rendered page, not the precise refreshing layer. No production defect was reproduced. |
+| **No browser sign-in exercised** (client cookie write, PKCE verifier, `/auth/callback` exchange) | Recorded in the authenticated-verification evidence. The server adapter and legacy-cookie compatibility were tested directly. |
+| **Cookie writes outside middleware / the PKCE callback** are not marked `no-store` | `cookies()` gives no access to response headers. |
+| **The review process has no platform enforcement** — `main` requires no approving review and auto-deploys | Structural; see `release-review-policy.md`. |
+
+**Remaining blocker:** the owner's explicit release approval has not yet been given. Independent human
+review remains **waived, not satisfied, under D5**; the owner-authorised substitute — two different
+model-family reviews of exact application revision `ba0c765a…` — is complete. PR #51 must still land
+before PR #49; neither merge is authorised by this status.
+
+`15.5.28` remains the approved target (D1). Successor to R-001: when the migration lands and is
+independently approved, **R-001 is closed as remediated, not renewed.**
 
 ---
 
@@ -564,6 +690,17 @@ falls through to the keyless Dexscreener fallback, and D4 asserts only a 200 on 
 D4 checks pass**; the prior preview returned `holders: 0` for a devnet mint, which reads like real
 data and is not — so the change improves legibility rather than removing working functionality.
 
+**ROTATED 2026-10-25 — the residual is now closed.** The production value was rotated at
+Birdeye and replaced on the Netlify site; the previously exposed value (`4faa22abd2`) is
+gone from every context. **Verified by use, not by presence:** the new production key
+(`44eaadeb17`, 32 chars) was sent to `public-api.birdeye.so/defi/token_overview` for the
+production mint and returned **HTTP 200 / `success: true`** with live data (price, holders,
+liquidity, market cap); a USDC control call also returned 200, isolating key validity from
+token indexing. **Preview/branch-deploy re-confirmed unset** — `env:list --context` shows
+`BIRDEYE_API_KEY` absent from both, present only in production. Note: `netlify env:get
+--context <ctx>` returns a **stale local value** after an unset and must not be used to
+confirm removal; use `env:list --context` or `env:list --json --context`.
+
 **RECLASSIFIED — `NEXT_PUBLIC_APP_URL`.** It is identical across contexts, but it is a
 `NEXT_PUBLIC_*` value compiled into the client bundle and therefore **public by design**, and the
 sharing is **deliberate** (`app/auth/callback/route.ts:15` — "always redirect to the canonical app
@@ -616,7 +753,7 @@ Every variable present in the `production` context is **also present in
 | `AIRDROP_WALLET_PRIVATE_KEY` | production, branch-deploy, deploy-preview | **Production treasury signing key**, identical across all three |
 | `BITXBIT_TOKEN_MINT` | production, branch-deploy, deploy-preview | Production mint, identical across all three |
 | `NEXT_PUBLIC_APP_URL` | **all** | `https://app.bitxbit.com.au` — previews identify as production. **Reclassified 2026-10-22: public by design, deliberate, not a credential exposure.** |
-| `BIRDEYE_API_KEY` | *(missing from this audit)* | **Missed by the original audit; found 2026-10-22** — was identical across all three contexts, reachable from arbitrary branch code. **Closed 2026-10-22** (unset from preview/branch-deploy). |
+| `BIRDEYE_API_KEY` | *(missing from this audit)* | **Missed by the original audit; found 2026-10-22** — was identical across all three contexts, reachable from arbitrary branch code. **Closed 2026-10-22** (unset from preview/branch-deploy). **Rotated 2026-10-25** — the exposed production value replaced and verified by use (HTTP 200 against the production mint); preview/branch-deploy re-confirmed unset. |
 
 **Consequence:** a deploy preview or branch deploy executes **arbitrary branch
 code** with the **production treasury private key** and the **production
@@ -1076,7 +1213,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
 | R-005 | Server Actions not rate limited | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per authenticated user; enforcement observed on a deployed preview (6 allowed, #7 refused with a returned, legible `{error}`); counter seen in the shared store keyed on the user id | Shri (interim) | NA-3 done |
 | R-006 | No explicit request-size limits | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — `bodySizeLimit` explicit; upload boundary enforced by a tested policy below the platform ceiling; a deployed preview refused a genuine 4 MB file with a returned, legible `{error}` (HTTP 200, not 500) | Shri (interim) | NA-4 done |
-| R-007 | Next.js 15 migration | Planned (D1-D3 resolved) | Shri (interim) | Migration |
+| R-007 | Next.js 15 migration | **IMPLEMENTED 2026-10-24 (PR #49) — not released.** `next@15.5.28` + React 19 + Supabase SSR 0.12.7; **no advisory targets `next` directly** (was 25); tsc/tests/migration replay/build green; D4 staging regression passed. **Authenticated gate 21/21 on a deployed preview** (`scripts/authz-matrix-verify.py`), incl. the session `setAll` refresh path on the **200 and redirect** branches, a decoded same-user redirect cookie, and a page-level check that the refreshed session renders. **Wallet SIWS sign-in verified end-to-end in a real browser 2026-10-26** (production `04321bb`; see `evidence/wallet-signin-browser-verification-2026-10-26.md`). **Still unverified:** magic-link/PKCE browser sign-in, wallet disconnect, wallet unlink (no path exists); previews cannot exercise wallet sign-in against real identities (staging split). The remaining residuals in the R-007 entry stay open. **Blockers: owner release approval; human review waived — not satisfied — under D5** | Shri (interim) | PR #49 |
 | R-008 | Production pre-010, no ledger | ✅ **RESOLVED** — `010`–`026` applied and verified; ledger backfilled. **Re-measured 2026-10-23:** production ledger is complete `001`–`027`, all Phase 1 landmarks present, and the code is **deployed** (PR #1 merged 2026-10-20) — the "window remains open" text was stale | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). **Leaked service-role key rotated 2026-10-23** — new key live, old key revoked, production re-verified after revocation. | Shri (interim) | **NA-8** ✅ |
 | R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Rotation of the exposed service-role key **completed 2026-10-23** — new key live, leaked key revoked, production re-verified after revocation. **Closure scope:** this closes the *two high-value secrets*; **NA-9 — the flag across the remaining credential set — is OPEN**, awaiting owner authorisation, not blocked (its precondition, an observable deployment, has been met since 2026-10-22). | Shri (interim) | NA-9 (**open** — owner authorisation) |
