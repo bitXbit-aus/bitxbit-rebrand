@@ -1122,9 +1122,11 @@ Teardown deleted the user; staging returned to 20 users with no orphan row.
   contains only its SiteURL (`http://localhost:3000`), not deploy-preview hosts** — so a reset
   requested from a preview is silently redirected to `localhost:3000`. This is the same
   missing-allowlist root cause that blocks wallet flows on staging.
-- **Owner action (dashboard config, not code):** add `https://*--bitxbit-dashboard.netlify.app/**`
-  to staging's URL Configuration, and confirm production lists `https://app.bitxbit.com.au/**`.
-  Production's allowlist is not readable from the repo and was not tested here.
+- **Production redirect behaviour — CONFIRMED 2026-10-27.** Measured on production via the verify
+  endpoint (invalid token, no user created, no email sent): `…/auth/callback?next=…` is preserved
+  exactly, as is any path on `app.bitxbit.com.au`; a foreign host is substituted. The recovery link
+  therefore works on production. Remaining owner action is **staging only** — add
+  `https://*--bitxbit-dashboard.netlify.app/**` so previews can exercise the emailed link.
 - No rate limiting is applied by this application to the reset request; Supabase Auth's built-in
   email send limits are the only bound. Recorded rather than claimed.
 
@@ -1291,7 +1293,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
-| **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox) and production's redirect allowlist. | Shri (interim) | on merge |
+| **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox; **production redirect behaviour is confirmed** — `?next=` preserved on the site host). | Shri (interim) | on merge |
 | **R-016** | **Browser-facing integration untested by CI** | **CONTROL IMPLEMENTED 2026-10-27 (stacked on PR #68) — not released.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,

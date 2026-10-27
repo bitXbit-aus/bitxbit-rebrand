@@ -135,10 +135,29 @@ Two conclusions, pointing away from the initial worry:
    replaced, so the emailed link lands on `localhost:3000`. Previews therefore **cannot exercise the
    emailed-link hop** — the same missing-allowlist root cause that blocks wallet flows on staging.
 
-**Owner action (dashboard config, not code):** in Supabase → Authentication → URL Configuration, add
-the preview wildcard (`https://*--bitxbit-dashboard.netlify.app/**`) to **staging**, and confirm
-**production** lists `https://app.bitxbit.com.au/**` (or at least `/auth/callback`). Production's
-allowlist could not be read from here and is not tested by this branch.
+### Production — confirmed 2026-10-27
+
+The production allowlist was reported as exactly `https://app.bitxbit.com.au/auth/callback`. GoTrue
+validates `redirect_to` at **verify** time, so this was measured on production with no user created
+and no email sent — probing `/auth/v1/verify` with a deliberately invalid token and comparing where
+it redirects:
+
+| `redirect_to` probed | Production redirect |
+|---|---|
+| `…/auth/callback?next=%2Fauth%2Freset-password` (ours) | 303 → **that exact URL, query preserved** |
+| `…/auth/callback` | 303 → preserved |
+| `…/auth/reset-password` (not in the declared list) | 303 → **also preserved** |
+| `https://evil.example.com/auth/callback` | 303 → **substituted** to `https://app.bitxbit.com.au` |
+
+**Conclusion: the recovery link works on production** — the `?next=` survives. The effective rule is
+site-host matching, not exact-path matching: any path on `app.bitxbit.com.au` is accepted, which is
+why the undeclared `/auth/reset-password` also passed. Foreign hosts are still substituted, so this
+is not an open redirect. The declared allowlist entry under-describes the real rule; no code change
+is needed.
+
+**Owner action remaining (staging only):** add the preview wildcard
+(`https://*--bitxbit-dashboard.netlify.app/**`) to **staging** so previews can exercise the emailed
+link. Production needs nothing.
 
 ## What is NOT verified
 
@@ -148,7 +167,7 @@ allowlist could not be read from here and is not tested by this branch.
   uses. The composition is sound, but the end-to-end click was not performed: no mailbox is
   available, and the preview host is not allowlisted (above). The real-browser CI smoke test
   (outstanding-work item 2) should own this.
-- **Production's redirect allowlist contents** — not readable from here.
+- **Production's redirect behaviour** — now measured (above): `?next=` is preserved on the site host.
 - **No application-level rate limiting** on the reset request; Supabase Auth's built-in email send
   limits are the only bound. Stated, not claimed.
 - **Email deliverability/branding** of `supabase/templates/recovery.html` is dashboard configuration
