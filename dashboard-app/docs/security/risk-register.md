@@ -1166,16 +1166,28 @@ Teardown deleted the user; staging returned to 20 users with no orphan row.
 - **RESOLVED 2026-10-27 — the emailed-link hop is owner-confirmed end to end** on production with a
   real account (request → emailed link → set new password → sign in). No part of this control
   remains unverified.
-- **The `?next=` allowlist question is answered, and it surfaced a config gap.** A query string on
-  the callback **is** honoured when the origin is allowlisted. But **staging's redirect allowlist
-  contains only its SiteURL (`http://localhost:3000`), not deploy-preview hosts** — so a reset
-  requested from a preview is silently redirected to `localhost:3000`. This is the same
-  missing-allowlist root cause that blocks wallet flows on staging.
+- **The `?next=` allowlist question is answered.** A query string on the callback **is** honoured when
+  the origin is allowlisted.
+- **Staging deploy-preview allowlist — FIXED 2026-10-27.** The gap was worse than recorded: staging's
+  `uri_allow_list` was not "only localhost", it was **empty** (`""`), so *every* external redirect was
+  substituted to `site_url` (`http://localhost:3000`) — including the site's own Netlify host. It now
+  contains `https://*--bitxbit-dashboard.netlify.app/**`, verified by probe: deploy-preview and
+  branch-deploy hosts are **preserved** (with `?next=` intact), while `evil.example.com`, a lookalike
+  `…netlify.app.attacker.com` suffix and `app.bitxbit.com.au` are still substituted. Evidence:
+  `evidence/staging-preview-allowlist-2026-10-27.md`.
 - **Production redirect behaviour — CONFIRMED 2026-10-27.** Measured on production via the verify
   endpoint (invalid token, no user created, no email sent): `…/auth/callback?next=…` is preserved
-  exactly, as is any path on `app.bitxbit.com.au`; a foreign host is substituted. The recovery link
-  therefore works on production. Remaining owner action is **staging only** — add
-  `https://*--bitxbit-dashboard.netlify.app/**` so previews can exercise the emailed link.
+  exactly, as is any path on `app.bitxbit.com.au`; a foreign host is substituted. No owner action
+  remains on either project.
+- **Config-write caveat, recorded from that change.** `UPDATE_PROJECT_AUTH_CONFIG` claims only provided
+  fields are updated; it also nulled five unsent fields (`rate_limit_email_sent`, `security_captcha_provider`,
+  `sms_provider`, `sessions_inactivity_timeout`, `sessions_timebox`). Three were restored.
+  `rate_limit_email_sent` cannot be set without custom SMTP (`PROVIDER_RATE_LIMITED`) and `sms_provider`
+  reverts to null with no SMS credentials — staging therefore falls back to the platform default email
+  send limit. **Re-read and diff the full auth config after any such write.**
+- **Not verified:** a real recovery round trip *on a preview* (would need a staging user and consuming a
+  one-time token). The allowlist is proven to preserve the redirect; the app-side consumption is proven
+  on production.
 - No rate limiting is applied by this application to the reset request; Supabase Auth's built-in
   email send limits are the only bound. Recorded rather than claimed.
 
