@@ -31,6 +31,10 @@ on:
       - main
       - "security/**"
   workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Deployed URL to smoke-test. If set, skips the deploy-preview wait."
+        required: false
 
 jobs:
   browser-smoke:
@@ -63,10 +67,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_URL_INPUT: ${{ github.event.inputs.base_url }}
         run: |
           set -euo pipefail
+          # Manual dispatch may name a URL directly (useful for stacked PRs, which
+          # never receive a Netlify deploy preview because Netlify only previews
+          # PRs into the production branch).
+          if [ -n "${BASE_URL_INPUT:-}" ]; then
+            echo "Using supplied base_url: $BASE_URL_INPUT"
+            echo "PREVIEW_URL=$BASE_URL_INPUT" >> "$GITHUB_ENV"
+            exit 0
+          fi
           if [ -z "${SHA:-}" ]; then
-            echo "::error::No pull_request head SHA (workflow_dispatch?)"; exit 1
+            echo "::error::No pull_request head SHA and no base_url input"; exit 1
           fi
           echo "Waiting for netlify/bitxbit-dashboard/deploy-preview success on $SHA"
           PREVIEW_URL=""
