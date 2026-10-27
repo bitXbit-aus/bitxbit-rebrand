@@ -76,10 +76,25 @@ Both guards can fail, and fail for the right reason.
 
 `tsc` 0 · `npm test` 255/255 · `npm run test:migration` 0 · `npm run build` 0.
 
+## Production verification — 2026-10-27 (after merge)
+
+`https://app.bitxbit.com.au/auth/login`, once the deploy for merge commit `4b37746` was live:
+
+| Check | Result |
+| --- | --- |
+| CSP header count | **1** |
+| devnet occurrences | **0** (was 1 before the deploy) |
+| `connect-src` | `'self'`, `*.supabase.co`, `api.mainnet-beta.solana.com`, `public-api.birdeye.so`, `api.dexscreener.com`, `plausible.io` |
+| `frame-src` | `'self'`, `connect.solflare.com`, `keys.coinbase.com` |
+| `frame-ancestors` | `'none'` |
+
+The devnet count going 1 → 0 on the live host is the observable change, and it confirms middleware —
+not the removed CDN rule — is serving the policy in production.
+
 ## Not verified — stated explicitly
 
-- **Production has not been observed under the new policy.** A merge is the release. The preview
-  proves the mechanism; the same `curl` must be repeated against production after merge.
+- ~~Production not observed under the new policy.~~ **Now observed** (section above): one header,
+  devnet gone. Closed.
 - **Static assets carry no CSP** (deliberate, above). If a document is ever served outside middleware
   — a static export, for instance — it needs the header added deliberately rather than inheriting it.
 - **`'unsafe-eval'` remains in `script-src` in every context, including production.** Untouched here.
