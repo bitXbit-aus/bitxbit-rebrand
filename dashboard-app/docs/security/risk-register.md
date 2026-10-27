@@ -198,7 +198,9 @@ when the Next.js 15 migration lands. **Do not renew by default.**
 ## R-002 — `bigint-buffer` overflow, no upstream fix
 
 **Decision B — conditionally accepted.**
-**Status:** ACCEPTED — conditional. **Review:** 2026-11-18 (with R-001).
+**Status:** ACCEPTED — conditional. **Review:** 2026-11-18 (with R-001). The review is
+**unaffected by R-007** — that migration removes the 25 `next` advisories, not `bigint-buffer`,
+which stays in the tree and in the wallet-adapter stack either way.
 **Owner:** Shri — interim accountable owner.
 
 **Advisory:** GHSA-3gc7-fjrx-p6mg — buffer overflow in `toBigIntLE()`.
@@ -835,9 +837,8 @@ Evidence: `evidence/r010-is-secret-flagging-2026-10-22.md`.
 
 ## R-011 — No non-production Solana RPC or devnet configuration
 
-**Status:** **ADDRESSED for preview/branch-deploy** 2026-10-19 — `SOLANA_RPC_URL` set to
-devnet for those contexts. Production deliberately left on its existing mainnet default.
-Remains open until verified in a running deployment.
+**Status:** **VERIFIED IN CONFIGURATION 2026-10-24** — the constraint is now configuration, not
+convention. **One recorded residual:** production carries no explicit value.
 **Owner:** Shri — interim accountable owner.
 
 There is **no `SOLANA_RPC_URL` or `NEXT_PUBLIC_SOLANA_RPC_URL`** variable at all, so
@@ -849,7 +850,33 @@ which cannot currently be asserted, let alone verified.
 and branch-deploy, mainnet for production — so the constraint is configuration
 rather than convention.
 
-**Tracked as NA-10.**
+**Measured 2026-10-24** — per-context read of the Netlify API, i.e. the value Netlify injects into
+those deploys (a server-only variable, so it is absent from the client bundle and the platform
+config is the correct source):
+
+| Context | `SOLANA_RPC_URL` | Explicit? |
+|---|---|---|
+| `branch-deploy` | `https://api.devnet.solana.com` | ✅ |
+| `deploy-preview` | `https://api.devnet.solana.com` | ✅ |
+| `production` | *(no value)* | ❌ — resolves to the code default `https://api.mainnet-beta.solana.com` (`app/api/token-stats/route.ts:7`, `lib/payout.ts:17`, `lib/solana.ts:60`) |
+
+So non-production is **explicit devnet**, and production is **mainnet by documented default** — the
+deliberate choice already recorded here, but as a *default* rather than an explicit value. Setting
+one is a one-line change that **requires a production deploy**, so it is left to the owner.
+
+**Runtime confirmation attempted 2026-10-24 — NOT achieved, recorded so it is not mistaken for
+done.** The only public path that exercises the RPC is the `token-stats` holder fallback
+(`fetchHolderCountViaRpc()`), which runs exactly when Birdeye is absent — i.e. on previews. Called on
+preview `deploy-preview-49` it returned `holders: null` with
+`errors: ["BIRDEYE_API_KEY not configured","RPC holder count failed"]`; production never reaches the
+fallback because Birdeye answers. Public Solana endpoints reject `getProgramAccounts`, so that
+failure is **consistent with either cluster and discriminates nothing**. The config read above is the
+evidence; the endpoint was **not** observed at runtime. *(Side observation: the fallback is
+effectively dead on public endpoints, so `holders` is null whenever Birdeye is unconfigured —
+legible, since the route returns the error, but not the fallback it appears to be. This corroborates
+R-009's note that removing the key "improves legibility rather than removing working functionality".)*
+
+**Tracked as NA-10.** Evidence: `evidence/register-corrections-2026-10-24.md`.
 
 ---
 
@@ -1280,7 +1307,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | ID | Risk | Status | Owner | Review |
 |---|---|---|---|---|
 | R-001 | Next.js 14.2.35 residual advisories | Accepted, **conditional** — Condition 3 now satisfied in fact (host validation released; rate limiting live and verified; request limits explicit). Formally contingent only on **R-003's closure** (independent review waived). Interim bump **released 2026-10-20** (PR #8, deploy `6ad715a9`). **Re-measured 2026-10-23:** the advisory set has grown — **25** advisories via `next`, **3 criticals** (new: GHSA-2464-fhr4-w9xw, SVG image-optimizer RCE, `<=15.5.27`); all criticals still neutralised by Condition 1; minimum clearing version is now **15.5.28** (= approved D1 target) | Shri (interim) | **2026-11-18 (expires)** |
-| R-002 | `bigint-buffer`, no fix | Accepted, conditional — **re-assessed by measurement 2026-10-22**: the trigger is **non-Buffer input** to the native addon, and the tree's **only** caller wraps in `Buffer.from`; the native build is additionally excluded from the deployed bundle. Guarded by 4 mutation-verified tests. *(Prior justification argued the wrong axis and was replaced.)* | Shri (interim) | 2026-11-18 |
+| R-002 | `bigint-buffer`, no fix | Accepted, conditional — **re-assessed by measurement 2026-10-22**: the trigger is **non-Buffer input** to the native addon, and the tree's **only** caller wraps in `Buffer.from`; the native build is additionally excluded from the deployed bundle. Guarded by 4 mutation-verified tests. *(Prior justification argued the wrong axis and was replaced.)* **Not cleared by R-007** — `bigint-buffer` remains either way. | Shri (interim) | 2026-11-18 |
 | R-003 | No host-header validation | **RELEASED 2026-10-20** (PR #4, deploy `6ad70e11`) — control verified; **not closed**, independent review still waived | Shri (interim) | NA-1 |
 | R-004 | Rate limiting per-instance in production | ✅ **FIXED AND VERIFIED** — shared atomic store (migration `027`) keyed on the **real client** (verified live: keys carry `206.83.119.2`), not spoofable (a forged forwarded chain produced no new key), enforcing at 30/60 s → 429 from request #31. Deploy `6ad93872` | Shri (interim) | NA-13 done; NA-14 done |
 | R-005 | Server Actions not rate limited | ✅ **VERIFIED IN A DEPLOYMENT 2026-10-22** — five costly actions bounded per authenticated user; enforcement observed on a deployed preview (6 allowed, #7 refused with a returned, legible `{error}`); counter seen in the shared store keyed on the user id | Shri (interim) | NA-3 done |
@@ -1288,8 +1315,8 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | R-007 | Next.js 15 migration | **IMPLEMENTED 2026-10-24 (PR #49) — not released.** `next@15.5.28` + React 19 + Supabase SSR 0.12.7; **no advisory targets `next` directly** (was 25); tsc/tests/migration replay/build green; D4 staging regression passed. **Authenticated gate 21/21 on a deployed preview** (`scripts/authz-matrix-verify.py`), incl. the session `setAll` refresh path on the **200 and redirect** branches, a decoded same-user redirect cookie, and a page-level check that the refreshed session renders. **Wallet SIWS sign-in verified end-to-end in a real browser 2026-10-26** (production `04321bb`; see `evidence/wallet-signin-browser-verification-2026-10-26.md`). **Still unverified:** magic-link/PKCE browser sign-in, wallet disconnect, wallet unlink (no path exists); previews cannot exercise wallet sign-in against real identities (staging split). The remaining residuals in the R-007 entry stay open. **Blockers: owner release approval; human review waived — not satisfied — under D5** | Shri (interim) | PR #49 |
 | R-008 | Production pre-010, no ledger | ✅ **RESOLVED** — `010`–`026` applied and verified; ledger backfilled. **Re-measured 2026-10-23:** production ledger is complete `001`–`027`, all Phase 1 landmarks present, and the code is **deployed** (PR #1 merged 2026-10-20) — the "window remains open" text was stale | Shri (interim) | NA-5 done |
 | **R-009** | **Production credentials in preview/branch-deploy contexts** | **CLOSED 2026-10-19; re-verified by measurement 2026-10-22.** All six production credentials isolated from previews (hash-compared per context); previews resolve to staging + devnet. **One variable the original audit missed was found and closed** — `BIRDEYE_API_KEY`, previously identical across all three contexts. `NEXT_PUBLIC_APP_URL` reclassified as public-by-design, not a credential. Three items recorded not fixed (§ Re-verification). Remaining: `is_secret` (R-010/NA-9). **Leaked service-role key rotated 2026-10-23** — new key live, old key revoked, production re-verified after revocation. | Shri (interim) | **NA-8** ✅ |
-| R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Rotation of the exposed service-role key **completed 2026-10-23** — new key live, leaked key revoked, production re-verified after revocation. | Shri (interim) | NA-9 |
-| R-011 | No devnet constraint for non-production | **ADDRESSED** for preview/branch-deploy — unverified in a deploy | Shri (interim) | NA-10 |
+| R-010 | Secrets not marked secret | **CLOSED 2026-10-22** — both high-value secrets flagged and masked; CLI path silently no-ops (422 on `post_processing`), fixed via the API. **Verified in deployment**: preview all 4 service-role routes 200 + D4 6/6, production 200 with real data and `backend: supabase`. Rotation of the exposed service-role key **completed 2026-10-23** — new key live, leaked key revoked, production re-verified after revocation. **Closure scope:** this closes the *two high-value secrets*; **NA-9 — the flag across the remaining credential set — is OPEN**, awaiting owner authorisation, not blocked (its precondition, an observable deployment, has been met since 2026-10-22). | Shri (interim) | NA-9 (**open** — owner authorisation) |
+| R-011 | No devnet constraint for non-production | **VERIFIED IN CONFIGURATION 2026-10-24** — `SOLANA_RPC_URL` explicitly devnet for `deploy-preview` and `branch-deploy` (per-context Netlify read). One residual: **production has no explicit value**, resolving to the documented mainnet code default (setting one needs a production deploy). The endpoint was **not** observable at runtime — the one public RPC path fails identically on either cluster | Shri (interim) | NA-10 |
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
