@@ -159,14 +159,21 @@ is needed.
 (`https://*--bitxbit-dashboard.netlify.app/**`) to **staging** so previews can exercise the emailed
 link. Production needs nothing.
 
+## Emailed-link hop — confirmed by the owner (2026-10-27)
+
+**Confirmed end to end on production.** The owner completed a real password recovery against a live
+production account — their own address, deliberately not reproduced in this record — by requesting
+the reset from `/auth/forgot-password`, following the emailed link, setting a new password, and
+signing in with it.
+
+That exercises the one segment no automated gate here could reach: GoTrue verifying the token and
+redirecting through `/auth/callback` into `/auth/reset-password`. The recovery flow is therefore
+verified **end to end on production**, by the person accountable for it.
+
 ## What is NOT verified
 
-- **The emailed-link hop on a production-allowlisted host with a real mailbox.** Everything *around*
-  it is verified above; the remaining segment — GoTrue verifying the token and redirecting with
-  `?code=` — is Supabase's, and it lands on the same `exchangeCodeForSession` path OAuth already
-  uses. The composition is sound, but the end-to-end click was not performed: no mailbox is
-  available, and the preview host is not allowlisted (above). The real-browser CI smoke test
-  (outstanding-work item 2) should own this.
+- Nothing outstanding for this control. The automated gates cannot read a mailbox, but the hop they
+  could not reach has now been confirmed by the owner.
 - **Production's redirect behaviour** — now measured (above): `?next=` is preserved on the site host.
 - **No application-level rate limiting** on the reset request; Supabase Auth's built-in email send
   limits are the only bound. Stated, not claimed.
