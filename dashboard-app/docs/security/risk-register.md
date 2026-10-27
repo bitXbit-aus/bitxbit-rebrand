@@ -1354,9 +1354,10 @@ here; removing it needs hydration proven in a real browser. See
 
 ## R-018 — Advisories present in the tree after the Next 15 migration
 
-**Status:** **OPEN — recorded 2026-10-27**, with one item already actioned: the unused `zod`
-dependency was **removed** (see below), taking the tree from 28 advisories to 27. Not accepted, not
-dismissed. **Severity:** mixed (1 critical, 6 high, 20 moderate per `npm audit`).
+**Status:** **OPEN — recorded 2026-10-27**, with two items since dispositioned: the unused `zod`
+dependency was **removed** (28 → 27 advisories), and **`uuid` was assessed and found not reachable**
+(measured, not argued). The remainder stays open — not accepted, not dismissed.
+**Severity:** mixed (1 critical, 6 high, 20 moderate per `npm audit`).
 **Owner:** Shri — interim accountable owner.
 
 R-001 closed as remediated on the Next 15 migration, and its closure is deliberately narrow: it says the
@@ -1371,12 +1372,16 @@ R-001 closed as remediated on the Next 15 migration, and its closure is delibera
 | `postcss`, `postcss-selector-parser` | high / mod | no | build-time only | Build tooling; not the request path. |
 | `source-map-js` | high | no | build-time | Via the postcss chain. |
 | `jayson` → `stream-json` | mod | no | **runtime** via `@solana/web3.js` | O(depth²) filter DoS on crafted JSON. |
-| `uuid` | mod | **yes** (`^9.0.1`) | runtime + transitive | **Unassessed** — not dismissed. |
+| `uuid` | mod | yes — declared `^9.0.1`, **but unused by app code** | runtime via `@solflare-wallet/sdk`, `jayson`, `rpc-websockets` | ✅ **ASSESSED 2026-10-27 — NOT REACHABLE.** GHSA-w5hq-g745-h8pq covers only `v3`/`v5`/`v6` *with a buffer argument*; **no dependency calls those functions at all** (jayson→`v4`, rpc-websockets→`v1`, Solflare→`v4`), and the app never imports `uuid`. Where it would fire, Node ignores past-end writes, so the effect is **silent truncation (integrity only)** — not memory corruption. CVSS `I:H/C:N/A:N`. See `evidence/r018-uuid-reachability-2026-10-27.md`. |
 | `@solana/*` wallet adapters | mod | mostly yes | runtime | Several report **no fix available**. |
 
-**Two things this entry does not claim.** No advisory here was reproduced by running a trigger — the
-table is a reachability classification from the dependency graph, unlike R-002, which was characterised
-experimentally. And `uuid`'s reachability is genuinely unassessed rather than judged harmless.
+**What this entry does and does not claim.** Most rows remain a reachability classification from the
+dependency graph. Two are stronger: `zod` was removed outright, and `uuid` was **characterised by running
+its trigger** — a 4-byte buffer returns silently truncated with no exception, confirming the impact is
+integrity-only. What none of this rests on is a **runtime trace**: the `uuid` conclusion is static
+call-site enumeration, so a future dependency upgrade that introduces a `v3`/`v5`/`v6` call would not be
+caught here — re-read this entry if the `uuid` dependents change. `fixAvailable: false` for `uuid` means
+"no compatible upgrade path", not "accepted"; the risk is recorded as unreachable, not fixed.
 
 **Actioned 2026-10-27:** the `zod` removal described above. `npm audit` on the tree after the change
 reports **27** advisories (0 info, 0 low, 20 moderate, **6** high, 1 critical) — the high count fell by
@@ -1407,7 +1412,7 @@ Evidence: `evidence/r001-closure-2026-10-27.md`, `evidence/zod-removal-2026-10-2
 | **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **RELEASED 2026-10-27 (PR #68, `04221a5`).** Verified live on production (route 404→200, forgot/reset pages behave, browser suite 6/6) and **owner-confirmed end to end** with a real account. `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox; **production redirect behaviour is confirmed** — `?next=` preserved on the site host). | Shri (interim) | on merge |
 | **R-016** | **Browser-facing integration untested by CI** | **RELEASED 2026-10-27 (PR #68, `04221a5`); workflow now runs on every PR to `main`.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
 | **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | ✅ **RELEASED 2026-10-27** (PR #71, `4b37746`). One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Production verified: one header, devnet gone. Static assets carry no CSP (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | closed |
-| **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories after the `zod` removal (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` — a direct, unused dependency with a high advisory — was **removed**, not upgraded. `uuid` unassessed. No advisory reproduced experimentally. | Shri (interim) | open |
+| **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` (direct, unused, high) was **removed**. `uuid` **assessed — not reachable**: no dependency calls the affected `v3`/`v5`/`v6`, and the measured impact is silent truncation (integrity only). Static analysis, no runtime trace. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
