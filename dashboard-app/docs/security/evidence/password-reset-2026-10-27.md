@@ -87,39 +87,72 @@ Reintroducing the leak — returning `error?.message` instead of the generic mes
 The guard is real: three assertions fail when the defect returns. The source was restored
 afterward and confirmed free of the mutation.
 
-## Probes — what was tried and what it proved
+## Browser verification — deploy preview 68 (staging database)
 
-Question: does Supabase's redirect allowlist preserve `?next=` on the callback URL at click time?
+Driven in a real Chromium against `https://deploy-preview-68--bitxbit-dashboard.netlify.app`
+(head `0e354f8a`, Netlify deploy-preview-68 `success`), which resolves to the **staging** Supabase
+project.
 
-A send-time probe against **staging** (`luqrwhgjtiyfmeawbtmp`, publishable key only, no secret
-emitted) called `POST /auth/v1/recover` with `redirect_to` set to, in turn: the callback with a
-query, the bare callback, a direct reset path, a **deliberately disallowed** host
-(`evil.example.com`), `localhost:3000`, and a Netlify preview host. **Every request returned
-HTTP 200 `{}`.**
+| Check | Result |
+|---|---|
+| `/auth/login` renders; `Forgot password?` → `/auth/forgot-password` | ✅ link present, correct `href` |
+| `/auth/forgot-password` renders (email field, "Send reset link") | ✅ |
+| Submit an **unknown** address | ✅ generic message in a `role=status` / `aria-live=polite` panel: "If an account exists for that email address, a password reset link is on its way…" — **no "user not found"**, no error text |
+| `/auth/reset-password` with **no session** | ✅ → `/auth/login?error=reset_required`, login page shows "That password reset link has expired or was already used…" |
+| `/auth/callback?next=…` with **no code** | ✅ → `/auth/login?error=callback`, no Next error shell |
+| Signed in, `/auth/reset-password` | ✅ renders "Set a new password" with the account email; not bounced to the dashboard mid-flow |
+| Submit a new password | ✅ `updateUser` succeeded, redirected to `/dashboard` |
+| Did the password actually change? | ✅ measured by password grant — **old password REJECTED**, **new password ACCEPTED** (`session=true`) |
 
-**That proves nothing about the allowlist**, and it is recorded as a failed probe rather than a
-pass: GoTrue does **not** validate `redirect_to` when sending, so the deliberately-bogus host
-returned 200 too. The allowlist is only consulted when the emailed link is followed.
+Teardown: the throwaway staging user was deleted; `auth.users` back to **20**; **0** orphan rows in
+`public.users`; no fixture residue. The one-time recovery token file was mode-0600 in scratch and
+has been shredded.
 
-A useful side-effect, though: because the send never errors — for any address and any redirect —
-the endpoint is trivially non-enumerating from the client's point of view.
+## The `?next=` allowlist question — answered, and a real finding
+
+The first probe (send-time `POST /auth/v1/recover`) returned HTTP 200 for **every** `redirect_to`,
+including a deliberately bogus host. That proved nothing and is retained as a **failed probe**:
+GoTrue does not validate `redirect_to` when sending; the allowlist is consulted when the link is
+*followed*. Useful side-effect: the send never errors for any address, so the endpoint is trivially
+non-enumerating from the client's side.
+
+The real answer came from `admin.generateLink`, which sends no email and embeds the effective
+`redirect_to` in the returned link. Measured on staging:
+
+| Requested `redirect_to` | Embedded in link | Verdict |
+|---|---|---|
+| `https://deploy-preview-68--bitxbit-dashboard.netlify.app/auth/callback` | `http://localhost:3000` | **substituted** |
+| `…netlify.app/auth/callback?next=%2Fauth%2Freset-password` | `http://localhost:3000` | **substituted** |
+| `http://localhost:3000/auth/callback` | `http://localhost:3000/auth/callback` | honoured |
+| `http://localhost:3000/auth/callback?next=%2Fauth%2Freset-password` | same | **honoured** |
+
+Two conclusions, pointing away from the initial worry:
+
+1. **The `?next=` mechanism is sound** — a query string is preserved when the origin is allowlisted
+   (row 4). The design does not need to change.
+2. **Staging's redirect allowlist does not contain deploy-preview hosts** — only its SiteURL
+   (`http://localhost:3000`). A reset requested *from a preview* has its `redirect_to` silently
+   replaced, so the emailed link lands on `localhost:3000`. Previews therefore **cannot exercise the
+   emailed-link hop** — the same missing-allowlist root cause that blocks wallet flows on staging.
+
+**Owner action (dashboard config, not code):** in Supabase → Authentication → URL Configuration, add
+the preview wildcard (`https://*--bitxbit-dashboard.netlify.app/**`) to **staging**, and confirm
+**production** lists `https://app.bitxbit.com.au/**` (or at least `/auth/callback`). Production's
+allowlist could not be read from here and is not tested by this branch.
 
 ## What is NOT verified
 
-- **The recovery flow end-to-end in a browser.** Not done here: it needs a real account, a real
-  mailbox, and a browser following the emailed link. This is the one open item on R-015 and it is
-  exactly the class of defect (browser-facing integration) that CI, `tsc`, the tests and the build
-  are blind to — the dominant defect class in this project. It should be closed by the real-browser
-  CI smoke test (outstanding-work item 2).
-- **Whether `?next=` survives the allowlist.** Unknown until the above is done. Mitigation in place:
-  `/auth/reset-password` is reachable by any signed-in session, so a dropped `next` strands the user
-  on `/dashboard` (already signed in, old password unchanged) rather than in a broken state; and the
-  server-side guard sends a session-less visitor to
-  `/auth/login?error=reset_required`, which now shows a legible message.
-- **No application-level rate limiting** on the reset request. Supabase Auth's built-in email send
+- **The emailed-link hop on a production-allowlisted host with a real mailbox.** Everything *around*
+  it is verified above; the remaining segment — GoTrue verifying the token and redirecting with
+  `?code=` — is Supabase's, and it lands on the same `exchangeCodeForSession` path OAuth already
+  uses. The composition is sound, but the end-to-end click was not performed: no mailbox is
+  available, and the preview host is not allowlisted (above). The real-browser CI smoke test
+  (outstanding-work item 2) should own this.
+- **Production's redirect allowlist contents** — not readable from here.
+- **No application-level rate limiting** on the reset request; Supabase Auth's built-in email send
   limits are the only bound. Stated, not claimed.
-- **Email deliverability/branding** of `supabase/templates/recovery.html` is a dashboard
-  configuration and was not touched.
+- **Email deliverability/branding** of `supabase/templates/recovery.html` is dashboard configuration
+  and was not touched.
 
 ## Residual / follow-ups
 

@@ -1073,7 +1073,7 @@ authentication outage for every user with no degraded state in between.
 ## R-015 — No password-recovery route: a password-only account can be permanently locked out
 
 **Status:** **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68, branch `security/password-reset`) — not
-released, not browser-verified.** Identified 2026-10-27 while reading live state; see
+released.** Identified 2026-10-27 while reading live state; see
 `evidence/password-reset-2026-10-27.md`.
 **Owner:** Shri — interim accountable owner. **Review:** on merge.
 
@@ -1103,14 +1103,28 @@ it and nothing in the build, type-check, test suite or CI notices its absence.
 - New password validation is client-side (minimum 8 characters, confirmation match) and the actual
   change runs against the current session only, so it can only alter the signed-in user's password.
 
-### Not verified — stated explicitly
+### Browser verification — 2026-10-27
 
-- **The recovery link has not been exercised in a browser.** Whether Supabase's redirect allowlist
-  preserves the `?next=` parameter at click time could not be confirmed from outside the dashboard,
-  and the send-time probe proved nothing (GoTrue returned HTTP 200 for a deliberately disallowed
-  host, so it does not validate `redirect_to` when sending). This must be confirmed by requesting a
-  reset for a real account and following the emailed link — item 2 in the outstanding work, the
-  real-browser CI smoke test.
+Verified in a real Chromium on the PR's deploy preview (`deploy-preview-68`, head `0e354f8a`,
+against **staging**): the login link, the forgot-password page and its **generic message for an
+unknown address** (no "user not found"), the session-guard redirect + notice, the callback failure
+path, and the reset form. Signing in a throwaway user and submitting a new password redirected to
+`/dashboard`, and a password grant then **rejected the old password and accepted the new one**.
+Teardown deleted the user; staging returned to 20 users with no orphan row.
+
+### Still unverified — stated explicitly
+
+- **The emailed-link hop on a production-allowlisted host with a real mailbox.** The segment left is
+  Supabase's (verify token → redirect with `?code=`), landing on the same `exchangeCodeForSession`
+  path OAuth uses. Not performed: no mailbox available.
+- **The `?next=` allowlist question is answered, and it surfaced a config gap.** A query string on
+  the callback **is** honoured when the origin is allowlisted. But **staging's redirect allowlist
+  contains only its SiteURL (`http://localhost:3000`), not deploy-preview hosts** — so a reset
+  requested from a preview is silently redirected to `localhost:3000`. This is the same
+  missing-allowlist root cause that blocks wallet flows on staging.
+- **Owner action (dashboard config, not code):** add `https://*--bitxbit-dashboard.netlify.app/**`
+  to staging's URL Configuration, and confirm production lists `https://app.bitxbit.com.au/**`.
+  Production's allowlist is not readable from the repo and was not tested here.
 - No rate limiting is applied by this application to the reset request; Supabase Auth's built-in
   email send limits are the only bound. Recorded rather than claimed.
 
@@ -1238,7 +1252,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | **R-012** | Production treasury key in a local staging file | **RESOLVED** — fixture swapped to devnet key; production key rotated anyway | Shri (interim) | closed |
 | R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
-| **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Unverified: the recovery link end-to-end in a browser** (Supabase redirect-allowlist behaviour not confirmable externally). | Shri (interim) | on merge |
+| **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox) and production's redirect allowlist. | Shri (interim) | on merge |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
