@@ -1130,8 +1130,8 @@ Teardown deleted the user; staging returned to 20 users with no orphan row.
 
 ## R-016 — The browser-facing surface is not exercised by CI
 
-**Status:** **CONTROL IMPLEMENTED 2026-10-27 (branch `security/browser-smoke`, stacked on PR #68) —
-not released; the workflow has not yet run on GitHub.** Identified while reviewing the nine wallet
+**Status:** **CONTROL IMPLEMENTED AND PROVEN IN CI 2026-10-27 (merged into PR #68 via #69) — not
+released to production.** Identified while reviewing the nine wallet
 defects found on 2026-10-26; see `evidence/browser-smoke-ci-2026-10-27.md`.
 **Owner:** Shri — interim accountable owner. **Review:** on merge.
 
@@ -1160,7 +1160,8 @@ reached from the page.
 
 - **Proven (locally, against `deploy-preview-68`):** 7/7 pass; and 7/7 **fail** against a control page,
   so the suite is capable of failing rather than passing regardless of its target.
-- **Not proven:** the workflow has not run on GitHub yet for this branch.
+- **Proven in CI:** the dispatched run `40445056002` (supplied URL) and the **automatic** PR run
+  `40445727437` on head `9ef5601e` (deploy-preview wait) both completed **success**.
 - **Not covered:** the wallet **signature** step — driving the official wallet adapters needs a real
   extension, which CI cannot install. That remains a manual procedure.
 - **Deliberately not a required status check.** Making it required is an owner decision and presumes a
@@ -1291,7 +1292,7 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 | R-013 | Local Netlify link targets the wrong site | ✅ **CLOSED 2026-10-20** (re-measured 2026-10-23) — `.netlify/state.json` now points at `9617719a-…`; the prior "OPEN" was stale | Shri (interim) | NA-12 done |
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
 | **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **REMEDIATION IMPLEMENTED 2026-10-27 (PR #68) — not released.** `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox) and production's redirect allowlist. | Shri (interim) | on merge |
-| **R-016** | **Browser-facing integration untested by CI** | **CONTROL IMPLEMENTED 2026-10-27 (stacked on PR #68) — not released.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Not covered: the wallet signature step (needs a real extension). The workflow has not yet run on GitHub.** | Shri (interim) | on merge |
+| **R-016** | **Browser-facing integration untested by CI** | **CONTROL IMPLEMENTED 2026-10-27 (stacked on PR #68) — not released.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See

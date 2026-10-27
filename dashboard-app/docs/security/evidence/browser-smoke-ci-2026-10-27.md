@@ -129,10 +129,24 @@ Using (1), the suite was run from GitHub Actions against `deploy-preview-68`:
 
 So the workflow is proven end-to-end in CI, not only locally.
 
+## The automatic path is verified too
+
+PR #68 targets `main`, so Netlify built a preview for the merged head `9ef5601e`, and the workflow's
+**automatic** wait resolved that URL and ran the suite:
+
+| | |
+|---|---|
+| Run | `40445727437` (event `pull_request`, head `9ef5601e`) |
+| Netlify deploy-preview status at the time | `success` |
+| Result | **success** |
+
+Both branches of the URL-resolution logic — a supplied `base_url` and the deploy-preview wait — are
+now proven green in CI.
+
 ## Not verified
 
-- **A PR-into-`main` run** of the automatic path (the deploy-preview wait). It is the same job and the
-  same command; only the URL-resolution branch differs. The first such PR will confirm it.
+- Nothing structural remains for this control. The coverage limits above still apply (the wallet
+  signature step is not exercised).
 - **Not a required status check.** Making it required is an owner decision, and it presumes a Netlify
   preview exists for every PR (fork PRs do not get one).
 - The wallet **signature** step, as above.
