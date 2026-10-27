@@ -1320,7 +1320,9 @@ success (the pre-fix stacked PR had none). See `evidence/na6-stacked-pr-ci-2026-
 
 ## R-017 — Content-Security-Policy defined by two emitters
 
-**Status:** **FIXED IN PR #71 (branch `security/csp-consolidation`) — not released.**
+**Status:** **RELEASED 2026-10-27** (PR #71, merge commit `4b37746`). Verified live on production:
+`/auth/login` serves exactly one CSP header with **no devnet** (was 1 occurrence before the
+deploy), mainnet present, wallet `frame-src` and `frame-ancestors 'none'` intact.
 **Owner:** Shri — interim accountable owner.
 
 Two independent sources emitted CSP: `netlify.toml` (a CDN rule, `for = "/*"`) and `middleware.ts`
@@ -1363,7 +1365,7 @@ here; removing it needs hydration proven in a real browser. See
 | **R-014** | **Legacy Supabase API keys being retired; production depends on one** | **CLOSED** — production re-pointed to the publishable key *before* its legacy key was disabled; deployed bundle verified to carry it (legacy JWT in 0 of 15 chunks); **operator-confirmed end to end** — sign-in succeeded and the dashboard loaded with data. | Shri (interim) | closed |
 | **R-015** | **No password-recovery route — password-only accounts can lock out permanently** | **RELEASED 2026-10-27 (PR #68, `04221a5`).** Verified live on production (route 404→200, forgot/reset pages behave, browser suite 6/6) and **owner-confirmed end to end** with a real account. `/auth/forgot-password` + `/auth/reset-password` via the existing `/auth/callback` host validation; identical response regardless of account existence (mutation-verified test); wallet is not a recovery credential. tsc 0 / 253 tests / migration replay / build 0. **Browser-verified on the PR's deploy preview (staging)** 2026-10-27, incl. old-rejected/new-accepted. **Unverified: the emailed-link hop** (no mailbox; **production redirect behaviour is confirmed** — `?next=` preserved on the site host). | Shri (interim) | on merge |
 | **R-016** | **Browser-facing integration untested by CI** | **RELEASED 2026-10-27 (PR #68, `04221a5`); workflow now runs on every PR to `main`.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
-| **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | **FIXED IN PR #71 — not released.** One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Preview `eba9344`: one header on documents, none on static assets (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | on merge |
+| **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | ✅ **RELEASED 2026-10-27** (PR #71, `4b37746`). One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Production verified: one header, devnet gone. Static assets carry no CSP (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | closed |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
