@@ -1403,6 +1403,60 @@ Evidence: `evidence/r001-closure-2026-10-27.md`, `evidence/zod-removal-2026-10-2
 
 ---
 
+## R-019 — A merge to `main` can silently not release (Netlify build quota)
+
+**Status:** **MITIGATED 2026-10-27 — residual OPEN.** The silent-skip *cause* is largely removed; the
+silent-*detection* gap is not. **Severity:** release-integrity — a green CI run and an unshipped release
+look identical from the outside.
+**Owner:** Shri — interim accountable owner.
+
+Measured 2026-10-27. The Netlify account's build minutes were exhausted and a production deploy was
+skipped, with CI green throughout:
+
+```
+production | error | 7671f85 | Skipped due to account builds usage exceeded
+production | ready | acec64d | (none)
+```
+
+`main` was `7671f85` while production served `acec64d`. This repository's operating assumption is that
+**a merge to `main` is a production release**; that stopped being true without anything failing. The
+difference happened to be docs-only, so the deployed bytes were identical — the risk was realised before
+it could bite, not avoided by a control.
+
+**Two structural wastes caused the exhaustion** (both measured, not inferred):
+
+1. The security documentation lives at `dashboard-app/docs/**` — *inside* the dashboard site's base
+   directory — so a docs-only merge was a real content change to Netlify and cost a **full Next build**.
+   Four of the last eight merges were docs-only.
+2. Both sites built on **every** commit anywhere in the monorepo, from one shared account-wide quota.
+
+`build_settings.ignore` was **unset on both sites** before this work (read via the API).
+
+### Mitigation applied 2026-10-27
+
+`[build] ignore` commands in `dashboard-app/netlify.toml` and `webflow-site/netlify.toml` skip the build
+when a deploy changes nothing ship-able; the browser-smoke workflow is gated on the dashboard actually
+changing, so it no longer fails merely because a skipped build produced no preview. Verified by executing
+the commands stored in the files against real commit pairs (docs-only → exit 0/SKIP, code → exit 1/BUILD,
+refs-equal → BUILD), from both candidate working directories; five mutations of the guard are each caught
+by `lib/netlify-build-ignore.test.ts`. Evidence: `evidence/netlify-build-ignore-2026-10-27.md`.
+
+### Residual risk — OPEN
+
+- **Exhaustion is still possible.** The rules cut waste; a run of genuine app changes can still consume
+  the quota, and the same silent skip returns.
+- **Nothing fails when a production build is skipped.** This is the unaddressed half. The Netlify
+  deploy checks are not required status checks, so a skipped production build leaves `main` ahead of
+  production with every visible signal green. The workflow's own failure message now explains this class
+  of skip, but that job is not required either.
+- **Durable control not built:** a required check (or a post-merge step) asserting that the production
+  deploy for the merged SHA reached `ready`, or a deploy-failure notification to the owner. This belongs
+  with the release-gating work, not with the quota rules.
+- **Neither ignore rule has been exercised by a real Netlify build yet** — the quota is still exhausted,
+  so the rules cannot take effect until builds resume.
+
+---
+
 ## Summary
 
 | ID | Risk | Status | Owner | Review |
@@ -1425,6 +1479,7 @@ Evidence: `evidence/r001-closure-2026-10-27.md`, `evidence/zod-removal-2026-10-2
 | **R-016** | **Browser-facing integration untested by CI** | **RELEASED 2026-10-27 (PR #68, `04221a5`); workflow now runs on every PR to `main`.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
 | **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | ✅ **RELEASED 2026-10-27** (PR #71, `4b37746`). One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Production verified: one header, devnet gone. Static assets carry no CSP (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | closed |
 | **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` (direct, unused, high) was **removed**. `uuid` **assessed — not reachable**: no dependency calls the affected `v3`/`v5`/`v6`, and the measured impact is silent truncation (integrity only). Static analysis, no runtime trace. | Shri (interim) | open |
+| **R-019** | **A merge to `main` can silently not release (Netlify build quota)** | **MITIGATED 2026-10-27; residual OPEN.** The quota was exhausted and production stayed at `acec64d` while `main` was `7671f85` — CI green, nothing failed. Cause largely removed: `[build] ignore` rules on both sites (docs live *inside* the app, so docs-only merges cost full builds) plus a diff-based gate on the browser-smoke job; verified by executing the stored commands against real refs and catching five mutations. **Still open: nothing fails when a production build is skipped** — the Netlify checks are not required. Rules not yet exercised by a live build. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
