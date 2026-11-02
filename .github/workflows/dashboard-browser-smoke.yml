@@ -68,6 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app_changed: ${{ steps.diff.outputs.app_changed }}
+      head_touches_app: ${{ steps.diff.outputs.head_touches_app }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -104,6 +105,14 @@ jobs:
             echo "app_changed=true" >> "$GITHUB_OUTPUT"
             echo "Dashboard changed - expecting a deploy preview."
           fi
+          # Separately: does THIS commit change the app? A PR can touch the app and still
+          # end on a commit that does not (a trailing docs or CI commit), and Netlify
+          # skips the build for that commit, so no preview can exist for it.
+          if git diff --quiet "$HEAD_SHA^" "$HEAD_SHA" -- dashboard-app ':(exclude)dashboard-app/docs' 2>/dev/null; then
+            echo "head_touches_app=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "head_touches_app=true" >> "$GITHUB_OUTPUT"
+          fi
 
   browser-smoke:
     name: Browser smoke against the deploy preview
@@ -139,6 +148,7 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
           BASE_URL_INPUT: ${{ github.event.inputs.base_url }}
+          HEAD_TOUCHES_APP: ${{ needs.changes.outputs.head_touches_app }}
         run: |
           set -euo pipefail
           # Manual dispatch may name a URL directly (useful for stacked PRs, which
@@ -148,6 +158,17 @@ jobs:
             echo "Using supplied base_url: $BASE_URL_INPUT"
             echo "PREVIEW_URL=$BASE_URL_INPUT" >> "$GITHUB_ENV"
             exit 0
+          fi
+          # CONFIRMED LIVE 2026-11-02: when a deploy changes no ship-able files, Netlify
+          # skips the build and reports it as
+          #   "Failed during stage 'checking build content for changes':
+          #    Canceled build due to no content change"
+          # so NO preview will ever appear for a commit that does not touch the app.
+          # Fail fast and say why, instead of polling for 20 minutes and reporting a
+          # timeout that reads like a code fault.
+          if [ "${HEAD_TOUCHES_APP:-true}" != "true" ]; then
+            echo "::error::This commit changes nothing under dashboard-app (outside docs/), so Netlify skips its build and no deploy preview will exist - the browser suite cannot run against this revision. This is not a code defect. Push a commit that touches dashboard-app, or re-run this workflow manually with an explicit base_url."
+            exit 1
           fi
           if [ -z "${SHA:-}" ]; then
             echo "::error::No pull_request head SHA and no base_url input"; exit 1

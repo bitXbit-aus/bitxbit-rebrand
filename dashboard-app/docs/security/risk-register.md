@@ -1452,8 +1452,14 @@ by `lib/netlify-build-ignore.test.ts`. Evidence: `evidence/netlify-build-ignore-
 - **Durable control not built:** a required check (or a post-merge step) asserting that the production
   deploy for the merged SHA reached `ready`, or a deploy-failure notification to the owner. This belongs
   with the release-gating work, not with the quota rules.
-- **Neither ignore rule has been exercised by a real Netlify build yet** — the quota is still exhausted,
-  so the rules cannot take effect until builds resume.
+- **Exercised live 2026-11-02** — with the quota reset, a docs-only commit was skipped by Netlify on
+  **both** sites (`Failed during stage 'checking build content for changes': Canceled build due to no
+  content change`) while an app-changing commit on the same branch built normally. That also showed Netlify
+  diffs a deploy against the branch's **previous commit, not the base tip** — the reason a docs-or-CI-only
+  commit produces no preview at all, and why the smoke job now fails **fast** with an explicit "not a code
+  defect" message when the head commit touches no app files.
+- **The local `netlify build` CLI does not evaluate `[build] ignore`** (a full 39.9s build, exit 0, where
+  the platform skipped). Only the platform is authoritative for this setting.
 
 ---
 
@@ -1479,7 +1485,7 @@ by `lib/netlify-build-ignore.test.ts`. Evidence: `evidence/netlify-build-ignore-
 | **R-016** | **Browser-facing integration untested by CI** | **RELEASED 2026-10-27 (PR #68, `04221a5`); workflow now runs on every PR to `main`.** Playwright suite against the PR's deploy preview: error-shell, CSP, console/page errors, asset skew, reset enumeration, reset guard, wallet challenge API. 7/7 pass on `deploy-preview-68`, 7/7 fail on a control page. **Proven in CI: runs `40445056002` (supplied URL) and `40445727437` (automatic deploy-preview wait) both success. Not covered: the wallet signature step (needs a real extension).** | Shri (interim) | on merge |
 | **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | ✅ **RELEASED 2026-10-27** (PR #71, `4b37746`). One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Production verified: one header, devnet gone. Static assets carry no CSP (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | closed |
 | **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` (direct, unused, high) was **removed**. `uuid` **assessed — not reachable**: no dependency calls the affected `v3`/`v5`/`v6`, and the measured impact is silent truncation (integrity only). Static analysis, no runtime trace. | Shri (interim) | open |
-| **R-019** | **A merge to `main` can silently not release (Netlify build quota)** | **MITIGATED 2026-10-27; residual OPEN.** The quota was exhausted and production stayed at `acec64d` while `main` was `7671f85` — CI green, nothing failed. Cause largely removed: `[build] ignore` rules on both sites (docs live *inside* the app, so docs-only merges cost full builds) plus a diff-based gate on the browser-smoke job; verified by executing the stored commands against real refs and catching five mutations. **Still open: nothing fails when a production build is skipped** — the Netlify checks are not required. Rules not yet exercised by a live build. | Shri (interim) | open |
+| **R-019** | **A merge to `main` can silently not release (Netlify build quota)** | **MITIGATED 2026-10-27; residual OPEN.** The quota was exhausted and production stayed at `acec64d` while `main` was `7671f85` — CI green, nothing failed. Cause largely removed: `[build] ignore` rules on both sites (docs live *inside* the app, so docs-only merges cost full builds) plus a diff-based gate on the browser-smoke job; verified by executing the stored commands against real refs and catching five mutations. **Still open: nothing fails when a production build is skipped** — the Netlify checks are not required. Rules **exercised live 2026-11-02**: a docs-only commit was skipped on both sites while an app-changing commit built; Netlify diffs against the branch's *previous* commit, not the base tip, so the smoke job now fails fast with an explicit "not a code defect" message when the head touches no app files. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See

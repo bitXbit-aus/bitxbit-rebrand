@@ -111,15 +111,39 @@ docs, Netlify may skip the build for the head commit while this gate (which sees
 still expects a preview. That lands as a failure with an explanatory message, and the
 `workflow_dispatch` `base_url` input runs the suite directly.
 
+## Live verification — the platform skipped the build
+
+The refs above prove the *logic*; this proves the *platform honours it*. By the time this was tested the
+quota had reset (an app-changing commit built normally: `deploy-preview | ready | dd16d5d`). A **docs-only**
+commit (`caf8349`) was then pushed to the same branch, and Netlify skipped it on **both** sites:
+
+```
+dashboard : error | caf8349 | Failed during stage 'checking build content for changes': Canceled build due to no content change
+marketing : error | caf8349 | Failed during stage 'checking build content for changes': Canceled build due to no content change
+dashboard : ready | dd16d5d | (none)
+```
+
+Three things follow, and one of them changed the workflow:
+
+1. **The rules work on the platform**, not just in theory.
+2. **Netlify diffs a deploy against the branch's PREVIOUS commit, not the base branch tip.** The PR's whole
+   diff into `main` contained app changes (`netlify.toml`, `package.json`, the test), yet the build was
+   still skipped — which can only happen if the comparison was `dd16d5d..caf8349` (docs only). This is why
+   a commit that touches only docs or `.github/` produces no preview at all.
+3. **That made the smoke job's wait a trap.** The job's own gate looks at the whole PR diff, so it expects
+   a preview, while Netlify will never build one for that commit — the old behaviour was to poll for 20
+   minutes and then report a timeout that reads like a code fault. The wait step now fails **fast** with an
+   explicit "this is not a code defect" message when the *head commit* changes no app files, and names the
+   `base_url` escape hatch.
+
+A local `netlify build` was also run against the docs-only pair: it **completed a full build (39.9s, exit
+0)** rather than skipping, so the local CLI does not evaluate `[build] ignore`. The platform is the only
+authority for this setting — recorded so nobody repeats that path expecting a skip.
+
 ## Not verified
 
-- **Neither rule has been exercised by a real Netlify build.** The quota is exhausted, so every deploy is
-  still being skipped; the rules take effect only once builds resume. The verification above is the
-  command's own exit codes against real refs — strong evidence for the logic, but not a live build.
-- **The rules reduce consumption; they cannot prevent exhaustion.** A run of genuine app changes can
-  still exhaust the quota, and nothing in CI currently fails when a production build is skipped. That
-  residual is registered under R-019.
-
-## Live verification (in progress)
-
-Placeholder while the platform-level skip test runs.
+- **The marketing site's skip still rests on the same mechanism**, which was observed for the docs-only
+  commit above; the marketing *build* path was not re-observed live (only its skip was).
+- **The rules reduce consumption; they cannot prevent exhaustion.** A run of genuine app changes can still
+  exhaust the quota, and nothing in CI currently fails when a production build is skipped. That residual is
+  registered under R-019.

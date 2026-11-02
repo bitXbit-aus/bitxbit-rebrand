@@ -147,4 +147,14 @@ test("the smoke suite is gated on the dashboard actually changing", () => {
       /needs\.changes\.outputs\.app_changed\s*==\s*'true'/.test(smokeWorkflow),
     "the browser-smoke job must depend on the change detection and run only when the app changed"
   );
+  assert.ok(
+    /head_touches_app/.test(smokeWorkflow),
+    "the workflow must also report whether the HEAD COMMIT changes the app: a PR can touch the app " +
+      "and still end on a docs/CI-only commit, which Netlify skips, so no preview can exist for it"
+  );
+  assert.ok(
+    /HEAD_TOUCHES_APP/.test(smokeWorkflow) && /not a code defect/.test(smokeWorkflow),
+    "the wait step must fail FAST with an explicit reason when the head commit changes no app files, " +
+      "instead of polling 20 minutes for a preview that Netlify will never build"
+  );
 });
