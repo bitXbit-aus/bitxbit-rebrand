@@ -119,3 +119,7 @@ still expects a preview. That lands as a failure with an explanatory message, an
 - **The rules reduce consumption; they cannot prevent exhaustion.** A run of genuine app changes can
   still exhaust the quota, and nothing in CI currently fails when a production build is skipped. That
   residual is registered under R-019.
+
+## Live verification (in progress)
+
+Placeholder while the platform-level skip test runs.
