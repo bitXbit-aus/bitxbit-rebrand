@@ -16,13 +16,19 @@
  *
  * It also asserts the properties that make the feature safe rather than merely
  * working:
- *   * the SIWS message names the host the user is ACTUALLY on (a preview host must
- *     not be handed production's hostname);
+ *   * the challenge message names the host the user is ACTUALLY on (a preview host
+ *     must not be handed production's hostname);
  *   * every failure is byte-identical, so the endpoint cannot be used to
  *     enumerate members;
  *   * a replayed nonce is refused;
  *   * an UNVERIFIED wallet and an UNREGISTERED wallet both fail, even though the
  *     caller can produce a perfectly valid signature over the challenge.
+ *
+ * And it measures the residual it CANNOT fix: nothing binds a challenge to the
+ * client that requested it, so a signature relayed from another site completes a
+ * sign-in (register R-021, docs/security/wallet-signin-threat-model.md). That is
+ * asserted explicitly, so the gap stays visible instead of being mistaken for a
+ * solved problem.
  *
  * Required environment:
  *   STAGING_SUPABASE_URL
@@ -97,7 +103,26 @@ async function postChallenge(walletAddress: string) {
   } catch {
     body = null;
   }
-  return { status: res.status, body: body as Record<string, unknown> | null };
+  const cookies = res.headers.getSetCookie?.() ?? [];
+  return { status: res.status, body: body as Record<string, unknown> | null, cookies };
+}
+
+/**
+ * The host the message tells the user they are signing for.
+ *
+ * Read from the `Site:` line, NOT from line 1. This assertion used to parse
+ * `message.split("\n")[0].split(" wants")[0]`, which was the SIWS layout where the
+ * first line was `<domain> wants you to sign in with your … account:`. The message
+ * is no longer SIWS-shaped (Phantom refuses that shape — see lib/wallet-crypto.ts),
+ * so line 1 is now the title, the parse returned "bitXbit wallet verification", and
+ * the check FAILED on every deployment. A harness that is always red is worse than
+ * no harness: it stops being a gate.
+ */
+function messageHost(message: string): string {
+  const site = message
+    .split("\n")
+    .find((line) => line.startsWith("Site:"));
+  return (site ?? "").replace(/^Site:\s*/, "").replace(/^https?:\/\//, "").trim();
 }
 
 async function postVerify(payload: Record<string, string>) {
@@ -223,7 +248,7 @@ async function main() {
   // Asserting the alias literally is therefore wrong; the real property is that
   // the domain is an allowed host for this site and never someone else's.
   const requestedHost = new URL(baseUrl).host;
-  const messageHost = message.split("\n")[0].split(" wants")[0].trim();
+  const messageHostname = messageHost(message);
   const isHostOfThisSite = (candidate: string): boolean =>
     candidate === requestedHost ||
     candidate === "bitxbit-dashboard.netlify.app" ||
@@ -231,22 +256,63 @@ async function main() {
     candidate === "app.bitxbit.com.au";
 
   check(
-    `SIWS message names a host belonging to this deployment (${messageHost})`,
-    isHostOfThisSite(messageHost),
-    messageHost
+    `challenge message names a host belonging to this deployment (${messageHostname})`,
+    isHostOfThisSite(messageHostname),
+    messageHostname
   );
   if (expectedHost !== "app.bitxbit.com.au") {
     check(
       "preview sign-in is NOT bound to the production hostname",
       !message.includes("app.bitxbit.com.au"),
-      message.split("\n")[0]
+      messageHost(message)
     );
     check(
       "preview sign-in does NOT name an unrelated host",
-      !/\bevil\b|example\.com/i.test(messageHost),
-      messageHost
+      !/\bevil\b|example\.com/i.test(messageHostname),
+      messageHostname
     );
   }
+
+  // ------------------------------------------- 1b. the relay precondition (R-021)
+  //
+  // MEASURED, and deliberately asserted so it cannot quietly regress into a claim
+  // of safety. The challenge endpoint is public by design (it must answer for an
+  // unregistered wallet without becoming an enumeration oracle), and nothing binds
+  // a challenge to the client that requested it: the response above carries NO
+  // Set-Cookie, no token, and no origin record.
+  //
+  // So an attacker can (1) request a challenge for a victim's wallet address,
+  // (2) show that message to the victim on another site, (3) relay the signature
+  // back, and (4) be handed a session — the server cannot tell the client that
+  // requested the challenge from the client that completes it, and a legitimate
+  // nonce proves only that SOMEONE asked us for one.
+  //
+  // This is the residual documented in docs/security/wallet-signin-threat-model.md
+  // (register R-021). NOTE FOR WHOEVER CLOSES IT: this assertion will FAIL once a
+  // real binding exists — that failure is the signal to update the threat model and
+  // delete this block, not to weaken the assertion.
+  check(
+    "the challenge response carries NO client binding (known residual — R-021)",
+    challenge.cookies.length === 0,
+    `Set-Cookie headers: ${challenge.cookies.length}`
+  );
+
+  // Two clients, no shared state: the requester of the challenge is not the
+  // signer and not the completer. Both are plain HTTP with no cookies.
+  const relayChallenge = await postChallenge(registered.publicKey.toBase58());
+  const relayMessage = String(relayChallenge.body?.message ?? "");
+  const relaySignature = sign(relayMessage, registered);
+  const relayed = await postVerify({
+    walletAddress: registered.publicKey.toBase58(),
+    signature: relaySignature,
+    nonce: String(relayChallenge.body?.nonce ?? ""),
+  });
+  check(
+    "a challenge requested with no browser context can be completed by a different one (the relay is open — R-021)",
+    relayed.status === 200 && relayed.body?.ok === true,
+    `relayed verify -> ${relayed.status} ${relayed.raw}`
+  );
+
 
   // No enumeration: an unregistered wallet gets the same shape of challenge.
   const unregisteredChallenge = await postChallenge(unregistered.publicKey.toBase58());
