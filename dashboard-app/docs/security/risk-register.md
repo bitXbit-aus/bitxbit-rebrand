@@ -1486,6 +1486,113 @@ by `lib/netlify-build-ignore.test.ts`. Evidence: `evidence/netlify-build-ignore-
 
 ---
 
+## R-020 — A wallet session could set an email password (the wallet as a recovery credential)
+
+**Status:** **FIX BUILT 2026-11-03 — pending release.** **Severity:** account takeover — a held wallet key
+could mint a standing password credential for the account.
+**Owner:** Shri — interim accountable owner.
+
+Raised by independent review (2026-11-03) as *"password recovery may be accessible through an ordinary
+wallet session"*, recommended as *verify and harden*. Reproduced before changing any code.
+
+### The finding, measured
+
+`/auth/reset-password` checked only that **a session existed**, and the form called
+`supabase.auth.updateUser({ password })` from the browser. Wallet sign-in
+(`app/api/auth/wallet/verify`) establishes its session through the project's passwordless plumbing —
+`admin.generateLink({ type: "magiclink" })` then `verifyOtp({ token_hash })` — so it produces an ordinary
+session.
+
+Measured against the provider on **staging, 2026-11-03**, one fresh throwaway user per case, each change
+confirmed by a password grant (never by trusting a 200), then torn down (`auth.users` back to 20, 0
+leftovers):
+
+| Session class | `amr` | `PUT /auth/v1/user` with no `current_password`, no nonce | Old password after |
+|---|---|---|---|
+| **wallet-class** (`magiclink`) | `[{"method":"otp"}]` | **200 — password changed** | rejected |
+| ordinary password sign-in | `[{"method":"password"}]` | 200 — password changed | rejected |
+| genuine recovery | `[{"method":"otp"}]` | 200 — password changed | rejected |
+
+**The wallet session and the genuine recovery session are the same class** (`otp`); a password session is a
+different one. So a wallet session could set an email password without any recovery email — which
+contradicts the claim in `evidence/password-reset-2026-10-27.md` that *"a wallet cannot serve as a recovery
+credential"*. That claim was about the **design intent**, and the design was right; the *check* was
+`user !== null`, which does not implement it.
+
+### Why the provider's password-change protections do not cover it
+
+Read from production's auth config (`flasgvendiiasuixeqzu`):
+
+```
+security_update_password_require_current_password : true
+security_update_password_require_reauthentication : true
+```
+
+Neither helps, and this is the part that makes the finding sharp:
+
+- the **current-password check is skipped when `session.IsRecovery()` is true**, and that is true for
+  `otp`, `magiclink` and `recovery` sessions — exactly the class the wallet flow mints;
+- the **reauthentication check only asks for a nonce when the session is older than 24 hours**, so a
+  freshly minted wallet session is exempt.
+
+**Staging has BOTH settings `false`**, so staging cannot detect this class at all — an environment that is
+more permissive than production, which is why the guard had to be moved into the application rather than
+left to a dashboard setting.
+
+**Provenance, stated precisely.** The app-level gap, the session classes and both configs were measured
+here. The two exemption rules are **documented** (GoTrue `internal/api/user.go` / `factor.go` as
+independently tested and reported), **not measured by us** — the connector can set
+`require_reauthentication` but not `require_current_password`, and there is no Supabase PAT on this machine
+to set it directly. Treat the exemption as the working explanation, not as a measured fact.
+
+### The fix — bind the intent, not the session class
+
+`/auth/callback` now sets a short-lived (30 min), `httpOnly`, path-scoped, HMAC-SHA256-signed marker
+**only when the sanitised `next` is exactly `/auth/reset-password`**; the page requires it to render, and
+the password change moved into a **Server Action** that re-verifies it server-side before touching the
+password and then spends it.
+
+The marker deliberately does **not** key on the session class: a genuine recovery session's `amr` is `otp`,
+the same as the wallet session's, so "require `amr.method === 'recovery'`" would have broken the very flow
+it was meant to protect. **Intent, not class, is the discriminator that actually exists** — and that is a
+measured design constraint, not a preference.
+
+The guard is mutation-verified: 5/5 reintroduced defects are each caught by their own assertion —
+`userId` dropped from the signed payload; a client-side `updateUser` restored; the guard neutered with
+`false &&` (which still *reads* as enforced); the marker deleted without its path (a silent no-op that
+leaves a live marker); and the marker issued for every path instead of only the reset path.
+
+### Verified in a deployment 2026-11-03
+
+On `deploy-preview-80` (staging-backed), in a real Chromium:
+
+- **Refused without the marker** — a valid password session requesting the reset page gets
+  `307 → /auth/login?error=reset_required`, measured on the raw response so the refusing layer is
+  unambiguous (middleware is a pass-through for that path). The same session gets `200` on `/dashboard`,
+  which proves the refusal is the marker and not a broken session. The form is not served.
+- **Accepted with the marker** — the form renders and the change completes end to end: the old password is
+  then **rejected** and the new one **accepted** by password grant.
+- **Stated limitation:** the marker in the positive run was minted by the harness with the same construction
+  and key resolution the server uses, because the emailed hop cannot be performed without a mailbox — a
+  server-generated `generateLink` redirects with an **implicit** `#access_token`, not the `?code=` this
+  app's callback exchanges. The emailed hop therefore remains **owner-confirmation**, as it was for the
+  original reset work.
+
+Evidence: `evidence/reset-intent-binding-2026-11-03.md`.
+
+### Residual / not verified
+
+- **The provider-side exemption is documented, not measured** (above). Measuring it needs the staging flag
+  set — a dashboard click, or a PAT for the Management API.
+- **The structural test is structural.** It asserts ordering, the guard's own condition, and the absence of
+  a client-side call; it cannot prove the action enforces at runtime. The behavioural proof is the deployed
+  browser verification recorded in the evidence file.
+- **The wallet signature-relay phishing risk** (the same review's second finding) is **not addressed here**;
+  it is a documented threat-model item and belongs in its own change.
+- Other sessions are not revoked beyond what Supabase does on a password change; unchanged by this fix.
+
+---
+
 ## Summary
 
 | ID | Risk | Status | Owner | Review |
@@ -1509,6 +1616,7 @@ by `lib/netlify-build-ignore.test.ts`. Evidence: `evidence/netlify-build-ignore-
 | **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | ✅ **RELEASED 2026-10-27** (PR #71, `4b37746`). One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Production verified: one header, devnet gone. Static assets carry no CSP (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | closed |
 | **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` (direct, unused, high) was **removed**. `uuid` **assessed — not reachable**: no dependency calls the affected `v3`/`v5`/`v6`, and the measured impact is silent truncation (integrity only). Static analysis, no runtime trace. | Shri (interim) | open |
 | **R-019** | **A merge to `main` can silently not release (Netlify build quota)** | **MITIGATED 2026-10-27; residual OPEN.** The quota was exhausted and production stayed at `acec64d` while `main` was `7671f85` — CI green, nothing failed. Cause largely removed: `[build] ignore` rules on both sites (docs live *inside* the app, so docs-only merges cost full builds) plus a diff-based gate on the browser-smoke job; verified by executing the stored commands against real refs and catching five mutations. **Still open: nothing fails when a production build is skipped** — the Netlify checks are not required. Rules **exercised live 2026-11-02**: a docs-only commit was skipped on both sites while an app-changing commit built; Netlify diffs against the branch's *previous* commit, not the base tip, so the smoke job now fails fast with an explicit "not a code defect" message when the head touches no app files. **Detection control built 2026-10-27**: `/api/version` reports the deployed commit and a workflow compares it with the merged SHA — asks production, since merge commits get no Netlify signal at all. **Enforcement ENABLED 2026-11-03**: `Production is serving main` is a required check and `VERSION_ENDPOINT_REQUIRED=true`; validated green on a real PR first, which caught a bug in the check itself (`git log -1 -- <path>` skipped a merge commit via history simplification). | Shri (interim) | open |
+| **R-020** | **A wallet session could set an email password (wallet as a recovery credential)** | **FIX BUILT 2026-11-03 — pending release.** Raised by independent review as *"password recovery may be accessible through an ordinary wallet session"*. `/auth/reset-password` checked only that *a* session existed, and the form changed the password from the browser. **Measured on staging 2026-11-03**: a wallet-class session (`amr=[{"method":"otp"}]` — the same class as a genuine recovery session) changed the password with no `current_password` and no nonce, proven by password grant. Production has both password-change protections ON and **neither helps** (the current-password check is skipped for `otp`/`magiclink`/`recovery` sessions; reauthentication only bites after 24h) — documented, not measured here. Staging has both OFF, so it could not detect this class at all. **Fix:** a signed, 30-minute, `httpOnly` recovery-intent marker set by `/auth/callback` only for the reset path, verified in a Server Action before the password is touched. 5/5 mutations caught. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See

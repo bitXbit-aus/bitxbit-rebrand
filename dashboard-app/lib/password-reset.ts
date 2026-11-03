@@ -106,3 +106,22 @@ export function validateNewPassword(
   }
   return null;
 }
+
+/**
+ * Shown when the session is not authorised to set a password — i.e. it did not
+ * arrive through a reset link.
+ *
+ * Lives here, not in the Server Action: a `"use server"` module may only export
+ * async functions, so a constant exported from it fails the build. It is also the
+ * kind of copy that should be testable, and this file is pure.
+ *
+ * It deliberately describes the required action rather than the policy, so it does
+ * not disclose why a session was refused.
+ */
+export const RESET_NOT_AUTHORISED_MESSAGE =
+  "This page only works from a password reset link. Request a new link and follow it to set your password.";
+
+/** State shape shared by the reset Server Action and the form that calls it. */
+export interface ResetPasswordState {
+  error: string | null;
+}
