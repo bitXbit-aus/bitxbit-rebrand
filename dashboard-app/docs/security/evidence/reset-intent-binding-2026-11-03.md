@@ -143,10 +143,25 @@ Staging `auth.users` back to **20**, **0** probe leftovers. The cookie header ca
 measurement was mode-0600 and has been deleted; the throwaway user was deleted; probe scripts print no
 secret values.
 
+## Owner confirmation — the emailed hop, 2026-11-03
+
+Merged as PR #80 → `main` `c33f76f`, with production deploy `ready` for that commit and
+`GET https://app.bitxbit.com.au/api/version` reporting it. The R-019 control observed the transition
+itself (it read `6fe3ad6`, waited through the build, then *"Production is serving c33f76f — the merge
+shipped"*).
+
+**The owner then completed a real password recovery against a live account on the released revision** —
+requesting the reset, following the emailed link, setting a new password, and signing in with it. This is
+the one segment no gate here can reach, and it had to be re-confirmed rather than inherited, because this
+release changed the shape of the flow: the password change now runs in a Server Action. The identifier is
+deliberately not reproduced in this record.
+
+With that, R-020 is **closed**. **M8 independent human review is waived under D5 — waived, not satisfied.**
+
 ## Not verified / residual
 
-- **The provider-side exemption is documented, not measured** (Measurement 2).
-- **The emailed-link hop is not performed here** (above) — owner confirmation needed for this revision.
+- **The provider-side exemption is documented, not measured** (Measurement 2) — a limitation of this
+  analysis, not an open exposure, since the fix no longer depends on that setting.
 - **The structural test cannot prove runtime enforcement.** The deployed browser run above is the
   behavioural proof; the structural test guards against regression in the wiring.
 - **Wallet signature-relay phishing** (the same review's second finding) is deliberately not addressed in
