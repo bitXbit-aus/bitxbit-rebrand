@@ -152,10 +152,26 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags origin "$BASE_REF"
-          # Newest commit on main that changes something the app actually ships.
-          sha=$(git log -1 --format=%H FETCH_HEAD -- dashboard-app ':(exclude)dashboard-app/docs' || true)
+          BASE=$(git rev-parse FETCH_HEAD)
+          # Walk main's FIRST-PARENT history and take the newest commit whose own
+          # diff against its first parent changes something ship-able.
+          #
+          # NOT `git log -1 -- <path>`: with default history simplification a merge
+          # commit that is TREESAME to one parent for those paths is omitted, so on
+          # this merge-heavy main it returned 4e43e75 — a commit that is not even on
+          # main's first-parent line — while production was serving bc7901d. The
+          # check then polled for a commit that could never appear and failed.
+          # Caught on a throwaway PR while validating the check BEFORE making it
+          # required; this is why that validation step exists.
+          sha=""
+          while read -r c; do
+            if ! git diff --quiet "$c^" "$c" -- dashboard-app ':(exclude)dashboard-app/docs' 2>/dev/null; then
+              sha="$c"
+              break
+            fi
+          done < <(git rev-list --first-parent -n 300 "$BASE")
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "main's newest ship-able commit: ${sha:-none}"
+          echo "main's newest ship-able commit: ${sha:-none} (walked from $BASE)"
 
       - name: Verify production is serving it
         env:
