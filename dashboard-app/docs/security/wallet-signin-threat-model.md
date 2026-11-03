@@ -141,6 +141,23 @@ someone holding the wallets. That verification is the owner's.
 
 See above. Documented so it is not re-proposed as a fix.
 
+## Verification run — 2026-11-03, deploy-preview-82
+
+```
+26 assertion(s) passed, 0 failed
+wallet sign-in end-to-end verification PASSED
+```
+
+Run against the preview of the change that documents this risk (`npm run test:wallet-signin`). It covers
+the full HTTP surface with real keypairs: challenge issuance, a completed sign-in with a session that
+authenticates `/dashboard`, every negative case (wrong signer, replayed nonce, unverified wallet,
+unregistered wallet), the enumeration guarantee, and the two R-021 assertions above. Teardown proved clean
+(no challenge rows, no disposable users).
+
+**Before this change the same harness reported 23 passed / 1 failed on every deployment** — a stale
+assertion read the message host from line 1, the position it held in the SIWS layout the message no longer
+uses. A permanently red harness is not a gate, which is why it is fixed here rather than noted.
+
 ## What this document does not claim
 
 - It does not claim the risk is mitigated. It is **accepted and open** (R-021).
