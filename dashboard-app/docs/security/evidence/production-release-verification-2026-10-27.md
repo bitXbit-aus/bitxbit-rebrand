@@ -111,6 +111,49 @@ Baseline 7/7 → each mutation 1 fail → restored 7/7.
 because the opposite outcome is the trap: an assertion that never matches anything is indistinguishable
 from one that is satisfied.
 
+## Live in production — measured after the deploy
+
+The control is now live. Production deploy `bc7901d` reached `ready`, and:
+
+```
+$ curl -sS https://app.bitxbit.com.au/api/version
+{"deployedCommit":"bc7901d1949e83008dabd77f20c74de78a273529","context":null,"production":false}
+HTTP 200
+```
+
+`deployedCommit` is exactly the merge commit on `main` — the primary signal works in production.
+
+**Correction to the local example above.** That run printed `"context":"production","production":true`
+because `CONTEXT` was set in the shell. In production it is **`null`**: `CONTEXT` is a **build-time**
+variable on Netlify and is **not present in the running function**, so `context`/`production` will always
+be null/false there. This is why the control keys on `deployedCommit` alone and never on the `production`
+flag — and why `lib/deploy-version.test.ts` asserts that an absent context must not read as production. The
+two informational fields are misleading in production and should either be inlined at build time like the
+commit, or dropped. **Not fixed here** — recorded rather than left as a trap.
+
+**Real CI verification** — workflow dispatch run `41602629205` on `main`:
+
+```
+Ship-able files changed - a production deploy is expected.
+tick 1/40: production reports 'bc7901d…', expected 'bc7901d…'
+Production is serving bc7901d… - the merge shipped.        -> success
+```
+
+That is the control doing its job on a genuine merge, not on a fixture.
+
+**A note on how this PR was branched.** The R-019 work was started from the *previous* branch's head rather
+than from `main`, so this PR was implicitly stacked on the build-ignore PR: its first diff showed 14 files.
+Once the build-ignore PR merged first, the diff settled at the 9 files that belong to this change. Worth
+knowing when reading the history — the stacking was not intended, and the merge order happened to absorb it
+cleanly.
+
+**The browser smoke job went red on the reconcile merge** — by design. That commit changed nothing under
+`dashboard-app` outside docs relative to the branch's previous commit, so Netlify skipped the build and the
+job failed fast with *"This is not a code defect"*. The head tree was **byte-identical** to `4e43e75`
+(`git diff --stat` between them: 0 files), which is the commit the suite had already passed on — so the
+content was verified, at its own commit. That is the documented trade-off: a loud failure over a silent
+skip.
+
 ## Enabling it as a required check
 
 The check name to require is **`Production is serving main`**. Not enabled by this change.
