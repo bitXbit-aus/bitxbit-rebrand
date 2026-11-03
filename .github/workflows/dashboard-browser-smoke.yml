@@ -191,7 +191,20 @@ jobs:
             state=$(echo "$statuses" | jq -r '[.[] | select(.context=="netlify/bitxbit-dashboard/deploy-preview")][0].state // "none"')
             url=$(echo "$statuses" | jq -r '[.[] | select(.context=="netlify/bitxbit-dashboard/deploy-preview" and .state=="success")][0].target_url // ""')
             echo "tick $i/$BUDGET: state=$state url=${url:-none}"
-            if [ -n "$url" ]; then PREVIEW_URL="$url"; break; fi
+            if [ -n "$url" ]; then
+              # A CANCELED preview is reported as state=success with the ADMIN url
+              # ("Deploy Preview canceled." -> app.netlify.com/projects/.../deploys/...).
+              # Accepting that made the suite run against the Netlify admin page and
+              # fail for a reason that had nothing to do with the code. Only a real
+              # preview host is usable.
+              case "$url" in
+                *"--bitxbit-dashboard.netlify.app"*|*"//bitxbit-dashboard.netlify.app"*)
+                  PREVIEW_URL="$url"; break ;;
+                *)
+                  echo "ignoring non-preview url: $url"
+                  url="" ;;
+              esac
+            fi
             if [ "$state" = "pending" ]; then SAW_PENDING=1; fi
             if [ "$state" = "failure" ] || [ "$state" = "error" ]; then
               # NOTE: Netlify reports a SKIPPED build through this same status as

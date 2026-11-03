@@ -157,4 +157,9 @@ test("the smoke suite is gated on the dashboard actually changing", () => {
     "the wait step must fail FAST with an explicit reason when the head commit changes no app files, " +
       "instead of polling 20 minutes for a preview that Netlify will never build"
   );
+  assert.ok(
+    /Deploy Preview canceled|--bitxbit-dashboard\.netlify\.app/ .test(smokeWorkflow),
+    "the wait step must reject a CANCELED preview: Netlify reports it as state=success carrying the " +
+      "Netlify ADMIN url, and accepting that runs the suite against app.netlify.com instead of the app"
+  );
 });
