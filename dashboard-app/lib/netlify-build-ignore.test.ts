@@ -144,8 +144,11 @@ test("the smoke suite is gated on the dashboard actually changing", () => {
   );
   assert.ok(
     /needs:\s*changes/.test(smokeWorkflow) &&
-      /needs\.changes\.outputs\.app_changed\s*==\s*'true'/.test(smokeWorkflow),
-    "the browser-smoke job must depend on the change detection and run only when the app changed"
+      /needs\.changes\.outputs\.app_changed\s*==\s*'true'/.test(smokeWorkflow) &&
+      /needs\.changes\.outputs\.head_touches_app\s*==\s*'true'/.test(smokeWorkflow),
+    "the browser-smoke job must depend on the change detection and run only when BOTH the PR touches the " +
+      "app and this commit does: a docs-only head produces no preview, so the suite would fail for a " +
+      "reason unrelated to the code"
   );
   assert.ok(
     /head_touches_app/.test(smokeWorkflow),

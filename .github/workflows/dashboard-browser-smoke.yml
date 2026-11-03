@@ -128,7 +128,18 @@ jobs:
     name: Browser smoke against the deploy preview
     needs: changes
     # Skipped (not failed, and not silently green) when the dashboard is untouched.
-    if: needs.changes.outputs.app_changed == 'true'
+    #
+    # ALSO skipped when THIS COMMIT changes no app files, even if the PR as a whole does.
+    # Netlify diffs a deploy against its own cached ref, so such a commit often produces
+    # no preview at all - and the suite would then fail for a reason unrelated to the
+    # code. Observed twice on legitimate docs commits before this was fixed; a check that
+    # cries wolf on every documentation change is worse than no check. The app changes in
+    # the PR were verified at their own commit, where the suite did run.
+    #
+    # Residual risk, stated: a red smoke run on an earlier commit could be followed by a
+    # docs-only commit whose run is skipped. The smoke suite is NOT a required check, so
+    # the guard there is the reviewer, not the gate.
+    if: needs.changes.outputs.app_changed == 'true' && needs.changes.outputs.head_touches_app == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
