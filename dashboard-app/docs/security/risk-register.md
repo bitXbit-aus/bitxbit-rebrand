@@ -1562,6 +1562,24 @@ The guard is mutation-verified: 5/5 reintroduced defects are each caught by thei
 `false &&` (which still *reads* as enforced); the marker deleted without its path (a silent no-op that
 leaves a live marker); and the marker issued for every path instead of only the reset path.
 
+### Verified in a deployment 2026-11-03
+
+On `deploy-preview-80` (staging-backed), in a real Chromium:
+
+- **Refused without the marker** — a valid password session requesting the reset page gets
+  `307 → /auth/login?error=reset_required`, measured on the raw response so the refusing layer is
+  unambiguous (middleware is a pass-through for that path). The same session gets `200` on `/dashboard`,
+  which proves the refusal is the marker and not a broken session. The form is not served.
+- **Accepted with the marker** — the form renders and the change completes end to end: the old password is
+  then **rejected** and the new one **accepted** by password grant.
+- **Stated limitation:** the marker in the positive run was minted by the harness with the same construction
+  and key resolution the server uses, because the emailed hop cannot be performed without a mailbox — a
+  server-generated `generateLink` redirects with an **implicit** `#access_token`, not the `?code=` this
+  app's callback exchanges. The emailed hop therefore remains **owner-confirmation**, as it was for the
+  original reset work.
+
+Evidence: `evidence/reset-intent-binding-2026-11-03.md`.
+
 ### Residual / not verified
 
 - **The provider-side exemption is documented, not measured** (above). Measuring it needs the staging flag
