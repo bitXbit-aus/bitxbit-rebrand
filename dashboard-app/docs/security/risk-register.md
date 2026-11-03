@@ -1692,11 +1692,15 @@ Two properties were treated as load-bearing, and both are mutation-verified:
   with `reason` — so `not_configured` and provider failures are visible rather than looking like "nothing
   happened". That is the same failure mode this whole entry is about, so it is recorded rather than assumed.
 
-**Outstanding owner action — the control is inert until this is done.** The app has no mailer and
-`RESEND_API_KEY` is **not set on the dashboard site** (verified). Without it, no alert is sent; the sign-in
-still works and the audit row records `not_configured`. The key must be set in **production, preview and
-branch-deploy** contexts. `SECURITY_NOTIFICATION_FROM` is optional and defaults to a `bitxbit.com.au`
-address, which the provider already sends auth email from.
+**Outstanding owner action — the control is inert until this is done.** The **application** has no
+mail-sending code path: Supabase Auth sends its own templated auth email (including the password reset the
+owner confirmed) through SMTP configured in the Supabase dashboard, and that channel cannot be asked to send
+an arbitrary message. So the alert needs an application-side transport, and `RESEND_API_KEY` is **not set on
+the dashboard site** (verified). Without it, no alert is sent; the sign-in still works and the audit row
+records `not_configured`. The key must be set in **production, preview and branch-deploy** contexts.
+`SECURITY_NOTIFICATION_FROM` is optional and defaults to a `bitxbit.com.au` address, which the provider
+already sends auth email from — the same provider, so **no new vendor is required**, only an API key
+distinct from the SMTP password held in Supabase.
 
 **What is NOT verified:** no email has been sent end to end, because no key exists to send with. The
 payload, escaping, fail-soft behaviour and wiring are tested; the delivery is not. Confirming a received
