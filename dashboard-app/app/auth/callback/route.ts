@@ -4,6 +4,12 @@ import { safeAuthNextPath } from "@/lib/auth-redirect";
 import { resolveAuthRedirectBase } from "@/lib/auth-callback-url";
 import { parseHostPolicy } from "@/lib/host-validation";
 import { withAuthNoStore } from "@/lib/supabase/response-cache";
+import {
+  PASSWORD_RESET_COOKIE,
+  RESET_PASSWORD_PATH,
+  createResetMarker,
+  resetMarkerKey,
+} from "@/lib/password-reset-marker";
 import { NextResponse } from "next/server";
 
 function isUuid(value: string): boolean {
@@ -42,7 +48,34 @@ export async function GET(request: Request) {
       // This redirect sets session cookies, so it must never be cached — a CDN or reverse
       // proxy serving it to another user would leak a session. See @supabase/ssr's setAll
       // cache guidance.
-      return withAuthNoStore(NextResponse.redirect(`${appUrl}${next}`));
+      const response = NextResponse.redirect(`${appUrl}${next}`);
+
+      // A password reset link is the ONLY thing that marks a session as authorised to
+      // set a new password. The marker is set here — and only when the sanitised `next`
+      // is exactly the reset page — so it cannot be obtained by any other route into
+      // the application, which is what stops a wallet (or any other) session from
+      // setting an email password it never received an email for.
+      //
+      // `next` is the sanitised value from safeAuthNextPath, never the raw query.
+      if (next === RESET_PASSWORD_PATH) {
+        const key = resetMarkerKey();
+        if (key) {
+          const { value, maxAge } = createResetMarker(data.user.id, key);
+          response.cookies.set({
+            name: PASSWORD_RESET_COOKIE,
+            value,
+            httpOnly: true,
+            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            // Scoped to the page that consumes it, so it is not attached to every
+            // subsequent request in the session.
+            path: RESET_PASSWORD_PATH,
+            maxAge,
+          });
+        }
+      }
+
+      return withAuthNoStore(response);
     }
   }
 

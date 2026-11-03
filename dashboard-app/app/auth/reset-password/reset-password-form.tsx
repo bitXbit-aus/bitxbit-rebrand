@@ -1,57 +1,27 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { toast } from "@/components/ui/use-toast";
-import { MIN_PASSWORD_LENGTH, validateNewPassword } from "@/lib/password-reset";
+import { MIN_PASSWORD_LENGTH, type ResetPasswordState } from "@/lib/password-reset";
+import { resetPassword } from "./actions";
 
+/**
+ * Set-new-password form.
+ *
+ * The password change runs in a **Server Action**, not here. It used to call
+ * `supabase.auth.updateUser` from the browser, which meant the only thing between a
+ * wallet session and a new email password was a page check — and a page check is
+ * bypassable by posting to the auth endpoint directly, which is exactly what the
+ * exploit probe did. The action verifies the recovery-intent marker server-side
+ * before changing anything, so this component decides only what to *show*.
+ */
 export function ResetPasswordForm({ email }: { email: string }) {
-  const supabase = createClient();
-  const router = useRouter();
-  const [password, setPassword] = useState("");
-  const [confirmation, setConfirmation] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const localError = validateNewPassword(password, confirmation);
-    if (localError) {
-      setError(localError);
-      return;
-    }
-
-    setError(null);
-    setLoading(true);
-
-    // updateUser acts on the CURRENT session (the one the recovery link
-    // established), so this can only ever change the signed-in user's own
-    // password — it is not a path to another account.
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-
-    setLoading(false);
-
-    if (updateError) {
-      setError(updateError.message);
-      toast({
-        title: "Could not update password",
-        description: updateError.message,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    toast({
-      title: "Password updated",
-      description: "You're signed in with your new password.",
-    });
-    router.push("/dashboard");
-  };
+  const [state, formAction, pending] = useActionState<ResetPasswordState, FormData>(
+    resetPassword,
+    { error: null }
+  );
 
   return (
     <div className="space-y-6">
@@ -69,15 +39,14 @@ export function ResetPasswordForm({ email }: { email: string }) {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form action={formAction} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="password">New password</Label>
           <Input
             id="password"
+            name="password"
             type="password"
             placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
             autoComplete="new-password"
             minLength={MIN_PASSWORD_LENGTH}
             required
@@ -87,24 +56,23 @@ export function ResetPasswordForm({ email }: { email: string }) {
           <Label htmlFor="confirm-password">Confirm new password</Label>
           <Input
             id="confirm-password"
+            name="confirmation"
             type="password"
             placeholder="••••••••"
-            value={confirmation}
-            onChange={(e) => setConfirmation(e.target.value)}
             autoComplete="new-password"
             minLength={MIN_PASSWORD_LENGTH}
             required
           />
         </div>
 
-        {error && (
+        {state.error && (
           <p className="text-sm text-destructive" role="alert">
-            {error}
+            {state.error}
           </p>
         )}
 
-        <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? "Updating..." : "Update password"}
+        <Button type="submit" className="w-full" disabled={pending}>
+          {pending ? "Updating..." : "Update password"}
         </Button>
       </form>
     </div>
