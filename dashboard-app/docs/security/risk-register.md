@@ -1488,8 +1488,10 @@ by `lib/netlify-build-ignore.test.ts`. Evidence: `evidence/netlify-build-ignore-
 
 ## R-020 — A wallet session could set an email password (the wallet as a recovery credential)
 
-**Status:** **FIX BUILT 2026-11-03 — pending release.** **Severity:** account takeover — a held wallet key
-could mint a standing password credential for the account.
+**Status:** **RELEASED 2026-11-03 (PR #80, `c33f76f`).** Production is serving the fix and the R-019 control
+verified the release. **Owner end-to-end confirmation of the emailed hop is outstanding** — the reset flow
+changed shape, and that hop is the one segment no gate here can reach. **Severity:** account takeover — a
+held wallet key could mint a standing password credential for the account.
 **Owner:** Shri — interim accountable owner.
 
 Raised by independent review (2026-11-03) as *"password recovery may be accessible through an ordinary
@@ -1580,6 +1582,19 @@ On `deploy-preview-80` (staging-backed), in a real Chromium:
 
 Evidence: `evidence/reset-intent-binding-2026-11-03.md`.
 
+### Released 2026-11-03
+
+Merged as PR #80 → `main` `c33f76f`; production deploy `ready` for that commit and
+`GET https://app.bitxbit.com.au/api/version` reports it, so `main` and production agree. The R-019 control
+observed the transition itself (saw `6fe3ad6`, waited through the build, then *"Production is serving
+c33f76f — the merge shipped"*). Live auth routes after the change: `/auth/login` 200, `/auth/forgot-password`
+200, `/auth/reset-password` **307 → `/auth/login?error=reset_required`** (no session), and
+`/auth/callback` with no `code` **307 → `?error=callback`**.
+
+**Outstanding: the owner re-confirms one real password reset end to end.** The emailed hop cannot be
+performed here, and this release changed the shape of the flow (the change now runs in a Server Action), so
+the previous owner confirmation does not carry over to this revision.
+
 ### Residual / not verified
 
 - **The provider-side exemption is documented, not measured** (above). Measuring it needs the staging flag
@@ -1616,7 +1631,7 @@ Evidence: `evidence/reset-intent-binding-2026-11-03.md`.
 | **R-017** | **CSP defined twice (CDN rule + middleware) — drift risk** | ✅ **RELEASED 2026-10-27** (PR #71, `4b37746`). One definition in `lib/csp.ts`; `netlify.toml` sets none and a test fails if one reappears; devnet removed from `connect-src` (browser is mainnet-pinned). Production verified: one header, devnet gone. Static assets carry no CSP (accepted). `'unsafe-eval'` retained — separate hardening. | Shri (interim) | closed |
 | **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` (direct, unused, high) was **removed**. `uuid` **assessed — not reachable**: no dependency calls the affected `v3`/`v5`/`v6`, and the measured impact is silent truncation (integrity only). Static analysis, no runtime trace. | Shri (interim) | open |
 | **R-019** | **A merge to `main` can silently not release (Netlify build quota)** | **MITIGATED 2026-10-27; residual OPEN.** The quota was exhausted and production stayed at `acec64d` while `main` was `7671f85` — CI green, nothing failed. Cause largely removed: `[build] ignore` rules on both sites (docs live *inside* the app, so docs-only merges cost full builds) plus a diff-based gate on the browser-smoke job; verified by executing the stored commands against real refs and catching five mutations. **Still open: nothing fails when a production build is skipped** — the Netlify checks are not required. Rules **exercised live 2026-11-02**: a docs-only commit was skipped on both sites while an app-changing commit built; Netlify diffs against the branch's *previous* commit, not the base tip, so the smoke job now fails fast with an explicit "not a code defect" message when the head touches no app files. **Detection control built 2026-10-27**: `/api/version` reports the deployed commit and a workflow compares it with the merged SHA — asks production, since merge commits get no Netlify signal at all. **Enforcement ENABLED 2026-11-03**: `Production is serving main` is a required check and `VERSION_ENDPOINT_REQUIRED=true`; validated green on a real PR first, which caught a bug in the check itself (`git log -1 -- <path>` skipped a merge commit via history simplification). | Shri (interim) | open |
-| **R-020** | **A wallet session could set an email password (wallet as a recovery credential)** | **FIX BUILT 2026-11-03 — pending release.** Raised by independent review as *"password recovery may be accessible through an ordinary wallet session"*. `/auth/reset-password` checked only that *a* session existed, and the form changed the password from the browser. **Measured on staging 2026-11-03**: a wallet-class session (`amr=[{"method":"otp"}]` — the same class as a genuine recovery session) changed the password with no `current_password` and no nonce, proven by password grant. Production has both password-change protections ON and **neither helps** (the current-password check is skipped for `otp`/`magiclink`/`recovery` sessions; reauthentication only bites after 24h) — documented, not measured here. Staging has both OFF, so it could not detect this class at all. **Fix:** a signed, 30-minute, `httpOnly` recovery-intent marker set by `/auth/callback` only for the reset path, verified in a Server Action before the password is touched. 5/5 mutations caught. | Shri (interim) | open |
+| **R-020** | **A wallet session could set an email password (wallet as a recovery credential)** | **RELEASED 2026-11-03 (PR #80, `c33f76f`)** — production serving it, verified by the R-019 control. Raised by independent review as *"password recovery may be accessible through an ordinary wallet session"*. `/auth/reset-password` checked only that *a* session existed, and the form changed the password from the browser. **Measured on staging 2026-11-03**: a wallet-class session (`amr=[{"method":"otp"}]` — the same class as a genuine recovery session) changed the password with no `current_password` and no nonce, proven by password grant. Production has both password-change protections ON and **neither helps** (the current-password check is skipped for `otp`/`magiclink`/`recovery` sessions; reauthentication only bites after 24h) — documented, not measured here. Staging has both OFF, so it could not detect this class at all. **Fix:** a signed, 30-minute, `httpOnly` recovery-intent marker set by `/auth/callback` only for the reset path, verified in a Server Action before the password is touched. 5/5 mutations caught. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
