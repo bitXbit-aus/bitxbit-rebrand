@@ -46,11 +46,35 @@ import bs58 from "bs58";
  *   integrity         : Ed25519 over the stored bytes, not over anything the client
  *                       says it signed
  *
- * The security boundary was never the message text. A hostile site could induce a
- * signature over a message that merely SAYS "app.bitxbit.com.au" — but it would
- * carry that site's nonce, which does not exist in our challenge table, so our
- * server refuses it. Trust comes from the nonce we minted and stored, not from a
- * string a wallet helpfully pattern-matched.
+ * The security boundary was never the message text — but the argument that used to
+ * stand here was WRONG, and it was corrected on 2026-11-03 after the relay it
+ * dismissed was measured working end to end.
+ *
+ * What it claimed: "a hostile site could induce a signature over a message that
+ * merely SAYS app.bitxbit.com.au — but it would carry that site's nonce, which does
+ * not exist in our challenge table, so our server refuses it." That only holds if a
+ * hostile site cannot obtain one of our nonces. **It can.** The challenge endpoint
+ * is public by design — it must answer for an unregistered wallet without becoming
+ * an enumeration oracle — so an attacker requests a challenge for the victim's
+ * address, is handed a genuine nonce and the exact message we stored, shows that
+ * message to the victim on another site, and relays the signature back. Nothing
+ * binds a challenge to the client that requested it (the response carries no
+ * cookie and no client token), so the server cannot tell the two apart and mints
+ * the session.
+ *
+ * What is still true, and is why dropping SIWS costs us nothing: trust comes from
+ * the nonce WE minted and stored, not from a string a wallet pattern-matched. That
+ * gives replay protection, freshness and integrity over the exact stored bytes. It
+ * does NOT give origin binding — a valid nonce proves only that somebody asked us
+ * for one, never where the signing prompt was displayed.
+ *
+ * The `Site:` line below is therefore for the USER's benefit — so a person can see
+ * what they are being asked to sign for — and is a detection aid, not a control. A
+ * hostile site can display this message verbatim.
+ *
+ * The residual is documented in docs/security/wallet-signin-threat-model.md and
+ * tracked as **R-021**; `scripts/wallet-signin-verify.ts` asserts the open relay so
+ * the gap cannot be mistaken for a solved problem.
  *
  * ONE THING THAT IS STILL LOAD-BEARING: the message must not resemble an SIWS
  * message. A near-miss phrasing was enough to trigger Phantom's validator and a

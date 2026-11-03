@@ -1606,9 +1606,82 @@ runs in a Server Action. The identifier is deliberately not reproduced in this r
 - **The structural test is structural.** It asserts ordering, the guard's own condition, and the absence of
   a client-side call; it cannot prove the action enforces at runtime. The behavioural proof is the deployed
   browser verification recorded in the evidence file.
-- **The wallet signature-relay phishing risk** (the same review's second finding) is **not addressed here**;
-  it is a documented threat-model item and belongs in its own change.
+- **The wallet signature-relay phishing risk** (the same review's second finding) is a separate risk, now
+  measured and documented as **R-021**, with a mitigation proposed.
 - Other sessions are not revoked beyond what Supabase does on a password change; unchanged by this fix.
+
+---
+
+## R-021 — Wallet sign-in signature relay (a phished signature becomes a session)
+
+**Status:** **OPEN — measured, documented, mitigation proposed; not mitigated.** **Severity:** account
+takeover via phishing — requires victim interaction; not a forgery.
+**Owner:** Shri — interim accountable owner.
+**Threat model:** `wallet-signin-threat-model.md`
+
+Raised by independent review (2026-11-03) as *"wallet sign-in has a signature-relay phishing risk"*,
+recommended as a threat-model review. Adopted, reproduced, and documented.
+
+### The finding, measured 2026-11-03 (deploy-preview-80)
+
+The challenge endpoint is public by design, so an attacker can request a challenge **for the victim's wallet
+address**, show that message to the victim on another site, and relay the resulting signature back to
+`/api/auth/wallet/verify` for a session. A valid nonce proves only that somebody asked us for one — never
+which site displayed the prompt.
+
+| Measure | Result |
+|---|---|
+| `Set-Cookie` on the challenge response | **0** — nothing binds a challenge to the client that requested it |
+| Challenge requested with no browser context, completed by a different one | **HTTP 200, `ok: true`** |
+| That session against a protected page | **`GET /dashboard` → 200** |
+
+The harness now asserts both facts explicitly, so the gap cannot be mistaken for a solved problem. It also
+**failed on every deployment** before this change — a stale assertion parsed the host from line 1 of the
+message, which was the SIWS layout the message no longer uses. A harness that is always red is not a gate;
+that is fixed here too.
+
+### A false argument in the code, corrected
+
+`lib/wallet-crypto.ts` asserted the relay was already prevented — *"it would carry that site's nonce, which
+does not exist in our challenge table, so our server refuses it."* That holds only if a hostile site cannot
+obtain one of our nonces, and it can, trivially. The comment is replaced with the measured position. **This
+was the most consequential of the three defects**: a wrong security argument in the code is what stops
+anyone looking further.
+
+### The obvious fix is rejected, deliberately
+
+Binding the challenge to the requesting client — a cookie or token issued at challenge time — **does not
+close the relay**: the attacker requests the challenge and therefore receives whatever binding is issued. A
+cookie is a bearer token; `Origin` is caller-controlled for a server-side request. No secret exists
+pre-authentication that the attacker cannot also obtain. Shipping such a binding would replace an honest gap
+with a false claim of safety, so it is recorded as rejected rather than implemented.
+
+### Mitigations — options, with the decision open
+
+1. **Step-up verification for an unrecognised device (recommended).** Sign-in completes immediately on a
+   known device; an unrecognised one must pass one additional check bound to the account email before a
+   session is minted — a factor the relaying attacker does not have. Reuses the signed-cookie pattern
+   shipped for R-020. **Trade-off: wallet sign-in stops being single-step on a new device — an owner
+   decision, not an engineering one.**
+2. **Notify the account owner on wallet sign-in (cheap, detection only).** The app has no mailer today (auth
+   email goes through Supabase's SMTP), so this needs a small mail path. Bounds how long a relayed sign-in
+   goes unnoticed; prevents nothing.
+3. **Make the prompt unmistakable (cheap, needs a real-wallet test).** The headline currently reads
+   *"bitXbit wallet verification"* for a **sign-in** challenge; a line telling the user to check the address
+   bar would arm the victim. Both are edits to the signed text, and Phantom is already measured to refuse
+   some message shapes — so neither ships without being exercised on Phantom and Solflare by someone holding
+   those wallets.
+4. **Challenge binding — rejected** (above).
+
+**Related, already done:** a wallet session can no longer set an email password (R-020, released), removing
+one of the three escalations the review listed. High-value admin actions are already guarded by
+`requireCapability` and audited; a step-up there is a separate piece.
+
+### Not claimed
+
+The mitigation analysis is reasoning, not measurement; what is measured is the relay and the absence of any
+client binding. The measurement used a staging-backed preview with disposable fixtures, not production
+accounts. The risk is **open**.
 
 ---
 
@@ -1636,6 +1709,7 @@ runs in a Server Action. The identifier is deliberately not reproduced in this r
 | **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` (direct, unused, high) was **removed**. `uuid` **assessed — not reachable**: no dependency calls the affected `v3`/`v5`/`v6`, and the measured impact is silent truncation (integrity only). Static analysis, no runtime trace. | Shri (interim) | open |
 | **R-019** | **A merge to `main` can silently not release (Netlify build quota)** | **MITIGATED 2026-10-27; residual OPEN.** The quota was exhausted and production stayed at `acec64d` while `main` was `7671f85` — CI green, nothing failed. Cause largely removed: `[build] ignore` rules on both sites (docs live *inside* the app, so docs-only merges cost full builds) plus a diff-based gate on the browser-smoke job; verified by executing the stored commands against real refs and catching five mutations. **Still open: nothing fails when a production build is skipped** — the Netlify checks are not required. Rules **exercised live 2026-11-02**: a docs-only commit was skipped on both sites while an app-changing commit built; Netlify diffs against the branch's *previous* commit, not the base tip, so the smoke job now fails fast with an explicit "not a code defect" message when the head touches no app files. **Detection control built 2026-10-27**: `/api/version` reports the deployed commit and a workflow compares it with the merged SHA — asks production, since merge commits get no Netlify signal at all. **Enforcement ENABLED 2026-11-03**: `Production is serving main` is a required check and `VERSION_ENDPOINT_REQUIRED=true`; validated green on a real PR first, which caught a bug in the check itself (`git log -1 -- <path>` skipped a merge commit via history simplification). | Shri (interim) | open |
 | **R-020** | **A wallet session could set an email password (wallet as a recovery credential)** | ✅ **CLOSED 2026-11-03 (PR #80, `c33f76f`)** — production serving it, the R-019 control observed the release, and the **owner confirmed a real password recovery end to end on this revision**. **M8 waived under D5 — not satisfied.** Raised by independent review as *"password recovery may be accessible through an ordinary wallet session"*. `/auth/reset-password` checked only that *a* session existed, and the form changed the password from the browser. **Measured on staging 2026-11-03**: a wallet-class session (`amr=[{"method":"otp"}]` — the same class as a genuine recovery session) changed the password with no `current_password` and no nonce, proven by password grant. Production has both password-change protections ON and **neither helps** (the current-password check is skipped for `otp`/`magiclink`/`recovery` sessions; reauthentication only bites after 24h) — documented, not measured here. Staging has both OFF, so it could not detect this class at all. **Fix:** a signed, 30-minute, `httpOnly` recovery-intent marker set by `/auth/callback` only for the reset path, verified in a Server Action before the password is touched. 5/5 mutations caught. | Shri (interim) | closed |
+| **R-021** | **Wallet sign-in signature relay (a phished signature becomes a session)** | **OPEN — measured and documented 2026-11-03; mitigation proposed, not built.** A public challenge endpoint means an attacker can request a challenge **for the victim's wallet address**, show the message to the victim on another site, and relay the signature back for a session. **Measured on a staging-backed preview**: the challenge response carries **0** `Set-Cookie` headers (nothing binds it to the requesting client), a challenge requested with no browser context is completed by a different one (`ok: true`), and that session gets `/dashboard` 200. **A false argument in `lib/wallet-crypto.ts` claimed this was already prevented** (that a hostile site could not obtain one of our nonces) — corrected. Challenge binding is **rejected** as a fix, with the reasoning recorded, because the attacker receives whatever binding is issued. Recommended: **step-up verification on an unrecognised device** — an owner decision, since it makes wallet sign-in multi-step on a new device. Threat model: `wallet-signin-threat-model.md`. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
