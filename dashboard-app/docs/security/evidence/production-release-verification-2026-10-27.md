@@ -154,28 +154,56 @@ job failed fast with *"This is not a code defect"*. The head tree was **byte-ide
 content was verified, at its own commit. That is the documented trade-off: a loud failure over a silent
 skip.
 
-## Enabling it as a required check
+## Defects found by validating before enforcing
 
-The check name to require is **`Production is serving main`**. Not enabled by this change.
+Making the check green on a real PR — rather than enabling it and hoping — found three genuine defects.
+All three are fixed in the same change.
 
-Two things to weigh before enforcing it:
+1. **The check itself would have failed on every PR after a merge.** `git log -1 --format=%H -- <path>`
+   returned `4e43e75`, a commit that is not even on main's first-parent line, while production was serving
+   `bc7901d`: default history simplification omits a merge commit that is TREESAME to one parent for those
+   paths. The job then polled 20 minutes for a commit that could never appear. With `enforce_admins: true`
+   this would have **blocked every merge**. Replaced with a first-parent walk.
+2. **The browser-smoke wait accepted a canceled preview.** Netlify reports a *canceled* deploy as
+   `state=success` with `target_url` pointing at the Netlify **admin** page. The step took that as "the
+   preview" and ran Playwright against `app.netlify.com`, producing a suite failure that looked like a
+   browser regression and was not one. Now only a real preview host is accepted, and the assertion covers
+   it. *(Pre-existing, not introduced here — exposed by watching the job run.)*
+3. **`TICK_SECONDS` was referenced but not defined in that workflow** — it exists only in the sibling
+   release-verification workflow's env. Under `set -u` the wait step aborted at the first tick with
+   `unbound variable`, which reads exactly like a smoke failure. Both variables are now defined in the
+   workflow that uses them, and a test fails if one is referenced without being defined.
 
-- `enforce_admins: true` is set, so a required check that is red **cannot be bypassed**, not even by the
-  owner. That is the point of the check, but it means the failure must be resolvable — and it is: retry
-  the skipped deploy in the Netlify UI (a skipped deploy can be retried), or restore build capacity. Those
-  are actions outside the merge path, so the check cannot deadlock itself. **Merging more releases is
-  explicitly not the fix**, and the failure message says so.
-- It should be enabled only **after it has gone green once**, otherwise the first PR after this merges
-  carries a red check for a state it did not cause. The sequence to follow: merge this → confirm
-  `/api/version` answers on production → set the repository variable `VERSION_ENDPOINT_REQUIRED=true` →
-  confirm the check goes green on a real PR → then add it to branch protection.
+The lesson that generalises: **a red check is a claim, and it has to be read before it is believed.** Each
+of these three looked like a code or browser defect from the outside and was a defect in the checking
+machinery instead.
+
+## Enabling it as a required check — DONE 2026-11-03
+
+`Production is serving main` **is now a required status check on `main`**, and
+`VERSION_ENDPOINT_REQUIRED=true` is set. Read back from the API:
+
+```
+required_checks: ["Tests, migration replay, and build", "Production is serving main"]
+strict: true   enforce_admins: true
+```
+
+The order was deliberate and it paid for itself: the check was made **green on a real PR first**, and that
+run failed before it passed — which is how defect 1 above was found. Enabling it directly would have put a
+permanently failing required check on `main`, and with `enforce_admins: true` nobody could have bypassed it.
+
+The failure path stays non-deadlocking: retrying the skipped deploy in the Netlify UI, or restoring build
+capacity, are actions outside the merge path — and the failure message says outright that merging more
+releases will not fix it.
 
 ## Not verified
 
-- **The control has never observed a real production deploy transition.** Production has no `/api/version`
-  yet, so the endpoint's behaviour is proven from a real production build running locally, not from
-  Netlify's own runtime. The first genuine observation is the deploy of this change.
-- **`VERSION_ENDPOINT_REQUIRED` is unset**, so a missing endpoint still passes with a warning. Until it is
-  set, deleting the route would silently disable the control.
+- **The endpoint's behaviour is verified in production, but only for the happy path.** `/api/version`
+  answered correctly on the live site, and the control verified a real merge (`bc7901d`). What has not been
+  observed is the *failure* branch in production — no real merge has yet failed to ship since enforcement,
+  so "production is behind" has been exercised only against fixtures and a locally served build.
+- **`context`/`production` are null/false in production** — `CONTEXT` is build-time only on Netlify. The
+  control does not use them, but they should be inlined at build time or dropped. See the production
+  section above.
 - The 20-minute window is a judgement, not a measurement of this pipeline's worst case. Netlify builds here
   have taken ~1–4 minutes; a heavily queued build could exceed it and produce a false failure.
