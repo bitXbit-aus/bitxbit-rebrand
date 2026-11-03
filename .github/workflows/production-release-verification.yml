@@ -1,0 +1,201 @@
+name: Production release verification
+
+# WHY THIS EXISTS — R-019
+# -----------------------
+# On 2026-10-27 a merge to `main` never reached production. Netlify skipped the
+# build ("Skipped due to account builds usage exceeded") and recorded it only on
+# the deploy record — which GitHub never sees for a merge commit. CI was green,
+# `main` had moved, and production was still serving the previous commit. The
+# repository's operating assumption is that A MERGE TO `main` IS A RELEASE; it
+# had quietly stopped being true and nothing said so.
+#
+# Build-ignore rules (see each netlify.toml) removed the waste that exhausted the
+# quota, but they cannot prevent exhaustion and they do not detect it. THIS is the
+# detection: rather than asking Netlify whether it tried, ask production what it
+# is actually running.
+#
+#   GET https://app.bitxbit.com.au/api/version -> { deployedCommit, context, production }
+#
+# The commit is inlined at BUILD time (next.config.mjs `env`), so a deployment
+# that never built cannot report one — the endpoint answers from the artifact, not
+# from an intention.
+#
+# TWO JOBS, DELIBERATELY DIFFERENT
+#   `Release reached production`   — runs after a push to main. Post-hoc: it cannot
+#                                    gate the merge, it proves the release shipped
+#                                    or fails loudly that it did not.
+#   `Production is serving main`   — runs on PRs, and is the one to make a REQUIRED
+#                                    check: it refuses to add more releases while
+#                                    main's newest ship-able commit is not live.
+#
+# WHY NOT READ NETLIFY'S OWN STATUS instead: a production deploy for a merge
+# commit posts NOTHING to GitHub (measured on 7671f85, 4e47f50, acec64d — no check
+# runs, no statuses), and a skipped build is reported as `failure | "Deploy
+# Preview failed."`, byte-identical to a real build failure. There is nothing to
+# match on, and no token is required this way.
+#
+# RESOLUTION PATH when `Production is serving main` fails: the newest ship-able
+# commit's deploy was skipped or errored. Retry that deploy in the Netlify UI (a
+# skipped deploy can be retried) or restore build capacity, then re-run this check.
+# Merging more releases is not a fix and is exactly what the check is preventing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VERSION_URL: https://app.bitxbit.com.au/api/version
+  # 20 minutes: production builds here have taken ~1–4 minutes, so this absorbs a
+  # queue without failing inside a normal review cycle.
+  MAX_TICKS: "40"
+  TICK_SECONDS: "30"
+
+jobs:
+  release-reached-production:
+    name: Release reached production
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The parent of the pushed commit is needed for the change test below.
+          fetch-depth: 2
+
+      - name: Did this merge need to ship?
+        id: need
+        run: |
+          set -euo pipefail
+          # A merge commit's diff against its first parent is what the merge
+          # brought in. If nothing under the app changed, Netlify's [build] ignore
+          # skips the build by design and production keeps serving the previous
+          # app content — that is a correct outcome, not a missed release.
+          if git diff --quiet HEAD^ HEAD -- dashboard-app ':(exclude)dashboard-app/docs'; then
+            echo "needs_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing under dashboard-app changed (outside docs/) - no deploy expected."
+          else
+            echo "needs_deploy=true" >> "$GITHUB_OUTPUT"
+            echo "Ship-able files changed - a production deploy is expected."
+          fi
+
+      - name: Verify production is serving this commit
+        env:
+          SHA: ${{ github.sha }}
+          NEEDS_DEPLOY: ${{ steps.need.outputs.needs_deploy }}
+          # Bootstrap: before the version endpoint has ever been deployed, the
+          # control cannot read an answer. Set the repository variable to 'true'
+          # once the endpoint is live to make a MISSING endpoint a failure too —
+          # otherwise removing the route would silently disable this check.
+          ENDPOINT_REQUIRED: ${{ vars.VERSION_ENDPOINT_REQUIRED }}
+        run: |
+          set -euo pipefail
+
+          read_served() {
+            curl -sS --max-time 10 "$VERSION_URL" 2>/dev/null | jq -r '.deployedCommit // empty' 2>/dev/null || true
+          }
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$VERSION_URL" 2>/dev/null || echo 000)
+          if [ "$code" != "200" ]; then
+            if [ "${ENDPOINT_REQUIRED:-}" = "true" ]; then
+              echo "::error::$VERSION_URL answered $code. The release control cannot verify anything, and the endpoint is marked as required. Restore app/api/version or unset the VERSION_ENDPOINT_REQUIRED repository variable."
+              exit 1
+            fi
+            echo "::warning::$VERSION_URL answered $code - the version endpoint is not deployed yet, so this release cannot be verified. Bootstrap mode: set the VERSION_ENDPOINT_REQUIRED repository variable to 'true' once it is live."
+            exit 0
+          fi
+
+          if [ "$NEEDS_DEPLOY" != "true" ]; then
+            served=$(read_served)
+            echo "No deploy was expected for this merge; production reports '${served:-none}'."
+            echo "The merge changed no ship-able files, so production content is unchanged."
+            exit 0
+          fi
+
+          served=""
+          for i in $(seq 1 "$MAX_TICKS"); do
+            served=$(read_served)
+            echo "tick $i/$MAX_TICKS: production reports '${served:-none}', expected '$SHA'"
+            if [ "$served" = "$SHA" ]; then
+              echo "Production is serving $SHA - the merge shipped."
+              exit 0
+            fi
+            sleep "$TICK_SECONDS"
+          done
+
+          echo "::error::Production is still serving '${served:-nothing}' after $(( MAX_TICKS * TICK_SECONDS ))s; the merge to main did NOT reach production. This is R-019. Inspect the Netlify deploy for $SHA: a skipped build (account build minutes exhausted) or a build error. Retry the deploy in Netlify once resolved."
+          exit 1
+
+  production-is-serving-main:
+    name: Production is serving main
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find main's newest ship-able commit
+        id: newest
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE_REF"
+          # Newest commit on main that changes something the app actually ships.
+          sha=$(git log -1 --format=%H FETCH_HEAD -- dashboard-app ':(exclude)dashboard-app/docs' || true)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "main's newest ship-able commit: ${sha:-none}"
+
+      - name: Verify production is serving it
+        env:
+          EXPECTED: ${{ steps.newest.outputs.sha }}
+          ENDPOINT_REQUIRED: ${{ vars.VERSION_ENDPOINT_REQUIRED }}
+        run: |
+          set -euo pipefail
+
+          read_served() {
+            curl -sS --max-time 10 "$VERSION_URL" 2>/dev/null | jq -r '.deployedCommit // empty' 2>/dev/null || true
+          }
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$VERSION_URL" 2>/dev/null || echo 000)
+          if [ "$code" != "200" ]; then
+            if [ "${ENDPOINT_REQUIRED:-}" = "true" ]; then
+              echo "::error::$VERSION_URL answered $code. The release control cannot verify anything, and the endpoint is marked as required."
+              exit 1
+            fi
+            echo "::warning::$VERSION_URL answered $code - the version endpoint is not deployed yet. Bootstrap mode; the check is INACTIVE until it lands. Set the VERSION_ENDPOINT_REQUIRED repository variable to 'true' once it is live."
+            exit 0
+          fi
+
+          if [ -z "${EXPECTED:-}" ]; then
+            echo "main has no ship-able commits to verify; nothing to compare."
+            exit 0
+          fi
+
+          # Poll rather than fail on first look: immediately after a merge the
+          # deploy is legitimately still building, and a flapping required check
+          # teaches people to ignore it.
+          served=""
+          for i in $(seq 1 "$MAX_TICKS"); do
+            served=$(read_served)
+            echo "tick $i/$MAX_TICKS: production reports '${served:-none}', main expects '$EXPECTED'"
+            if [ "$served" = "$EXPECTED" ]; then
+              echo "Production is serving main's newest ship-able commit - releases are keeping up."
+              exit 0
+            fi
+            sleep "$TICK_SECONDS"
+          done
+
+          echo "::error::Production is serving '${served:-nothing}' but main's newest ship-able commit is $EXPECTED. A previous merge did not reach production (R-019): its Netlify build was skipped or failed - commonly the account build minutes are exhausted. Retry that deploy in the Netlify UI or restore build capacity, then re-run this check. Merging more releases will not fix it."
+          exit 1

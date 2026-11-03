@@ -70,6 +70,21 @@ const BIGINT_BUFFER_NATIVE_EXCLUDE = ['node_modules/bigint-buffer/build/**'];
 
 const nextConfig = {
   reactStrictMode: true,
+  // R-019 — the deployed commit, captured at BUILD time.
+  //
+  // Netlify documents `COMMIT_REF` as available *during the build*; a request-time
+  // read cannot be relied on to find it inside the running function. Next inlines
+  // the entries here into the bundle at build time, so the artifact carries the
+  // commit it was built from — which is exactly the claim a post-merge check needs
+  // to verify. A build that never ran sets nothing, and app/api/version reports
+  // null rather than a placeholder.
+  //
+  // Deliberately NOT prefixed NEXT_PUBLIC_: this is not needed in the browser, and
+  // leaving it unprefixed keeps the value out of the client bundle even though it
+  // is not sensitive (a commit SHA of a public repository).
+  env: {
+    DEPLOYED_COMMIT: process.env.COMMIT_REF ?? '',
+  },
   images: {
     domains: ['localhost'],
     unoptimized: true,
