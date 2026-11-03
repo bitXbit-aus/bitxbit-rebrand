@@ -162,4 +162,17 @@ test("the smoke suite is gated on the dashboard actually changing", () => {
     "the wait step must reject a CANCELED preview: Netlify reports it as state=success carrying the " +
       "Netlify ADMIN url, and accepting that runs the suite against app.netlify.com instead of the app"
   );
+  // The step runs under `set -u`, so any variable it references must be defined in
+  // THIS workflow. Referencing one that only exists in a sibling workflow aborts the
+  // job at the first tick with "unbound variable" - which reads as a smoke failure.
+  for (const variable of ["TICK_SECONDS", "MAX_TICKS"]) {
+    if (new RegExp(`\\$${variable}\\b|\\$\\{${variable}`).test(smokeWorkflow)) {
+      assert.match(
+        smokeWorkflow,
+        new RegExp(`^\\s*${variable}:\\s*["']?\\d+`, "m"),
+        `${variable} is used by the smoke workflow but not defined in it - under \`set -u\` that ` +
+          "aborts the wait step with 'unbound variable'"
+      );
+    }
+  }
 });

@@ -59,6 +59,16 @@ on:
         description: "Deployed URL to smoke-test. If set, skips the deploy-preview wait."
         required: false
 
+# Wait window for the deploy preview. Both are referenced by the wait step below and
+# by its error messages — they must exist here, not only in the sibling release-
+# verification workflow. A missing one is not a soft failure: the step runs under
+# `set -u`, so `sleep "$TICK_SECONDS"` aborts the job with "unbound variable" at the
+# first tick, which looks exactly like a smoke failure and is not one. Learned the hard
+# way on 2026-11-03.
+env:
+  MAX_TICKS: "40"
+  TICK_SECONDS: "30"
+
 jobs:
   changes:
     name: Detect whether the dashboard changed
