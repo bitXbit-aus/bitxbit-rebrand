@@ -144,8 +144,11 @@ test("the smoke suite is gated on the dashboard actually changing", () => {
   );
   assert.ok(
     /needs:\s*changes/.test(smokeWorkflow) &&
-      /needs\.changes\.outputs\.app_changed\s*==\s*'true'/.test(smokeWorkflow),
-    "the browser-smoke job must depend on the change detection and run only when the app changed"
+      /needs\.changes\.outputs\.app_changed\s*==\s*'true'/.test(smokeWorkflow) &&
+      /needs\.changes\.outputs\.head_touches_app\s*==\s*'true'/.test(smokeWorkflow),
+    "the browser-smoke job must depend on the change detection and run only when BOTH the PR touches the " +
+      "app and this commit does: a docs-only head produces no preview, so the suite would fail for a " +
+      "reason unrelated to the code"
   );
   assert.ok(
     /head_touches_app/.test(smokeWorkflow),
@@ -157,4 +160,22 @@ test("the smoke suite is gated on the dashboard actually changing", () => {
     "the wait step must fail FAST with an explicit reason when the head commit changes no app files, " +
       "instead of polling 20 minutes for a preview that Netlify will never build"
   );
+  assert.ok(
+    /Deploy Preview canceled|--bitxbit-dashboard\.netlify\.app/ .test(smokeWorkflow),
+    "the wait step must reject a CANCELED preview: Netlify reports it as state=success carrying the " +
+      "Netlify ADMIN url, and accepting that runs the suite against app.netlify.com instead of the app"
+  );
+  // The step runs under `set -u`, so any variable it references must be defined in
+  // THIS workflow. Referencing one that only exists in a sibling workflow aborts the
+  // job at the first tick with "unbound variable" - which reads as a smoke failure.
+  for (const variable of ["TICK_SECONDS", "MAX_TICKS"]) {
+    if (new RegExp(`\\$${variable}\\b|\\$\\{${variable}`).test(smokeWorkflow)) {
+      assert.match(
+        smokeWorkflow,
+        new RegExp(`^\\s*${variable}:\\s*["']?\\d+`, "m"),
+        `${variable} is used by the smoke workflow but not defined in it - under \`set -u\` that ` +
+          "aborts the wait step with 'unbound variable'"
+      );
+    }
+  }
 });

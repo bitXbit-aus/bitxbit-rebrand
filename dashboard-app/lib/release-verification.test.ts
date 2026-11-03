@@ -132,8 +132,15 @@ test("the PR job is the one that can be made required", () => {
   );
   assert.match(
     workflow,
-    /git log -1 --format=%H FETCH_HEAD -- dashboard-app/,
-    "the PR job must derive the expectation from main's newest ship-able commit"
+    /git rev-list --first-parent/,
+    "the PR job must walk main's FIRST-PARENT history to find the newest ship-able commit. " +
+      "`git log -1 -- <path>` silently returns an older commit on merge-heavy history: default " +
+      "simplification omits a merge commit that is TREESAME to one parent for those paths, which " +
+      "made the check poll for a commit production could never serve"
+  );
+  assert.ok(
+    !/git log -1 --format=%H FETCH_HEAD -- dashboard-app/.test(workflow),
+    "the simplification-prone selector must not come back"
   );
   assert.match(
     workflow,
