@@ -163,39 +163,63 @@ jobs:
           # skips the build and reports it as
           #   "Failed during stage 'checking build content for changes':
           #    Canceled build due to no content change"
-          # so NO preview will ever appear for a commit that does not touch the app.
-          # Fail fast and say why, instead of polling for 20 minutes and reporting a
-          # timeout that reads like a code fault.
-          if [ "${HEAD_TOUCHES_APP:-true}" != "true" ]; then
-            echo "::error::This commit changes nothing under dashboard-app (outside docs/), so Netlify skips its build and no deploy preview will exist - the browser suite cannot run against this revision. This is not a code defect. Push a commit that touches dashboard-app, or re-run this workflow manually with an explicit base_url."
-            exit 1
-          fi
+          #
+          # BUT DO NOT PREDICT IT. Measured 2026-11-03: a commit whose own diff touched
+          # nothing under dashboard-app still got a BUILD and a working preview, because
+          # Netlify compares against ITS OWN cached ref, not this commit's parent. An
+          # earlier version of this step failed fast on that prediction and refused to
+          # run the suite against a preview that existed - a real coverage loss dressed
+          # up as a hard failure, with a message that was simply untrue.
+          #
+          # So: always look. A commit that changes no app files gets a SHORT budget, and
+          # the budget extends as soon as a build is visibly running.
           if [ -z "${SHA:-}" ]; then
             echo "::error::No pull_request head SHA and no base_url input"; exit 1
           fi
           echo "Waiting for netlify/bitxbit-dashboard/deploy-preview success on $SHA"
+          echo "This commit touches app files: ${HEAD_TOUCHES_APP:-true}"
           PREVIEW_URL=""
-          for i in $(seq 1 40); do
+          SAW_PENDING=0
+          BUDGET=40
+          i=0
+          while [ "$i" -lt "$BUDGET" ]; do
+            i=$((i + 1))
             statuses=$(curl -sS \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/$REPO/commits/$SHA/statuses")
             state=$(echo "$statuses" | jq -r '[.[] | select(.context=="netlify/bitxbit-dashboard/deploy-preview")][0].state // "none"')
             url=$(echo "$statuses" | jq -r '[.[] | select(.context=="netlify/bitxbit-dashboard/deploy-preview" and .state=="success")][0].target_url // ""')
-            echo "tick $i: state=$state url=${url:-none}"
+            echo "tick $i/$BUDGET: state=$state url=${url:-none}"
             if [ -n "$url" ]; then PREVIEW_URL="$url"; break; fi
+            if [ "$state" = "pending" ]; then SAW_PENDING=1; fi
             if [ "$state" = "failure" ] || [ "$state" = "error" ]; then
               # NOTE: Netlify reports a SKIPPED build through this same status as
               # `failure: "Deploy Preview failed."`, so this branch also fires when
               # the build was skipped rather than broken. Check the deploy's
               # `error_message` (content skip vs "account builds usage exceeded")
               # before treating this as a code failure.
-              echo "::error::Netlify deploy preview failed or was skipped for $SHA - inspect the deploy's error_message before assuming a code fault"; exit 1
+              if [ "${HEAD_TOUCHES_APP:-true}" != "true" ]; then
+                echo "::error::This commit changes nothing under dashboard-app (outside docs/), and Netlify reported the deploy as failed or skipped for $SHA, so there is no preview to smoke. This is not a code defect. Push a commit that touches dashboard-app, or re-run this workflow manually with an explicit base_url."
+              else
+                echo "::error::Netlify deploy preview failed or was skipped for $SHA - inspect the deploy's error_message before assuming a code fault"
+              fi
+              exit 1
             fi
-            sleep 30
+            # Short budget only while nothing is visibly building. Once a build is
+            # pending, wait the full window - Netlify decided to build after all.
+            if [ "${HEAD_TOUCHES_APP:-true}" != "true" ] && [ "$SAW_PENDING" = "0" ] && [ "$BUDGET" -gt 8 ]; then
+              BUDGET=8
+              echo "no build pending and this commit changes no app files - shortening the wait to ${BUDGET} ticks"
+            fi
+            sleep "$TICK_SECONDS"
           done
           if [ -z "$PREVIEW_URL" ]; then
-            echo "::error::No successful Netlify deploy preview appeared within 20 minutes for $SHA. This is expected when Netlify SKIPPED the build (no ship-able change in the deploy, or the account build quota is exhausted) - it is not proof of a code fault, and it is not a pass either. Re-run with workflow_dispatch and an explicit base_url to exercise the suite."
+            if [ "${HEAD_TOUCHES_APP:-true}" != "true" ]; then
+              echo "::error::No deploy preview appeared for $SHA. This commit changes nothing under dashboard-app (outside docs/), and Netlify did not build it within the shortened window - the suite cannot run against this revision. This is not a code defect. Push a commit that touches dashboard-app, or re-run this workflow manually with an explicit base_url."
+            else
+              echo "::error::No successful Netlify deploy preview appeared within $(( MAX_TICKS * TICK_SECONDS ))s for $SHA. This is expected when Netlify SKIPPED the build (no ship-able change in the deploy, or the account build quota is exhausted) - it is not proof of a code fault, and it is not a pass either. Re-run with workflow_dispatch and an explicit base_url to exercise the suite."
+            fi
             exit 1
           fi
           echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
