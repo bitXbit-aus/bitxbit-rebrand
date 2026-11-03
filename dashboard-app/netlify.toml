@@ -2,6 +2,31 @@
   command = "rm -rf .next && next build"
   publish = ".next"
 
+  # --- Do not build when nothing ship-able changed (do NOT remove) -----------
+  # WHY: the Netlify account shares ONE build-minute quota across both sites, and
+  # this repo's security work lands a lot of documentation. The docs live INSIDE
+  # the app (dashboard-app/docs/**), so a docs-only merge was a genuine content
+  # change to Netlify and burned a full Next build. On 2026-10-27 that quota ran
+  # out: the deploy reported "Skipped due to account builds usage exceeded" and a
+  # production deploy silently did not ship, while CI stayed green.
+  #
+  # EXIT-CODE POLARITY — the easy thing to get backwards: Netlify SKIPS the build
+  # when this command exits 0, and BUILDS when it exits non-zero. So the command
+  # must read "true when there is nothing worth building" (hence `git diff --quiet`,
+  # which is 0 exactly when nothing changed).
+  #
+  # `git rev-parse --show-toplevel` makes the pathspec independent of whichever
+  # directory Netlify runs this from (base vs repo root). With a bare `.`, a
+  # repo-root cwd would match the whole monorepo, so a docs change here would
+  # still look like a change and nothing would be saved.
+  #
+  # The `test "$CACHED_COMMIT_REF" != "$COMMIT_REF"` guard keeps manual and
+  # "clear cache and deploy" builds working: those run with both refs EQUAL, and
+  # `git diff` between equal refs reports "no changes" — which would otherwise
+  # skip the very deploy that was explicitly requested.
+
+  ignore = "cd \"$(git rev-parse --show-toplevel)\" && test \"$CACHED_COMMIT_REF\" != \"$COMMIT_REF\" && git diff --quiet \"$CACHED_COMMIT_REF\" \"$COMMIT_REF\" -- dashboard-app ':(exclude)dashboard-app/docs'"
+
 [build.environment]
   NODE_VERSION = "22"
   NPM_FLAGS = "--legacy-peer-deps"

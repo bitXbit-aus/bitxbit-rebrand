@@ -24,6 +24,29 @@ name: Dashboard browser smoke
 # Deliberately NOT (yet) a required status check on `main`. Making it required is
 # an owner decision, and it depends on a Netlify preview existing for every PR —
 # including from forks, which do not receive previews.
+#
+# WHY THE JOB CAN NOW SKIP WITHOUT RUNNING (added 2026-10-27)
+# Both Netlify sites skip their build when a deploy changes no ship-able files
+# (see the `ignore` command in each netlify.toml), so a docs-only PR generates NO
+# deploy preview. This job used to wait 20 minutes for one and then fail — a red X
+# that said nothing about the code.
+#
+# The gate must be DIFF-BASED, not status-based, because Netlify reports a skipped
+# build through the commit-status API as `failure: "Deploy Preview failed."` —
+# byte-identical to a real build failure, and it reports a quota skip ("Skipped due
+# to account builds usage exceeded") the same way. There is no string to match on,
+# so the decision is made from the change set instead.
+#
+# The set is computed the same way Netlify computes it: the PR's base tip against
+# its head, over `dashboard-app`, excluding `dashboard-app/docs`. When that is
+# empty the suite simply does not apply, and the job is skipped (visibly, as a skip
+# — not as a green pass).
+#
+# KNOWN LIMIT: if a branch changes app code and a LATER commit changes only docs,
+# Netlify may skip the build for the head commit while this gate (which sees the
+# whole PR diff) still expects a preview. That lands as a failure with the message
+# below rather than a silent skip — run the suite explicitly with the
+# `workflow_dispatch` `base_url` input in that case.
 
 on:
   pull_request:
@@ -37,12 +60,65 @@ on:
         required: false
 
 jobs:
+  changes:
+    name: Detect whether the dashboard changed
+    # Same stacked-PR rule as the suite itself: Netlify only builds deploy previews
+    # for PRs into the production branch, so there is nothing to detect elsewhere.
+    if: github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    outputs:
+      app_changed: ${{ steps.diff.outputs.app_changed }}
+      head_touches_app: ${{ steps.diff.outputs.head_touches_app }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Both the PR base tip and its head must be present to diff them.
+          fetch-depth: 0
+
+      - name: Diff the dashboard, ignoring docs
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_URL_INPUT: ${{ github.event.inputs.base_url }}
+        run: |
+          set -euo pipefail
+          # A manual dispatch names its own URL, so the suite always applies.
+          if [ -n "${BASE_URL_INPUT:-}" ]; then
+            echo "app_changed=true" >> "$GITHUB_OUTPUT"
+            echo "manual dispatch with base_url - running the suite"
+            exit 0
+          fi
+          # If the SHAs are unavailable (e.g. a non-PR event), prefer running the
+          # suite over silently skipping the browser check.
+          if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
+            echo "app_changed=true" >> "$GITHUB_OUTPUT"
+            echo "no PR base/head SHA available - running the suite"
+            exit 0
+          fi
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- dashboard-app ':(exclude)dashboard-app/docs'; then
+            echo "app_changed=false" >> "$GITHUB_OUTPUT"
+            echo "No change under dashboard-app outside docs/."
+            echo "Netlify will skip the build for this commit, so there is no preview to smoke."
+          else
+            echo "app_changed=true" >> "$GITHUB_OUTPUT"
+            echo "Dashboard changed - expecting a deploy preview."
+          fi
+          # Separately: does THIS commit change the app? A PR can touch the app and still
+          # end on a commit that does not (a trailing docs or CI commit), and Netlify
+          # skips the build for that commit, so no preview can exist for it.
+          if git diff --quiet "$HEAD_SHA^" "$HEAD_SHA" -- dashboard-app ':(exclude)dashboard-app/docs' 2>/dev/null; then
+            echo "head_touches_app=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "head_touches_app=true" >> "$GITHUB_OUTPUT"
+          fi
+
   browser-smoke:
     name: Browser smoke against the deploy preview
-    # Netlify builds a deploy preview only for a PR into the production branch, so
-    # a stacked PR can never resolve one. Skip (neutral) instead of waiting 20
-    # minutes and failing: the suite simply does not apply to stacked PRs.
-    if: github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch
+    needs: changes
+    # Skipped (not failed, and not silently green) when the dashboard is untouched.
+    if: needs.changes.outputs.app_changed == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -72,6 +148,7 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
           BASE_URL_INPUT: ${{ github.event.inputs.base_url }}
+          HEAD_TOUCHES_APP: ${{ needs.changes.outputs.head_touches_app }}
         run: |
           set -euo pipefail
           # Manual dispatch may name a URL directly (useful for stacked PRs, which
@@ -81,6 +158,17 @@ jobs:
             echo "Using supplied base_url: $BASE_URL_INPUT"
             echo "PREVIEW_URL=$BASE_URL_INPUT" >> "$GITHUB_ENV"
             exit 0
+          fi
+          # CONFIRMED LIVE 2026-11-02: when a deploy changes no ship-able files, Netlify
+          # skips the build and reports it as
+          #   "Failed during stage 'checking build content for changes':
+          #    Canceled build due to no content change"
+          # so NO preview will ever appear for a commit that does not touch the app.
+          # Fail fast and say why, instead of polling for 20 minutes and reporting a
+          # timeout that reads like a code fault.
+          if [ "${HEAD_TOUCHES_APP:-true}" != "true" ]; then
+            echo "::error::This commit changes nothing under dashboard-app (outside docs/), so Netlify skips its build and no deploy preview will exist - the browser suite cannot run against this revision. This is not a code defect. Push a commit that touches dashboard-app, or re-run this workflow manually with an explicit base_url."
+            exit 1
           fi
           if [ -z "${SHA:-}" ]; then
             echo "::error::No pull_request head SHA and no base_url input"; exit 1
@@ -97,12 +185,18 @@ jobs:
             echo "tick $i: state=$state url=${url:-none}"
             if [ -n "$url" ]; then PREVIEW_URL="$url"; break; fi
             if [ "$state" = "failure" ] || [ "$state" = "error" ]; then
-              echo "::error::Netlify deploy preview failed for $SHA"; exit 1
+              # NOTE: Netlify reports a SKIPPED build through this same status as
+              # `failure: "Deploy Preview failed."`, so this branch also fires when
+              # the build was skipped rather than broken. Check the deploy's
+              # `error_message` (content skip vs "account builds usage exceeded")
+              # before treating this as a code failure.
+              echo "::error::Netlify deploy preview failed or was skipped for $SHA - inspect the deploy's error_message before assuming a code fault"; exit 1
             fi
             sleep 30
           done
           if [ -z "$PREVIEW_URL" ]; then
-            echo "::error::No successful Netlify deploy preview appeared within 20 minutes"; exit 1
+            echo "::error::No successful Netlify deploy preview appeared within 20 minutes for $SHA. This is expected when Netlify SKIPPED the build (no ship-able change in the deploy, or the account build quota is exhausted) - it is not proof of a code fault, and it is not a pass either. Re-run with workflow_dispatch and an explicit base_url to exercise the suite."
+            exit 1
           fi
           echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
 
