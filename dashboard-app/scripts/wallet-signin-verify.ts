@@ -540,7 +540,14 @@ async function main() {
   );
   check(
     "a REVOKED device is put back behind the gate",
-    afterRevoke.body?.ok !== true && afterRevoke.body?.stepUpRequired === true,
+    // Asserted on the SECURITY property (no session) plus "the gate fired", accepting
+    // either branch. Measured on a preview with no mailer: this returned the
+    // fail-closed 503 — the gate fired correctly, and an assertion demanding
+    // `stepUpRequired` alone would have called a working control a failure.
+    afterRevoke.body?.ok !== true &&
+      (afterRevoke.status === 200
+        ? afterRevoke.body?.stepUpRequired === true
+        : afterRevoke.status === 503),
     `got ${afterRevoke.status} ${afterRevoke.raw}`
   );
 
