@@ -2,7 +2,7 @@
 
 **Branch:** `security/wallet-signin-notification`
 **Register:** R-021 (detection half) · **Threat model:** `../wallet-signin-threat-model.md`
-**PR:** #83
+**PR:** #83 · **Released:** merge `bc396d44fafd728e882a16b6c834f5d471fa0e9c`, production live 2026-11-15
 
 The compensating control for the signature-relay risk. Prevention needs a step-up factor and is an owner
 decision (R-021 stays open for that); **detection needs nothing from the member at sign-in time**, which is
@@ -76,11 +76,33 @@ deployment predates this change — so the two states are distinguishable in the
 Once `RESEND_API_KEY` is set, `success` flips to `true` and `reason` to `sent`; a provider failure lands as
 `failed` with the provider's status. All three are queryable.
 
+## Production verification — 2026-11-15
+
+Released, then measured against the real thing. This was the **first wallet sign-in production has ever
+recorded**, which is what makes the row unambiguous:
+
+```
+action                  success  reason            method           created_at
+wallet.signed_in        true     —                 solana_wallet    2026-11-15 06:17:05.140
+wallet.signin_notified  true     sent              —                2026-11-15 06:17:05.415
+```
+
+`sent` means the provider **accepted** the message (2xx). It landed **275 ms after the session was minted** —
+the sign-in was already complete, so the alert cannot have gated it, which is the load-bearing property
+proven in production rather than only in a unit test. `not_configured` is gone: the key reached the function
+on the deploy that carried the code.
+
+Visible four minutes earlier, and worth reading correctly: `wallet.signin_failed · wallet_not_linked`. A
+**failed** sign-in sends no alert, and that is right — no session existed, so there is nothing to warn the
+member about. Noticing repeated failures is a different control (rate limiting or lockout), not this one.
+
 ## What is NOT verified
 
-- **No email has been sent end to end**, because no key exists to send with. The payload, escaping,
-  fail-soft behaviour and wiring are tested; **delivery is not**. Confirming a received alert is an owner
-  step, exactly as the recovery email was for R-015.
+- **Delivery to the inbox is not verified by us.** The *send* is: the provider accepted it (`sent`,
+  2026-11-15). Whether it arrives in the inbox rather than a spam folder — on a Proton address, from a
+  sender name (`bitXbit Security`) that differs from the auth emails (`bitXbit`) — is the account owner's
+  confirmation to make. A distinct name for security alerts is defensible; if it lands in spam, matching the
+  auth sender's name is the first thing to try.
 - The alert reports the trusted client IP as the source. It does not attempt geolocation, and a relayed
   sign-in will report the *attacker's* IP — which is the point, but means the alert is only as useful as
   the member's willingness to read it.
@@ -88,7 +110,15 @@ Once `RESEND_API_KEY` is set, `success` flips to `true` and `reason` to `sent`; 
   deliberately: in a serverless function a floating promise may never run, and an alert that silently does
   not send is worse than a few hundred milliseconds.
 
-## Owner action
+## Configuration — done 2026-11-15, with one follow-up
 
-Set `RESEND_API_KEY` on the dashboard site in **production, preview and branch-deploy** contexts, then
-confirm one real alert arrives. Until then the control is inert by design and says so in the audit log.
+`RESEND_API_KEY` is set on the dashboard site with scopes `builds, functions, runtime` — `functions` is the
+one that matters, because the alert runs in a serverless function. Read back through the Netlify API; secret
+values come back **masked**, so that read confirms presence and scope, and the `sent` row above is what
+confirms the key itself.
+
+**Follow-up:** it is currently enabled for **deploy previews and branch deploys** as well as production.
+Those are staging-backed, and the sign-in harness uses `…@staging-verify.bitxbit` — a domain that cannot
+receive mail — so harness runs there would **bounce against the very domain that carries password resets**.
+Narrowing it to Production only is recommended. It is a platform-side edit, no code, and it applies on the
+next deploy.
