@@ -104,13 +104,24 @@ prevented by anything in the current flow.
 
 ## Mitigations — options, cost, and the decision
 
-### 1. Step-up verification for an unrecognised device (the review's recommendation) — **recommended**
+### 1. Step-up verification for an unrecognised device (the review's recommendation) — **designed, not built**
+
+**→ Full design: `wallet-step-up-design.md`.**
 
 Sign-in completes immediately only on a device that has signed in before; an unrecognised device must pass
 one additional check before a session is minted. The attacker relaying a signature is on a device the
 account has never seen, so they hit the extra step — and it is a factor they do not have.
 
-Design sketch (reuses the signed-cookie pattern already shipped for R-020):
+Two conclusions from the design that supersede the sketch below, and are worth carrying here:
+
+- **An emailed code is the on-ramp, not the lock.** The attacker already has the victim's attention — that is
+  how they obtained the signature — so a code the victim can *read out* is a second act, not a wall. The
+  design therefore pairs the code (enrolment) with a **device-bound, non-extractable WebCrypto key** (the
+  steady state), because a factor with no expressible form is the only one that cannot be relayed.
+- **An "approve this sign-in" link would be dangerous**: the victim could click it and authorise the
+  *attacker's* pending attempt. The factor must be presented by the browser that is signing in.
+
+The original sketch, retained for context (reuses the signed-cookie pattern shipped for R-020):
 
 - on a successful wallet sign-in, set a long-lived `httpOnly`, HMAC-signed device cookie;
 - if a sign-in succeeds and the device cookie is absent or invalid, **do not mint the session** — record a
