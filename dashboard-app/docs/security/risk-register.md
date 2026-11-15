@@ -1758,10 +1758,16 @@ Three mutations detected and named (see the evidence file). One assertion was it
 negative lookahead that **passed a correct call** — and is recorded there, because an assertion that cannot
 fail is worse than none.
 
-**Not verified: the browser half.** Per rule 12, the UI is not done until it is exercised in a real browser
-against a deploy preview; not claimed. **D5 does not change the residual:** a victim who relays the *code* as
-well as the signature still gets in. Part 2 (the device-bound key, design §4) is the closure, and is not
-built.
+**Verified in a real browser (rule 12), on `deploy-preview-89` reporting `deployedCommit = 543daa1` — the PR
+head itself.** On an authenticated `/dashboard/wallet` the card rendered a seeded device with its "This
+device" badge; **Remove** emptied the active list, moved the row to *Removed devices*, set `revoked_at` in
+staging and wrote `wallet.device_revoked` (success). The **cross-account boundary was measured, not only
+asserted**: `revoke_wallet_device(<victim's hash>, <attacker's user_id>)` returned **false** with the victim's
+row untouched, and the positive control with the owner's own id returned **true** — so the refusal is scoping,
+not a broken instrument. Session material was minted server-side (no credential typed) and shredded; probe
+rows torn down and read back. Full detail: the evidence file. **D5 does not change the residual:** a victim
+who relays the *code* as well as the signature still gets in. Part 2 (the device-bound key, design §4) is the
+closure, and is not built.
 
 ### Not claimed
 

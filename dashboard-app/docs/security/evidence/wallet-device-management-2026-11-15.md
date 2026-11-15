@@ -4,7 +4,8 @@
 **PR:** #89 (branch `security/r021-device-management-ui`) · **Migration:** none — the `revoke_wallet_device`
 RPC and `wallet_trusted_devices` shipped in **029**, already applied to production and staging.
 
-**Status: implemented, verified locally, PR open. NOT merged, NOT deployed. R-021 is unchanged by this.**
+**Status: implemented, verified locally, and exercised in a real browser against the PR's deploy preview; PR
+open. NOT merged, NOT deployed. R-021 is unchanged by this.**
 
 ## Why this control exists
 
@@ -56,15 +57,61 @@ next build (placeholder env)                 clean; /dashboard/wallet compiles
 New test files are added to the explicit input list in `package.json` — `npm test` enumerates its inputs, it
 does not glob, so an unlisted file is silently not run.
 
+**CI on the exact head SHA** (`543daa1`): *Tests, migration replay, and build* **pass**, 2m42s, reporting
+`# tests 351 / # pass 351` — the required check ran on the candidate commit itself rather than an earlier one.
+**Browser smoke suite** 7/7 against `deploy-preview-89`.
+
+## Verified in a real browser (rule 12) — measured
+
+The unit suite is structurally blind to this half, so it was exercised against the deploy preview.
+
+**Target:** `https://deploy-preview-89--bitxbit-dashboard.netlify.app` — `/api/version` reports
+`deployedCommit = 543daa1504c4d2089441ea7be91c4e77f9fb18a6`, **identical to the PR head**, so the app under
+test is the exact candidate.
+
+**How a session was obtained, because it is part of the finding:** previews can no longer send mail (the
+`RESEND_API_KEY` narrowing carried by PR #88), so the step-up gate takes its **fail-closed** branch there and
+a *human* cannot complete a wallet sign-in on a preview at all. The session was therefore minted server-side
+for a staging **fixture** member (the `11111111-` scheme) through the app's own plumbing —
+`admin.generateLink({type:'magiclink'})` → `verifyOtp` via the same `@supabase/ssr` cookie adapter the app
+uses — and injected into the browser. **No credential was typed, requested or displayed**, and the session
+material lived in a mode-0600 file that was shredded afterwards. The device row was seeded with the
+documentation address `198.51.100.24` and the label `D5 automation browser`.
+
+| Step | Observed |
+|---|---|
+| Card renders | "Recognised Devices" with its description, on an authenticated `/dashboard/wallet` |
+| List loads through the action | the seeded row: label, **"This device"** badge, last-used / first-seen, "From 198.51.100.24", Remove button |
+| Press Remove | active list empties to "No recognised devices yet"; the row moves to **"Removed devices — D5 automation browser · Removed 15 Nov 2026"** |
+| Database | `revoked_at = 2026-11-15 08:52:17.806Z` on that row |
+| Audit | `wallet.device_revoked`, `success: true`, metadata carrying that device hash, at `08:52:18.408Z` |
+
+**The cross-account boundary was measured, not only asserted.** This is the property the guard test exists
+for, and a structural assertion is not a measurement:
+
+| Probe | Result |
+|---|---|
+| `revoke_wallet_device(<victim's hash>, <attacker's user_id>)` | **`false`** — and the victim's row stayed unrevoked |
+| Positive control: `revoke_wallet_device(<victim's hash>, <owner's user_id>)` | **`true`**, `revoked_at` set |
+
+The control matters: without it, `false` could mean a broken instrument rather than a real refusal. The
+cross-account call is exactly what the action would send if it took the account id from the form.
+
+**Teardown, read back:** both probe rows deleted (2 rows returned), the mode-0600 session file shredded, and
+the injected cookies deleted from the browser (`Network.getCookies` for that host → `[]`). The
+`security_audit_log` row is **append-only by trigger and deliberately left** — it accurately records that a
+device was revoked, and a fabricated row is permanent while this one is true.
+
 ## What is NOT verified
 
-- **The browser half.** Per repo rule 12, a browser-facing change is not done until it is exercised in a real
-  browser against a deploy preview. The list and the remove button have not been clicked by a human or by a
-  real browser session on a deployed preview. The Playwright smoke suite covers the page's error shell, CSP,
-  console and asset skew — not this control's behaviour. **Not claimed.**
-- **The revoke → re-gate loop end to end.** That a revoked device is put back behind the gate *is* asserted on
-  migration 029's own verification and on `deploy-preview-87` by the wallet harness, but **not** through this
-  new action's path (there is no test that presses the new button).
+- **The cross-account refusal was measured at the RPC layer**, which is the last line of defence. The
+  *action*-level refusal was not driven through the UI (invoking a Server Action cross-account from the page
+  was not attempted); it rests on the structural assertion plus the mutation that **compiles** and is caught
+  by the assertion. Two layers, one measured and one asserted — stated as such.
+- **The revoke → re-gate loop through this button.** That a revoked device is put back behind the gate is
+  asserted by migration 029's own verification and on `deploy-preview-87` by the wallet harness, and the
+  revocation itself is measured above — but no test signs in *again* from a revoked device through this
+  action's path.
 - **No member has used it.** Obvious, and worth stating plainly.
 - **D5 does not change the residual.** A victim talked into relaying the *code* as well as the signature still
   gets a session. Part 2 — the device-bound key (design §4) — is the closure of R-021, and is not built.
