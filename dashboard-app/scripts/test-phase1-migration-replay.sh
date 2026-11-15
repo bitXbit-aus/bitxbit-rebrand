@@ -23,6 +23,7 @@ MIGRATION_025="$ROOT_DIR/supabase/migrations/025_exact_payout_amount_reads.sql"
 MIGRATION_026="$ROOT_DIR/supabase/migrations/026_harden_payout_confirmation_evidence.sql"
 MIGRATION_027="$ROOT_DIR/supabase/migrations/027_shared_rate_limit_counter.sql"
 MIGRATION_028="$ROOT_DIR/supabase/migrations/028_wallet_signin.sql"
+MIGRATION_029="$ROOT_DIR/supabase/migrations/029_wallet_step_up.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -80,6 +81,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_027" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_028" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_029" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -104,6 +106,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_025" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_027" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_028" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_029" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -1447,6 +1450,200 @@ END $$;
 SQL
 
 printf 'wallet sign-in (028) verification passed (unique wallet per account, single-use challenge, unverified/unregistered refused, privileges locked)\n'
+
+# ------------------------------------------------------------------------------
+# Migration 029 (wallet step-up, R-021 prevention) verification
+#
+# The gate is only as good as these facts, and each is asserted by reintroducing
+# the failure it prevents:
+#   * exactly one live code per (account, device) -- a second request must
+#     invalidate the first, or every earlier code stays a valid credential for its
+#     full lifetime;
+#   * a code is single-use and attempt-bounded -- the LAST attempt consumes the
+#     row, so a correct code afterwards is still refused;
+#   * expiry is refused, a non-positive TTL is rejected rather than silently
+#     accepted, and trust is scoped per (device, account) so a shared machine
+#     cannot carry one member's trust to another.
+# ------------------------------------------------------------------------------
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE
+  v_user UUID := '41414141-4141-4141-8141-414141414141';
+  v_other UUID := '42424242-4242-4242-8242-424242424242';
+  v_wallet TEXT := 'DK6PWMyuZ4NMjsm9AWNCTMKrajQYrtfMjMJ3QauX2UHC';
+  v_device TEXT := repeat('a', 64);
+  v_id UUID;
+  v_id2 UUID;
+  v_live INT;
+  v_resolved UUID;
+  v_result JSONB;
+  v_rejected BOOLEAN;
+  v_attempts INT;
+  v_consumed BOOLEAN;
+  i INT;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES (v_user, 'stepup@example.test');
+  INSERT INTO auth.users (id, email) VALUES (v_other, 'stepup-other@example.test');
+
+  -- begin issues one live pending and stores an HMAC, never a plaintext code.
+  SELECT public.begin_wallet_stepup(v_user, v_device, v_wallet, 'hmac-one') INTO v_id;
+  IF v_id IS NULL THEN
+    RAISE EXCEPTION 'begin_wallet_stepup returned no id';
+  END IF;
+
+  SELECT COUNT(*) INTO v_live FROM public.wallet_signin_stepups
+  WHERE user_id = v_user AND device_hash = v_device AND consumed_at IS NULL;
+  IF v_live <> 1 THEN
+    RAISE EXCEPTION 'expected exactly one live pending, got %', v_live;
+  END IF;
+
+  -- A NEW request must invalidate the previous code.
+  SELECT public.begin_wallet_stepup(v_user, v_device, v_wallet, 'hmac-two') INTO v_id2;
+  SELECT COUNT(*) INTO v_live FROM public.wallet_signin_stepups
+  WHERE user_id = v_user AND device_hash = v_device AND consumed_at IS NULL;
+  IF v_live <> 1 THEN
+    RAISE EXCEPTION 'supersede left % live pendings', v_live;
+  END IF;
+
+  -- Asserted on the RETURNED STATUS, never on a caught exception. A raise from
+  -- inside this function rolls back its own writes when the caller catches it, so
+  -- an exception-based assertion passes while the attempt counter silently stays
+  -- at zero — which is exactly the defect this gate caught.
+  SELECT public.complete_wallet_stepup(v_id, 'hmac-one') INTO v_result;
+  IF v_result->>'status' IS DISTINCT FROM 'consumed' THEN
+    RAISE EXCEPTION 'a superseded code returned % (expected consumed)', v_result->>'status';
+  END IF;
+
+  -- A wrong code records an attempt, does NOT consume the pending, and does not
+  -- raise: the increment has to survive.
+  SELECT public.complete_wallet_stepup(v_id2, 'hmac-wrong') INTO v_result;
+  IF v_result->>'status' IS DISTINCT FROM 'invalid_code' THEN
+    RAISE EXCEPTION 'a wrong code returned % (expected invalid_code)', v_result->>'status';
+  END IF;
+
+  SELECT attempts, consumed_at IS NOT NULL INTO v_attempts, v_consumed
+  FROM public.wallet_signin_stepups WHERE id = v_id2;
+  IF v_attempts <> 1 THEN
+    RAISE EXCEPTION 'wrong code did not record an attempt (got %)', v_attempts;
+  END IF;
+  IF v_consumed THEN
+    RAISE EXCEPTION 'wrong code consumed the pending before the budget was spent';
+  END IF;
+
+  -- The right code resolves the pending's owner and is single-use.
+  SELECT public.complete_wallet_stepup(v_id2, 'hmac-two') INTO v_result;
+  IF v_result->>'status' IS DISTINCT FROM 'ok' THEN
+    RAISE EXCEPTION 'a correct code returned % (expected ok)', v_result->>'status';
+  END IF;
+  v_resolved := (v_result->>'user_id')::UUID;
+  IF v_resolved IS DISTINCT FROM v_user THEN
+    RAISE EXCEPTION 'complete_wallet_stepup resolved % instead of the pending owner', v_resolved;
+  END IF;
+
+  SELECT public.complete_wallet_stepup(v_id2, 'hmac-two') INTO v_result;
+  IF v_result->>'status' IS DISTINCT FROM 'consumed' THEN
+    RAISE EXCEPTION 'a step-up code was reusable (got %)', v_result->>'status';
+  END IF;
+
+  -- Attempt budget: the last attempt consumes, so a CORRECT code afterwards fails.
+  SELECT public.begin_wallet_stepup(v_user, v_device, v_wallet, 'hmac-three') INTO v_id;
+  FOR i IN 1..5 LOOP
+    SELECT public.complete_wallet_stepup(v_id, 'hmac-wrong') INTO v_result;
+    IF v_result->>'status' IS DISTINCT FROM 'invalid_code' THEN
+      RAISE EXCEPTION 'attempt % returned % (expected invalid_code)', i, v_result->>'status';
+    END IF;
+    IF i < 5 THEN
+      IF (SELECT consumed_at IS NOT NULL FROM public.wallet_signin_stepups WHERE id = v_id) THEN
+        RAISE EXCEPTION 'attempt % consumed the pending early', i;
+      END IF;
+    END IF;
+  END LOOP;
+
+  SELECT consumed_at IS NOT NULL, attempts INTO v_consumed, v_attempts
+  FROM public.wallet_signin_stepups WHERE id = v_id;
+  IF NOT v_consumed THEN
+    RAISE EXCEPTION 'exhausted pending was left live';
+  END IF;
+  IF v_attempts <> 5 THEN
+    RAISE EXCEPTION 'attempt budget recorded % attempts, expected 5', v_attempts;
+  END IF;
+
+  SELECT public.complete_wallet_stepup(v_id, 'hmac-three') INTO v_result;
+  IF v_result->>'status' IS DISTINCT FROM 'exhausted' THEN
+    RAISE EXCEPTION 'a correct code completed an exhausted step-up (got %)', v_result->>'status';
+  END IF;
+
+  -- Expiry is refused and consumes the row.
+  SELECT public.begin_wallet_stepup(v_user, v_device, v_wallet, 'hmac-four', 1) INTO v_id;
+  UPDATE public.wallet_signin_stepups SET expires_at = NOW() - INTERVAL '1 second' WHERE id = v_id;
+  SELECT public.complete_wallet_stepup(v_id, 'hmac-four') INTO v_result;
+  IF v_result->>'status' IS DISTINCT FROM 'expired' THEN
+    RAISE EXCEPTION 'an expired step-up returned % (expected expired)', v_result->>'status';
+  END IF;
+  IF NOT (SELECT consumed_at IS NOT NULL FROM public.wallet_signin_stepups WHERE id = v_id) THEN
+    RAISE EXCEPTION 'an expired pending was left live';
+  END IF;
+
+  -- A non-positive TTL must be rejected, not silently accepted.
+  v_rejected := FALSE;
+  BEGIN
+    PERFORM public.begin_wallet_stepup(v_user, v_device, v_wallet, 'hmac-five', 0);
+  EXCEPTION WHEN OTHERS THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'a zero TTL was accepted';
+  END IF;
+
+  -- Trust, then revoke, then re-trust after a later sign-in.
+  PERFORM public.trust_wallet_device(v_device, v_user, 'Test browser', '203.0.113.9');
+  IF NOT EXISTS (
+    SELECT 1 FROM public.wallet_trusted_devices
+    WHERE device_hash = v_device AND user_id = v_user AND revoked_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'trust_wallet_device did not record trust';
+  END IF;
+
+  IF NOT public.revoke_wallet_device(v_device, v_user) THEN
+    RAISE EXCEPTION 'revoke_wallet_device reported no change on a live device';
+  END IF;
+  IF public.revoke_wallet_device(v_device, v_user) THEN
+    RAISE EXCEPTION 'revoke_wallet_device revoked an already revoked device';
+  END IF;
+
+  PERFORM public.trust_wallet_device(v_device, v_user, 'Test browser', '203.0.113.9');
+  IF (SELECT revoked_at FROM public.wallet_trusted_devices
+      WHERE device_hash = v_device AND user_id = v_user) IS NOT NULL THEN
+    RAISE EXCEPTION 're-trusting a device did not clear revocation';
+  END IF;
+
+  -- The same browser signed into a second account is a SEPARATE row: one member's
+  -- trust must never authorise another.
+  PERFORM public.trust_wallet_device(v_device, v_other, 'Shared machine', '203.0.113.10');
+  IF (SELECT COUNT(*) FROM public.wallet_trusted_devices WHERE device_hash = v_device) <> 2 THEN
+    RAISE EXCEPTION 'device trust leaked across accounts';
+  END IF;
+
+  -- Client roles must reach neither the tables nor the functions.
+  IF has_table_privilege('anon', 'public.wallet_trusted_devices', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.wallet_trusted_devices', 'SELECT')
+     OR has_table_privilege('anon', 'public.wallet_signin_stepups', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.wallet_signin_stepups', 'SELECT') THEN
+    RAISE EXCEPTION 'step-up tables are readable by a client role';
+  END IF;
+  IF has_function_privilege('anon', 'public.complete_wallet_stepup(uuid,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.complete_wallet_stepup(uuid,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.begin_wallet_stepup(uuid,text,text,text,integer)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.trust_wallet_device(text,uuid,text,text,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.revoke_wallet_device(text,uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'step-up functions are executable by a client role';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.complete_wallet_stepup(uuid,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'service_role cannot execute complete_wallet_stepup';
+  END IF;
+END $$;
+SQL
+
+printf 'wallet step-up (029) verification passed (one live code per account+device, superseded codes invalid, single-use, attempt-bounded, expiry refused, revocation per account, privileges locked)\n'
 
 # ------------------------------------------------------------------------------
 # Concurrent correction-vs-claim race test
