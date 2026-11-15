@@ -104,7 +104,7 @@ prevented by anything in the current flow.
 
 ## Mitigations — options, cost, and the decision
 
-### 1. Step-up verification for an unrecognised device (the review's recommendation) — **designed, not built**
+### 1. Step-up verification for an unrecognised device — **PART 1 BUILT AND VERIFIED IN A DEPLOYMENT (PR #87)**
 
 **→ Full design: `wallet-step-up-design.md`.**
 
