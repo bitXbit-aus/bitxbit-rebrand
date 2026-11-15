@@ -67,9 +67,14 @@ describe("Server Action authorization guards (R-005)", () => {
     // Re-checked for a guard: the deleted action did call requireActiveUser().
     // Back to 30 on 2026-10-26 with `unlinkWallet` (wallet unlink path), which
     // calls requireActiveUser() before constructing the service client.
+    // 30 -> 32 on 2026-11-15 with R-021 D5: `listWalletDevices` and
+    // `revokeWalletDevice` (recognised-device list + revoke on /dashboard/wallet).
+    // Both call requireActiveUser() before constructing the service client, and the
+    // revoke takes its account id from the session (asserted in
+    // lib/wallet-device-guard.test.ts).
     assert.equal(
       exportedActions(SOURCE).length,
-      30,
+      32,
       "the action set changed — re-check each action for an authorization guard"
     );
   });

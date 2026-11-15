@@ -14,10 +14,11 @@ import {
   verifyWalletSignature,
   getWalletVerificationStatus,
 } from "@/lib/wallet-verification";
-import { getTokenBalanceAction, unlinkWallet } from "@/lib/actions";
+import { getTokenBalanceAction, unlinkWallet, listWalletDevices, revokeWalletDevice } from "@/lib/actions";
+import type { WalletDeviceSummary } from "@/lib/wallet-devices";
 import bs58 from "bs58";
 import { toSignatureBytes } from "@/lib/wallet-signature-format";
-import { Coins, History, Wallet, AlertCircle, Shield, ShieldAlert } from "lucide-react";
+import { Coins, History, Wallet, AlertCircle, Shield, ShieldAlert, MonitorSmartphone, Trash2 } from "lucide-react";
 
 interface RewardTx {
   id: string;
@@ -46,6 +47,10 @@ export default function WalletPage() {
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isUnlinking, setIsUnlinking] = useState(false);
+  const [devices, setDevices] = useState<WalletDeviceSummary[]>([]);
+  const [currentDeviceHash, setCurrentDeviceHash] = useState<string | null>(null);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(true);
+  const [revokingHash, setRevokingHash] = useState<string | null>(null);
 
   const connectedAddress = publicKey?.toBase58() ?? null;
   const walletName = wallet?.adapter.name ?? "Wallet";
@@ -68,6 +73,26 @@ export default function WalletPage() {
 
   useEffect(() => {
     loadSavedWallet();
+  }, []);
+
+  async function loadDevices() {
+    setIsLoadingDevices(true);
+    try {
+      const result = await listWalletDevices();
+      setDevices(result.devices);
+      setCurrentDeviceHash(result.currentDeviceHash);
+    } catch (error) {
+      console.error("Failed to load recognised devices:", error);
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  }
+
+  useEffect(() => {
+    // The recognised-devices list is what makes the R-021 alert actionable: it is
+    // what lets the warning on a new-device sign-in say "remove that device" instead
+    // of "unlink your wallet". Read-only; no write happens on render.
+    loadDevices();
   }, []);
 
   useEffect(() => {
@@ -201,6 +226,49 @@ export default function WalletPage() {
       setIsUnlinking(false);
     }
   }
+
+  async function handleRevokeDevice(device: WalletDeviceSummary) {
+    // The confirmation states the actual effect, so it is not a vague "are you
+    // sure". Removing a device cannot lock anyone out — it only means the next
+    // wallet sign-in from that device needs an emailed code — and it cannot strand
+    // funds. For the device the member is currently on, say so plainly, because the
+    // next sign-in from here will then ask for a code.
+    const isThisDevice = device.deviceHash === currentDeviceHash;
+    const confirmed = window.confirm(
+      `Remove this recognised device?\n\n${device.label ?? "Unknown browser"}\n\n` +
+        "Wallet sign-in from that device will need an emailed verification code " +
+        "next time. Email sign-in is unaffected, and the device becomes recognised " +
+        "again the next time you sign in on it." +
+        (isThisDevice
+          ? "\n\nThis is the device you are using now — your next wallet sign-in here will " +
+            "ask for a code."
+          : "")
+    );
+    if (!confirmed) return;
+
+    setRevokingHash(device.deviceHash);
+    try {
+      const result = await revokeWalletDevice(device.deviceHash);
+      await loadDevices();
+      toast({
+        title: result.revoked ? "Device removed" : "No change",
+        description: result.revoked
+          ? `${device.label ?? "That device"} will need a code to sign in with a wallet.`
+          : "That device was already removed.",
+      });
+    } catch (error) {
+      toast({
+        title: "Could not remove device",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRevokingHash(null);
+    }
+  }
+
+  const activeDevices = devices.filter((d) => !d.revokedAt);
+  const revokedDevices = devices.filter((d) => d.revokedAt);
 
   const isConnectedSaved =
     !!connectedAddress &&
@@ -363,6 +431,103 @@ export default function WalletPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <MonitorSmartphone className="h-5 w-5 text-primary" />
+            <CardTitle>Recognised Devices</CardTitle>
+          </div>
+          <CardDescription>
+            Devices you have already signed in with a wallet on. A recognised device
+            signs in without an emailed code; any other device must enter a code sent
+            to your account before a session is created.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {isLoadingDevices ? (
+            <p className="text-sm text-muted-foreground">Loading devices...</p>
+          ) : activeDevices.length > 0 ? (
+            <ul className="space-y-3">
+              {activeDevices.map((device) => {
+                const isThisDevice = device.deviceHash === currentDeviceHash;
+                const isRevoking = revokingHash === device.deviceHash;
+                return (
+                  <li
+                    key={device.deviceHash}
+                    className="flex items-start justify-between gap-3 rounded-lg bg-muted p-4"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">
+                          {device.label ?? "Unknown browser"}
+                        </p>
+                        {isThisDevice && (
+                          <Badge variant="outline" className="gap-1">
+                            <Shield className="h-3 w-3" /> This device
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Last used {formatDate(device.lastSeenAt)}
+                        {device.firstSeenAt
+                          ? ` · First seen ${formatDate(device.firstSeenAt)}`
+                          : ""}
+                      </p>
+                      {device.lastIp && (
+                        <p className="text-xs text-muted-foreground">
+                          From {device.lastIp}
+                        </p>
+                      )}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRevokeDevice(device)}
+                      disabled={isRevoking}
+                      className="gap-1"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      {isRevoking ? "Removing…" : "Remove"}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="text-center py-6">
+              <MonitorSmartphone className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">
+                No recognised devices yet. The next device you complete a wallet
+                sign-in on will be listed here.
+              </p>
+            </div>
+          )}
+
+          {revokedDevices.length > 0 && (
+            <div className="space-y-1 pt-1">
+              <p className="text-xs font-medium text-muted-foreground">
+                Removed devices
+              </p>
+              <ul className="space-y-1">
+                {revokedDevices.map((device) => (
+                  <li
+                    key={device.deviceHash}
+                    className="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                  >
+                    <span>{device.label ?? "Unknown browser"}</span>
+                    <span>Removed {formatDate(device.revokedAt)}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground pt-1">
+                A removed device must enter a code on its next wallet sign-in, and
+                becomes recognised again if you sign in on it.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="mt-6">
         <CardHeader>

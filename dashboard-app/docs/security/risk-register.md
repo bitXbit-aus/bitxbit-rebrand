@@ -1729,6 +1729,46 @@ sign-in latency grows by up to the 2.5 s send timeout when the provider is slow.
 one of the three escalations the review listed. High-value admin actions are already guarded by
 `requireCapability` and audited; a step-up there is a separate piece.
 
+### Prevention Part 1, D5 — the recognised-device list and revoke (PR #89, open)
+
+**Implemented and verified locally; PR open — NOT merged, NOT deployed. R-021 is unchanged by this.** Recorded
+here so the next session measures rather than re-derives, and so this detailed entry and the summary row move
+together. Evidence: `evidence/wallet-device-management-2026-11-15.md`.
+
+Part 1 (#87) lets the detection alert tell a member to *remove* a device that was not them — but until this
+change there was nothing to remove it with. The only lever was *unlink your wallet*, a far bigger action, and
+one a member should not have to take to respond to "someone else has a device you use". D5 adds the
+member-facing half (design §3.4):
+
+- `listWalletDevices` and `revokeWalletDevice(deviceHash)` in `lib/actions.ts`, both calling
+  `requireActiveUser()` **before** the service client. The read is scoped to the session's `user_id`; the
+  revoke calls the RPC with `p_user_id: user.id` from the **session** and takes **only the device hash** from
+  the caller. **If the account id were read from the form, any member could revoke anyone's device** — a
+  targeted lockout of another member's wallet sign-in. It is invisible to `tsc`/CI (`p_user_id: anything`
+  type-checks), so it is asserted structurally (`lib/wallet-device-guard.test.ts`), and the mutation that
+  sources the id from the caller **compiles** and is caught by the assertion rather than the compiler.
+- **Idempotent, and a no-op is not an error:** an unknown or already-revoked device returns
+  `{ revoked: false }` with **no** audit row, mirroring `unlinkWallet` — a redelivered click must not
+  manufacture a security event. A success audits `wallet.device_revoked`.
+- **Revocation is a state, not a delete** (029); revoked devices render as a muted history, so "this device
+  was removed on <date>" survives as a fact.
+
+Gate: tsc 0 · **351/351** unit tests (baseline 338) · migration replay green · placeholder-env build clean.
+Three mutations detected and named (see the evidence file). One assertion was itself wrong on first run — a
+negative lookahead that **passed a correct call** — and is recorded there, because an assertion that cannot
+fail is worse than none.
+
+**Verified in a real browser (rule 12), on `deploy-preview-89` reporting `deployedCommit = 543daa1` — the PR
+head itself.** On an authenticated `/dashboard/wallet` the card rendered a seeded device with its "This
+device" badge; **Remove** emptied the active list, moved the row to *Removed devices*, set `revoked_at` in
+staging and wrote `wallet.device_revoked` (success). The **cross-account boundary was measured, not only
+asserted**: `revoke_wallet_device(<victim's hash>, <attacker's user_id>)` returned **false** with the victim's
+row untouched, and the positive control with the owner's own id returned **true** — so the refusal is scoping,
+not a broken instrument. Session material was minted server-side (no credential typed) and shredded; probe
+rows torn down and read back. Full detail: the evidence file. **D5 does not change the residual:** a victim
+who relays the *code* as well as the signature still gets in. Part 2 (the device-bound key, design §4) is the
+closure, and is not built.
+
 ### Not claimed
 
 The mitigation analysis is reasoning, not measurement; what is measured is the relay and the absence of any
@@ -1761,7 +1801,7 @@ accounts. The risk is **open**.
 | **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` (direct, unused, high) was **removed**. `uuid` **assessed — not reachable**: no dependency calls the affected `v3`/`v5`/`v6`, and the measured impact is silent truncation (integrity only). Static analysis, no runtime trace. | Shri (interim) | open |
 | **R-019** | **A merge to `main` can silently not release (Netlify build quota)** | **MITIGATED 2026-10-27; residual OPEN.** The quota was exhausted and production stayed at `acec64d` while `main` was `7671f85` — CI green, nothing failed. Cause largely removed: `[build] ignore` rules on both sites (docs live *inside* the app, so docs-only merges cost full builds) plus a diff-based gate on the browser-smoke job; verified by executing the stored commands against real refs and catching five mutations. **Still open: nothing fails when a production build is skipped** — the Netlify checks are not required. Rules **exercised live 2026-11-02**: a docs-only commit was skipped on both sites while an app-changing commit built; Netlify diffs against the branch's *previous* commit, not the base tip, so the smoke job now fails fast with an explicit "not a code defect" message when the head touches no app files. **Detection control built 2026-10-27**: `/api/version` reports the deployed commit and a workflow compares it with the merged SHA — asks production, since merge commits get no Netlify signal at all. **Enforcement ENABLED 2026-11-03**: `Production is serving main` is a required check and `VERSION_ENDPOINT_REQUIRED=true`; validated green on a real PR first, which caught a bug in the check itself (`git log -1 -- <path>` skipped a merge commit via history simplification). | Shri (interim) | open |
 | **R-020** | **A wallet session could set an email password (wallet as a recovery credential)** | ✅ **CLOSED 2026-11-03 (PR #80, `c33f76f`)** — production serving it, the R-019 control observed the release, and the **owner confirmed a real password recovery end to end on this revision**. **M8 waived under D5 — not satisfied.** Raised by independent review as *"password recovery may be accessible through an ordinary wallet session"*. `/auth/reset-password` checked only that *a* session existed, and the form changed the password from the browser. **Measured on staging 2026-11-03**: a wallet-class session (`amr=[{"method":"otp"}]` — the same class as a genuine recovery session) changed the password with no `current_password` and no nonce, proven by password grant. Production has both password-change protections ON and **neither helps** (the current-password check is skipped for `otp`/`magiclink`/`recovery` sessions; reauthentication only bites after 24h) — documented, not measured here. Staging has both OFF, so it could not detect this class at all. **Fix:** a signed, 30-minute, `httpOnly` recovery-intent marker set by `/auth/callback` only for the reset path, verified in a Server Action before the password is touched. 5/5 mutations caught. | Shri (interim) | closed |
-| **R-021** | **Wallet sign-in signature relay (a phished signature becomes a session)** | **OPEN — prevention PART 1 shipped and verified in a deployment (PR #87: *the relay no longer mints a session*, `/dashboard` not-200 after a relay, 42/42); DETECTION LIVE IN PRODUCTION since 2026-11-15.** Residual: a victim who also relays the emailed code still gets in — closed only by Part 2 (device-bound key). A public challenge endpoint means an attacker can request a challenge **for the victim's wallet address**, show the message to the victim on another site, and relay the signature back for a session. **Measured on a staging-backed preview**: the challenge response carries **0** `Set-Cookie` headers (nothing binds it to the requesting client), a challenge requested with no browser context is completed by a different one (`ok: true`), and that session gets `/dashboard` 200. **A false argument in `lib/wallet-crypto.ts` claimed this was already prevented** (that a hostile site could not obtain one of our nonces) — corrected. Challenge binding is **rejected** as a fix, with the reasoning recorded, because the attacker receives whatever binding is issued. Recommended: **step-up verification on an unrecognised device** — an owner decision, since it makes wallet sign-in multi-step on a new device. Threat model: `wallet-signin-threat-model.md`. | Shri (interim) | open |
+| **R-021** | **Wallet sign-in signature relay (a phished signature becomes a session)** | **OPEN — prevention PART 1 shipped and verified in a deployment (PR #87: *the relay no longer mints a session*, `/dashboard` not-200 after a relay, 42/42); DETECTION LIVE IN PRODUCTION since 2026-11-15.** Residual: a victim who also relays the emailed code still gets in — closed only by Part 2 (device-bound key). A public challenge endpoint means an attacker can request a challenge **for the victim's wallet address**, show the message to the victim on another site, and relay the signature back for a session. **Measured on a staging-backed preview**: the challenge response carries **0** `Set-Cookie` headers (nothing binds it to the requesting client), a challenge requested with no browser context is completed by a different one (`ok: true`), and that session gets `/dashboard` 200. **A false argument in `lib/wallet-crypto.ts` claimed this was already prevented** (that a hostile site could not obtain one of our nonces) — corrected. Challenge binding is **rejected** as a fix, with the reasoning recorded, because the attacker receives whatever binding is issued. Recommended: **step-up verification on an unrecognised device** — an owner decision, since it makes wallet sign-in multi-step on a new device. **D5 — the recognised-device list + per-device revoke (PR #89, open, NOT merged):** implemented and verified locally (tsc 0, 351/351, migration replay, build) so the alert's *remove that device* instruction finally has a target; recorded as pending, not shipped. Threat model: `wallet-signin-threat-model.md`. | Shri (interim) | open |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
