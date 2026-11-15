@@ -1621,7 +1621,7 @@ confirmed the alert reached the inbox — so a relayed sign-in is no longer sile
 step-up (below), which is an owner
 decision. **Severity:** account takeover via phishing — requires victim interaction; not a forgery.
 **Owner:** Shri — interim accountable owner.
-**Threat model:** `wallet-signin-threat-model.md`
+**Threat model:** `wallet-signin-threat-model.md` · **Prevention design (not built):** `wallet-step-up-design.md`
 
 Raised by independent review (2026-11-03) as *"wallet sign-in has a signature-relay phishing risk"*,
 recommended as a threat-model review. Adopted, reproduced, and documented.
