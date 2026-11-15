@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import {
   getAirdropWalletBalance,
@@ -20,6 +21,13 @@ import {
 } from "@/lib/solana";
 import { uploadAsset, deleteAsset } from "@/lib/storage";
 import { requireActiveUser, requireCapability, type AuthorizationContext } from "@/lib/authz";
+import { DEVICE_COOKIE, hashDeviceId } from "@/lib/wallet-stepup";
+import {
+  normaliseDeviceHash,
+  toDeviceSummary,
+  type WalletDeviceList,
+  type WalletDeviceRow,
+} from "@/lib/wallet-devices";
 import { checkActionRateLimit, rateLimitRefusal } from "@/lib/action-rate-limit";
 import { writeSecurityAudit } from "@/lib/audit";
 import {
@@ -1091,6 +1099,124 @@ export async function unlinkWallet() {
     return { unlinked: true, previousAddress };
   } catch (error) {
     await auditMutationFailure(context, "wallet.unlink", "public.users", user.id, error);
+    throw error;
+  }
+}
+
+/**
+ * The recognised devices for the signed-in member (R-021, D5).
+ *
+ * A "recognised device" is one that has completed a wallet step-up (or signed in
+ * from an already-trusted device), so wallet sign-in from it mints a session
+ * without an emailed code. This is the read half of the member-facing control that
+ * lets the R-021 alert say *"remove that device"* — the design intent of
+ * `docs/security/wallet-step-up-design.md` §3.4.
+ *
+ * Guarded by `requireActiveUser()` BEFORE the service client is constructed, and
+ * scoped to the session's own `user.id`. The table is service-role only (migration
+ * 029), so the read is a privileged one; authorization is what makes it safe. A
+ * member can therefore see only their own rows.
+ *
+ * `currentDeviceHash` is derived server-side from the caller's OWN device cookie
+ * (httpOnly, so the client cannot read it) purely so the UI can mark "this device".
+ * It identifies nobody: the hash is of a random handle, and it is already the key
+ * the member's own list is displayed under.
+ */
+export async function listWalletDevices(): Promise<WalletDeviceList> {
+  const context = await requireActiveUser();
+  const supabase = createServiceClient();
+
+  const { data, error } = await supabase
+    .from("wallet_trusted_devices")
+    .select("device_hash, label, first_seen_at, last_seen_at, last_ip, revoked_at")
+    .eq("user_id", context.user.id)
+    .order("last_seen_at", { ascending: false });
+
+  if (error) throw error;
+
+  const cookieStore = await cookies();
+  const presented = cookieStore.get(DEVICE_COOKIE)?.value ?? "";
+
+  return {
+    devices: (data ?? []).map((row) => toDeviceSummary(row as WalletDeviceRow)),
+    currentDeviceHash: presented ? hashDeviceId(presented) : null,
+  };
+}
+
+/**
+ * Revoke a recognised device, so it is put back behind the step-up gate (R-021, D5).
+ *
+ * DESIGN DECISIONS, all deliberate:
+ *
+ * 1. THE ACCOUNT ID COMES FROM THE SESSION, NEVER FROM THE CALLER. The only value
+ *    taken from the client is the device hash of the row to revoke. The revoke RPC
+ *    is called with `p_user_id: user.id` from `requireActiveUser()`, and is scoped
+ *    by it, so a well-formed hash belonging to another member can revoke nothing.
+ *    If the account id were ever read from the form, this action could revoke
+ *    anyone's device — a targeted lockout of another member's wallet sign-in. That
+ *    invariant is asserted structurally in `lib/wallet-device-guard.test.ts`.
+ *
+ * 2. NO PROOF OF POSSESSION BY THE DEVICE BEING REMOVED. The situation this exists
+ *    for is a device that is lost, or that the member believes is someone else's —
+ *    where proving control of it is exactly what cannot be done. The bar is an
+ *    authenticated session, same as `unlinkWallet`.
+ *
+ * 3. IT CANNOT LOCK ANYONE OUT. Revocation only removes an exemption from the gate:
+ *    the device is asked for a code on its next sign-in. Email/OTP sign-in always
+ *    remains available, and the member can re-trust the device simply by signing in
+ *    on it again.
+ *
+ * 4. IDEMPOTENT, AND A NO-OP IS NOT AN ERROR. Revoking an unknown or already-revoked
+ *    device returns `{ revoked: false }` WITHOUT writing an audit row — mirroring
+ *    `unlinkWallet`. A redelivered click or a stale list must not manufacture a
+ *    security event (migration 029 records revocation as a state, not a delete).
+ */
+export async function revokeWalletDevice(deviceHash: string) {
+  const context = await requireActiveUser();
+  const { user } = context;
+
+  // Cheap refusal first, before any privileged client exists: a malformed handle is
+  // a caller error, and handing it to the RPC would only raise a parameter exception.
+  const normalised = normaliseDeviceHash(deviceHash);
+  if (!normalised) {
+    return { revoked: false, reason: "invalid_device" as const };
+  }
+
+  const supabase = createServiceClient();
+
+  try {
+    const { data, error } = await supabase.rpc("revoke_wallet_device", {
+      p_device_hash: normalised,
+      p_user_id: user.id,
+    });
+    if (error) throw error;
+
+    const revoked = data === true;
+    if (!revoked) {
+      return { revoked: false, reason: "not_found" as const };
+    }
+
+    // Its own action name so a device removal is legible in the audit trail rather
+    // than appearing only as a generic row. The device hash identifies the row; the
+    // account id is the actor.
+    await writeSecurityAudit(context, {
+      action: "wallet.device_revoked",
+      targetTable: "public.wallet_trusted_devices",
+      targetId: user.id,
+      metadata: { device_hash: normalised },
+    });
+
+    revalidatePath("/dashboard/wallet");
+
+    return { revoked: true };
+  } catch (error) {
+    await auditMutationFailure(
+      context,
+      "wallet.device_revoke",
+      "public.wallet_trusted_devices",
+      user.id,
+      error
+    );
     throw error;
   }
 }
