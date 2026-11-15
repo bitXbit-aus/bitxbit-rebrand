@@ -1,11 +1,16 @@
 # Recognised devices + revoke — evidence (R-021, D5)
 
 **Register:** R-021 (prevention, the member-facing half) · **Design:** `../wallet-step-up-design.md` §3.4
-**PR:** #89 (branch `security/r021-device-management-ui`) · **Migration:** none — the `revoke_wallet_device`
-RPC and `wallet_trusted_devices` shipped in **029**, already applied to production and staging.
+**PR:** #89 (branch `security/r021-device-management-ui`) · **Merge:** `78ff51e` (2026-11-15) · **Migration:**
+none — the `revoke_wallet_device` RPC and `wallet_trusted_devices` shipped in **029**, already applied to
+production and staging.
 
-**Status: implemented, verified locally, and exercised in a real browser against the PR's deploy preview; PR
-open. NOT merged, NOT deployed. R-021 is unchanged by this.**
+**Status: RELEASED to production 2026-11-15 (PR #89, merge `78ff51e`).** Production `/api/version` reports
+`78ff51ec3d8d846edaa51ccd88fa22ccfcf2626c` — the merge commit itself, so the release is measured rather than
+inferred from a green merge (R-019). The `Production is serving main` required check passed on that commit,
+post-merge `Dashboard CI` and `Production release verification` both succeeded, and production stayed healthy
+(`/dashboard/wallet` → 307 to login, the wallet challenge endpoint still 200). **R-021 is unchanged by this:**
+D5 is the member-facing half.
 
 ## Why this control exists
 
