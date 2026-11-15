@@ -96,13 +96,17 @@ Visible four minutes earlier, and worth reading correctly: `wallet.signin_failed
 **failed** sign-in sends no alert, and that is right — no session existed, so there is nothing to warn the
 member about. Noticing repeated failures is a different control (rate limiting or lockout), not this one.
 
+## Closed 2026-11-15 — owner confirmed receipt
+
+The `sent` row shows the provider **accepted** the message; it does not show it arrived. The account owner has
+now confirmed the alert reached the inbox, so the loop is closed end to end and R-021's detection half has no
+unverified step left.
+
+As with the recovery email for R-015, that is the **owner's self-report** rather than something we measured,
+and it is recorded as such so it is not mistaken for an independent check.
+
 ## What is NOT verified
 
-- **Delivery to the inbox is not verified by us.** The *send* is: the provider accepted it (`sent`,
-  2026-11-15). Whether it arrives in the inbox rather than a spam folder — on a Proton address, from a
-  sender name (`bitXbit Security`) that differs from the auth emails (`bitXbit`) — is the account owner's
-  confirmation to make. A distinct name for security alerts is defensible; if it lands in spam, matching the
-  auth sender's name is the first thing to try.
 - The alert reports the trusted client IP as the source. It does not attempt geolocation, and a relayed
   sign-in will report the *attacker's* IP — which is the point, but means the alert is only as useful as
   the member's willingness to read it.
