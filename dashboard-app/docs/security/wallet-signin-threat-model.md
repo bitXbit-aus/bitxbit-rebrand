@@ -122,11 +122,15 @@ production migration if the pending state is stored in the database (a signed co
 avoiding that). **Trade-off:** wallet sign-in stops being a single step on a new device — a real UX change
 for members, and therefore an owner decision, not an engineering one.
 
-### 2. Notify the account owner on wallet sign-in — **cheap, real, detection only**
+### 2. Notify the account owner on wallet sign-in — **IMPLEMENTED 2026-11-03, inert until configured**
 
-An email on every wallet sign-in ("if this wasn't you…") gives the victim the chance to act. The app has no
-mailer today (auth email goes through Supabase's SMTP), so this needs a small mail path and a template.
-It does not prevent the sign-in; it bounds how long it goes unnoticed.
+An email on every wallet sign-in ("if this wasn't you…") gives the victim the chance to act. It does not
+prevent the sign-in; it bounds how long it goes unnoticed.
+
+**The application has no mail-sending code path of its own** — Supabase Auth sends bitXbit's templated auth
+email (recovery, confirmation, invite, …) through SMTP configured in the Supabase dashboard, and there is no
+API to make it send an arbitrary message. So the alert needs a small application-side transport: it posts to
+the provider's REST API, and is inert without an API key (see R-021 for the configuration action).
 
 ### 3. Make the prompt unmistakable — **cheap, but needs a real-wallet test**
 

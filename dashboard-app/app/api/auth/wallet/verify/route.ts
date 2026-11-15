@@ -8,6 +8,7 @@ import {
   rateLimitResponse,
 } from "@/lib/rate-limit";
 import { writeAnonymousSecurityAudit } from "@/lib/audit";
+import { notifyWalletSignIn } from "@/lib/security-notification";
 import { verifyWalletSignIn } from "@/lib/wallet-signin";
 
 /**
@@ -158,6 +159,45 @@ export async function POST(request: NextRequest) {
     targetId: userId,
     metadata: { wallet_address: walletAddress, method: "solana_wallet" },
   });
+
+  // R-021 — DETECTION, and the reason it is here rather than earlier.
+  //
+  // A relayed sign-in cannot be prevented inside this handshake: the attacker
+  // requests the challenge themselves, so they receive whatever binding we issue
+  // (see docs/security/wallet-signin-threat-model.md). What CAN be done is to stop
+  // it being silent — the account owner is told immediately, with the wallet, the
+  // time, the source IP and what to do, so a relay becomes visible within seconds
+  // instead of whenever they next log in.
+  //
+  // Two properties, both deliberate:
+  //
+  // 1. It runs AFTER the session is minted and can never fail the sign-in.
+  //    `notifyWalletSignIn` does not throw, and the audit write is guarded too — a
+  //    mail outage must not become an auth outage.
+  // 2. The OUTCOME is audited. A notification that silently does not send would be
+  //    a false sense of safety, which is the exact failure this whole risk is about,
+  //    so "not configured" and "provider failed" are recorded rather than assumed.
+  try {
+    const notified = await notifyWalletSignIn({
+      email,
+      walletAddress,
+      clientIp: identifier,
+      signedInAt: new Date().toISOString(),
+      appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
+    });
+
+    await writeAnonymousSecurityAudit({
+      actorId: userId,
+      action: "wallet.signin_notified",
+      targetTable: "public.users",
+      targetId: userId,
+      success: notified.sent,
+      metadata: { reason: notified.reason, detail: notified.detail ?? null },
+    });
+  } catch {
+    // Belt and braces. Nothing above should throw; if it somehow does, the sign-in
+    // still succeeds — the session is already minted.
+  }
 
   return withAuthNoStore(
     NextResponse.json({ ok: true, redirectTo: "/dashboard" })
