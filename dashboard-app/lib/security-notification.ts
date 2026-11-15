@@ -173,6 +173,78 @@ export function buildWalletSignInNotification(
 }
 
 /**
+ * Build the step-up code email (R-021 prevention).
+ *
+ * Deliberately **not** the alert with a code bolted on, because the two have
+ * different jobs and different risks:
+ *
+ * - It carries a **secret**, so it leads with the code and says plainly that the
+ *   code must never be shared — the one instruction that matters when the person
+ *   asking for it is a convincing stranger.
+ * - It carries **no approval link**. An "approve this sign-in" button would let the
+ *   victim authorise the *attacker's* pending attempt, since the attacker's browser
+ *   is the one waiting for a session. The factor has to be entered in the browser
+ *   that is signing in.
+ * - It is the only email sent for a stepped-up sign-in. One email per sign-in, never
+ *   two: the warning that would otherwise come from the R-021 alert is folded in
+ *   here, so a member on a new device is not told the same thing twice.
+ */
+export function buildWalletStepUpEmail(
+  input: WalletSignInNoticeInput & { code: string }
+): EmailMessage {
+  const when = formatUtc(input.signedInAt);
+  const host = notificationHost(input.appUrl);
+
+  const subject = `Your bitXbit sign-in code: ${input.code}`;
+
+  const text = [
+    `Your bitXbit sign-in code is: ${input.code}`,
+    "",
+    "Enter it in the browser you are signing in from. It expires in 10 minutes.",
+    "",
+    `When:    ${when}`,
+    `Wallet:  ${input.walletAddress}`,
+    `From IP: ${input.clientIp}`,
+    "",
+    "Only enter this code if YOU started a wallet sign-in just now.",
+    `If you did not, do NOT share this code with anyone — not even someone`,
+    `claiming to be bitXbit. Someone is trying to sign in as you. Reset your`,
+    `password and unlink the wallet, then tell us: ${SUPPORT_EMAIL}`,
+    "",
+    `bitXbit only ever asks you to sign a message on ${host}. If you were asked to`,
+    "sign anywhere else, it was not us, and the signature should be treated as",
+    "compromised.",
+    "",
+    "— bitXbit",
+  ].join("\n");
+
+  const e = escapeHtml;
+  const html = `<div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0b0f19;padding:24px;color:#cbd5e1;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
+    <table width="480" cellpadding="0" cellspacing="0" border="0" style="background:#111827;border:1px solid #1f2937;border-radius:12px;max-width:480px;">
+      <tr><td style="padding:32px;">
+        <h1 style="margin:0 0 16px;font-size:20px;color:#60a5fa;">New device sign-in</h1>
+        <p style="margin:0 0 16px;line-height:1.5;">Enter this code in the browser you are signing in from. It expires in 10 minutes.</p>
+        <p style="margin:0 0 24px;font-size:32px;letter-spacing:6px;font-weight:700;color:#f8fafc;background:#0b0f19;border:1px solid #1f2937;border-radius:8px;padding:16px;text-align:center;">${e(input.code)}</p>
+        <table cellpadding="0" cellspacing="0" border="0" style="font-size:14px;line-height:1.7;">
+          <tr><td style="color:#94a3b8;">When</td><td style="padding-left:12px;">${e(when)}</td></tr>
+          <tr><td style="color:#94a3b8;">Wallet</td><td style="padding-left:12px;word-break:break-all;">${e(input.walletAddress)}</td></tr>
+          <tr><td style="color:#94a3b8;">From IP</td><td style="padding-left:12px;">${e(input.clientIp)}</td></tr>
+        </table>
+        <p style="margin:20px 0 0;line-height:1.5;">Only enter this code if <strong style="color:#f8fafc;">you</strong> started a wallet sign-in just now.</p>
+        <p style="margin:12px 0 0;line-height:1.5;"><strong style="color:#f87171;">If you did not, do not share this code with anyone</strong> — not even someone claiming to be bitXbit. Someone is trying to sign in as you. Reset your password, unlink the wallet, and tell us at <a href="mailto:${e(SUPPORT_EMAIL)}" style="color:#60a5fa;">${e(SUPPORT_EMAIL)}</a>.</p>
+        <p style="margin:20px 0 0;font-size:13px;color:#94a3b8;line-height:1.6;">
+          bitXbit only ever asks you to sign a message on <strong>${e(host)}</strong>. If you were asked to sign anywhere else, it was not us, and the signature should be treated as compromised.
+        </p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</div>`;
+
+  return { to: input.email, subject, text, html };
+}
+
+/**
  * Send one email through the provider's REST API. **Never throws.**
  *
  * No API key means NO REQUEST IS MADE — a missing configuration must not turn into
@@ -228,6 +300,32 @@ export async function sendSecurityNotification(
     return { sent: false, reason: "failed", detail };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Build and send the step-up code email. **Never throws.**
+ *
+ * Note the asymmetry with `notifyWalletSignIn`: that one is fail-soft because it is
+ * an *observation*, and a mail outage must not become an auth outage. This one is
+ * part of a *gate* — the caller must fail **closed** when it returns `sent: false`,
+ * which is precisely what the return value exists to let it do.
+ */
+export async function sendWalletStepUpCode(
+  input: WalletSignInNoticeInput & { code: string },
+  deps: { apiKey?: string; from?: string; fetcher?: Fetcher; timeoutMs?: number } = {}
+): Promise<SendOutcome> {
+  try {
+    if (!input.email || !input.code) {
+      return { sent: false, reason: "not_configured", detail: "no recipient or code" };
+    }
+    return await sendSecurityNotification(buildWalletStepUpEmail(input), deps);
+  } catch (error) {
+    return {
+      sent: false,
+      reason: "failed",
+      detail: error instanceof Error ? error.name : "unknown error",
+    };
   }
 }
 

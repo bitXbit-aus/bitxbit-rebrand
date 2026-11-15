@@ -68,10 +68,47 @@ export interface WalletSignInFailure {
   error?: string;
 }
 
+/**
+ * A step-up is NOT a failure: the signature verified and the account was resolved,
+ * but the device is unrecognised, so a code has been sent to the account email
+ * (R-021 prevention). It is a distinct state and must be surfaced as one.
+ *
+ * Folding it into `WalletSignInFailure` would tell a member signing in from a new
+ * phone that their wallet is wrong — the exact opposite of what happened.
+ */
+export interface WalletSignInStepUp {
+  ok: false;
+  stepUpRequired: true;
+  stepUpId: string;
+  /** Masked, e.g. `m•••@protonmail.com`. Never the full address. */
+  emailHint: string;
+}
+
+/** A server message is rendered to the user, so it is length-bounded and type-checked. */
+function boundedMessage(data: Record<string, unknown> | null): string | undefined {
+  return typeof data?.error === "string" && data.error.length <= 300
+    ? data.error
+    : undefined;
+}
+
+/**
+ * `redirectTo` is accepted ONLY as a root-relative path. The server sends
+ * "/dashboard", but a redirect target that arrives over the wire is an
+ * open-redirect sink the moment anything upstream changes, so it is constrained
+ * here too.
+ */
+function boundedRedirect(data: Record<string, unknown> | null): string {
+  return typeof data?.redirectTo === "string" &&
+    data.redirectTo.startsWith("/") &&
+    !data.redirectTo.startsWith("//")
+    ? data.redirectTo
+    : DEFAULT_REDIRECT;
+}
+
 export async function submitWalletSignIn(
   params: { walletAddress: string; signature: string; nonce: string },
   fetcher: Fetcher = fetch
-): Promise<{ ok: true; redirectTo: string } | WalletSignInFailure> {
+): Promise<{ ok: true; redirectTo: string } | WalletSignInStepUp | WalletSignInFailure> {
   try {
     const response = await fetcher("/api/auth/wallet/verify", {
       method: "POST",
@@ -87,25 +124,70 @@ export async function submitWalletSignIn(
     }
 
     if (!response.ok) {
-      // Bounded and type-checked: this string is rendered to the user.
-      const message =
-        typeof data?.error === "string" && data.error.length <= 300 ? data.error : undefined;
       // Only carry the key when there IS a message — an `error: undefined`
       // property is a phantom key that makes `{ok:false}` and
       // `{ok:false, error:undefined}` non-equal, which is a trap for callers.
+      const message = boundedMessage(data);
+      return message ? { ok: false, error: message } : { ok: false };
+    }
+
+    // Tested BEFORE the generic branch, and only when the server actually supplied a
+    // step-up id: an unsigned path back to the code form would be a dead end, and
+    // reporting a step-up as a failure would mislead the member.
+    if (data?.ok === false && data?.stepUpRequired === true) {
+      const stepUpId = typeof data.stepUpId === "string" ? data.stepUpId : "";
+      if (stepUpId) {
+        return {
+          ok: false,
+          stepUpRequired: true,
+          stepUpId,
+          emailHint: typeof data.emailHint === "string" ? data.emailHint : "",
+        };
+      }
+    }
+
+    if (data?.ok !== true) return { ok: false };
+
+    return { ok: true, redirectTo: boundedRedirect(data) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * Complete a step-up with the code sent to the account email.
+ *
+ * Same failure discipline as sign-in: one shape for every rejection, with the
+ * server's own message passed through rather than a guessed one. The server returns
+ * an identical message whether a code was wrong, expired, exhausted or unknown, so
+ * there is nothing here to infer.
+ */
+export async function submitWalletStepUp(
+  params: { stepUpId: string; code: string },
+  fetcher: Fetcher = fetch
+): Promise<{ ok: true; redirectTo: string } | WalletSignInFailure> {
+  try {
+    const response = await fetcher("/api/auth/wallet/step-up", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(params),
+    });
+
+    let data: Record<string, unknown> | null = null;
+    try {
+      data = (await response.json()) as Record<string, unknown>;
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const message = boundedMessage(data);
       return message ? { ok: false, error: message } : { ok: false };
     }
 
     if (data?.ok !== true) return { ok: false };
 
-    const redirectTo =
-      typeof data.redirectTo === "string" &&
-      data.redirectTo.startsWith("/") &&
-      !data.redirectTo.startsWith("//")
-        ? data.redirectTo
-        : DEFAULT_REDIRECT;
-
-    return { ok: true, redirectTo };
+    return { ok: true, redirectTo: boundedRedirect(data) };
   } catch {
     return { ok: false };
   }
