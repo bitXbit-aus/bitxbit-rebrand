@@ -56,6 +56,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Keypair } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import { createHash, createHmac } from "crypto";
 
 const url = process.env.STAGING_SUPABASE_URL;
 const serviceKey = process.env.STAGING_SUPABASE_SERVICE_ROLE_KEY;
@@ -125,10 +126,39 @@ function messageHost(message: string): string {
   return (site ?? "").replace(/^Site:\s*/, "").replace(/^https?:\/\//, "").trim();
 }
 
-async function postVerify(payload: Record<string, string>) {
+async function postVerify(payload: Record<string, string>, deviceCookie?: string) {
   const res = await fetch(`${baseUrl}/api/auth/wallet/verify`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(deviceCookie ? { cookie: deviceCookie } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await res.json()) as Record<string, unknown>;
+  } catch {
+    body = null;
+  }
+  const cookies = res.headers.getSetCookie?.() ?? [];
+  return { status: res.status, body, cookies, raw: JSON.stringify(body) };
+}
+
+/**
+ * Complete a step-up (R-021 prevention: the second factor for an unrecognised device).
+ *
+ * The device cookie is sent, because a real browser does: the handle issued at the
+ * gate is what the completion trusts, so a completing request that drops it would
+ * trust a different browser than the one that asked.
+ */
+async function postStepUp(payload: Record<string, string>, deviceCookie?: string) {
+  const res = await fetch(`${baseUrl}/api/auth/wallet/step-up`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(deviceCookie ? { cookie: deviceCookie } : {}),
+    },
     body: JSON.stringify(payload),
   });
   let body: Record<string, unknown> | null = null;
@@ -288,11 +318,14 @@ async function main() {
   // nonce proves only that SOMEONE asked us for one.
   //
   // This is the residual documented in docs/security/wallet-signin-threat-model.md
-  // (register R-021). NOTE FOR WHOEVER CLOSES IT: this assertion will FAIL once a
-  // real binding exists — that failure is the signal to update the threat model and
-  // delete this block, not to weaken the assertion.
+  // (register R-021) — and as of the step-up gate it is no longer exploitable, though
+  // the challenge is STILL unbound. The gate does not try to bind it (that is provably
+  // impossible: the attacker requests the challenge, so receives whatever binding is
+  // issued — see "Why the obvious fix does not work"). It removes the REWARD instead:
+  // a relayed signature on an unrecognised device now buys a step-up prompt, not a
+  // session. The two assertions below are the pair that proves it.
   check(
-    "the challenge response carries NO client binding (known residual — R-021)",
+    "the challenge response still carries NO client binding (R-021 residual, by design)",
     challenge.cookies.length === 0,
     `Set-Cookie headers: ${challenge.cookies.length}`
   );
@@ -308,9 +341,23 @@ async function main() {
     nonce: String(relayChallenge.body?.nonce ?? ""),
   });
   check(
-    "a challenge requested with no browser context can be completed by a different one (the relay is open — R-021)",
-    relayed.status === 200 && relayed.body?.ok === true,
+    "THE RELAY NO LONGER MINTS A SESSION (R-021 prevention)",
+    relayed.body?.ok !== true &&
+      relayed.cookies.filter((c) => c.startsWith("sb-")).length === 0,
     `relayed verify -> ${relayed.status} ${relayed.raw}`
+  );
+  check(
+    "the relayed attempt is refused by the gate — step-up required, or fail-closed if the code could not be delivered",
+    relayed.status === 200
+      ? relayed.body?.stepUpRequired === true
+      : relayed.status === 503,
+    `relayed verify -> ${relayed.status} ${relayed.raw}`
+  );
+  const relayedDash = await fetch(`${baseUrl}/dashboard`, { redirect: "manual" });
+  check(
+    "after a relay, /dashboard is not 200",
+    relayedDash.status !== 200,
+    `GET /dashboard (after relay) -> ${relayedDash.status}`
   );
 
 
@@ -324,18 +371,78 @@ async function main() {
     JSON.stringify(unregisteredChallenge.body)
   );
 
-  // ---------------------------------------------------- 2. sign in successfully
-  console.log("\n2. sign-in (valid signature, verified wallet)");
+  // --------------------------------- 2. sign-in on an UNRECOGNISED device (gated)
+  //
+  // This used to be a single POST that returned a session. It now has to pass the
+  // R-021 gate first, and the harness must exercise the REAL completion endpoint —
+  // the only other place a session is minted — rather than assume it works.
+  console.log("\n2. sign-in (valid signature, verified wallet, unrecognised device)");
   const signature = sign(message, registered);
-  const verified = await postVerify({
+  const firstVerify = await postVerify({
     walletAddress: registered.publicKey.toBase58(),
     signature,
     nonce,
   });
-  check("verify returns 200", verified.status === 200, `got ${verified.status} ${verified.raw}`);
-  check("verify reports ok", verified.body?.ok === true, verified.raw);
-  const authCookies = verified.cookies.filter((c) => c.startsWith("sb-"));
-  check("verify sets supabase session cookies", authCookies.length > 0, `headers: ${verified.cookies.length}`);
+  check("verify returns 200", firstVerify.status === 200, `got ${firstVerify.status} ${firstVerify.raw}`);
+  check(
+    "a valid signature on an UNRECOGNISED device does not sign in",
+    firstVerify.body?.ok !== true,
+    firstVerify.raw
+  );
+  check(
+    "it is refused by the gate with a step-up required",
+    firstVerify.body?.stepUpRequired === true,
+    `expected stepUpRequired, got ${firstVerify.raw}`
+  );
+  check(
+    "no session cookie is set before the step-up",
+    firstVerify.cookies.filter((c) => c.startsWith("sb-")).length === 0,
+    `Set-Cookie: ${firstVerify.cookies.join(" | ")}`
+  );
+
+  const deviceCookie = firstVerify.cookies
+    .find((c) => c.startsWith("bx_wallet_device="))
+    ?.split(";")[0];
+  check(
+    "the gate issues an opaque device handle",
+    Boolean(deviceCookie),
+    `Set-Cookie: ${firstVerify.cookies.join(" | ")}`
+  );
+
+  const stepUpId = String(firstVerify.body?.stepUpId ?? "");
+  check("the gate returns a step-up id", /^[0-9a-f-]{36}$/i.test(stepUpId), stepUpId);
+
+  // The harness cannot read the account's email — and must not be able to. It knows
+  // the code by putting its own pending state in place: it rewrites the row the gate
+  // just created with a code it chose, using the same key the application derives.
+  // That exercises the real endpoint without a mailbox, which is the point.
+  const chosenCode = "424242";
+  const stepUpKeyMaterial = process.env.STEPUP_HMAC_SECRET || String(serviceKey);
+  const codeHmac = createHmac("sha256", stepUpKeyMaterial).update(chosenCode).digest("hex");
+  const { error: seedError } = await admin
+    .from("wallet_signin_stepups")
+    .update({ code_hmac: codeHmac, attempts: 0 })
+    .eq("id", stepUpId);
+  check("the harness can seed its own pending code", !seedError, seedError?.message ?? "");
+
+  const wrongCode = await postStepUp({ stepUpId, code: "000000" }, deviceCookie);
+  check("a wrong code is refused", wrongCode.status === 401, `got ${wrongCode.status} ${wrongCode.raw}`);
+  check(
+    "a refused code sets no session cookie",
+    wrongCode.cookies.filter((c) => c.startsWith("sb-")).length === 0,
+    wrongCode.cookies.join(" | ")
+  );
+
+  const completed = await postStepUp({ stepUpId, code: chosenCode }, deviceCookie);
+  check("the right code completes the step-up", completed.status === 200, `got ${completed.status} ${completed.raw}`);
+  check("the step-up reports ok", completed.body?.ok === true, completed.raw);
+
+  const authCookies = completed.cookies.filter((c) => c.startsWith("sb-"));
+  check(
+    "the step-up mints supabase session cookies",
+    authCookies.length > 0,
+    `headers: ${completed.cookies.length}`
+  );
 
   const cookieHeader = authCookies.map((c) => c.split(";")[0]).join("; ");
   if (cookieHeader) {
@@ -349,6 +456,59 @@ async function main() {
       `GET /dashboard -> ${dash.status}`
     );
   }
+
+  check(
+    "a code is single-use and cannot be replayed",
+    (await postStepUp({ stepUpId, code: chosenCode }, deviceCookie)).status === 401,
+    "a consumed step-up accepted a replay"
+  );
+
+  // ---------------------------------------------- 2b. the device is now trusted
+  console.log("\n2b. sign-in from the now-recognised device");
+  const c2 = await postChallenge(registered.publicKey.toBase58());
+  const secondVerify = await postVerify(
+    {
+      walletAddress: registered.publicKey.toBase58(),
+      signature: sign(String(c2.body?.message ?? ""), registered),
+      nonce: String(c2.body?.nonce ?? ""),
+    },
+    deviceCookie
+  );
+  check(
+    "a recognised device signs in WITHOUT a step-up",
+    secondVerify.status === 200 && secondVerify.body?.ok === true,
+    `got ${secondVerify.status} ${secondVerify.raw}`
+  );
+  check(
+    "and it mints a session",
+    secondVerify.cookies.filter((c) => c.startsWith("sb-")).length > 0,
+    secondVerify.cookies.join(" | ")
+  );
+
+  // --------------------------------------------------- 2c. revoking un-trusts it
+  if (deviceCookie) {
+    const deviceId = deviceCookie.split("=")[1] ?? "";
+    const deviceHash = createHash("sha256").update(deviceId).digest("hex");
+    const { error: revokeError } = await admin.rpc("revoke_wallet_device", {
+      p_device_hash: deviceHash,
+      p_user_id: userId,
+    });
+    check("the device can be revoked", !revokeError, revokeError?.message ?? "");
+  }
+  const c2r = await postChallenge(registered.publicKey.toBase58());
+  const afterRevoke = await postVerify(
+    {
+      walletAddress: registered.publicKey.toBase58(),
+      signature: sign(String(c2r.body?.message ?? ""), registered),
+      nonce: String(c2r.body?.nonce ?? ""),
+    },
+    deviceCookie
+  );
+  check(
+    "a REVOKED device is put back behind the gate",
+    afterRevoke.body?.ok !== true && afterRevoke.body?.stepUpRequired === true,
+    `got ${afterRevoke.status} ${afterRevoke.raw}`
+  );
 
   const meCheck = await fetch(`${baseUrl}/dashboard`, { redirect: "manual" });
   check(
