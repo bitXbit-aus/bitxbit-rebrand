@@ -179,6 +179,43 @@ async function attachVerifiedWallet(userId: string, walletAddress: string) {
   await admin.from("users").update({ wallet_verified: true }).eq("id", userId);
 }
 
+/**
+ * R-021 Part 2 — a device key, as a browser would hold one.
+ *
+ * Generated with `extractable: false`, exactly as `lib/wallet-device-key-client.ts`
+ * does, and only the public half is handed to the server. The harness holds the
+ * private key here because a Node script has no IndexedDB; a browser never can.
+ */
+async function generateDeviceKey() {
+  const pair = await globalThis.crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign", "verify"]
+  );
+  const jwk = await globalThis.crypto.subtle.exportKey("jwk", pair.publicKey);
+  return {
+    pair,
+    publicKeyJson: JSON.stringify({ kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y }),
+  };
+}
+
+/** Signs the challenge nonce, returning base64url of WebCrypto's raw r||s. */
+async function signNonce(pair: CryptoKeyPair, nonce: string): Promise<string> {
+  const raw = new Uint8Array(
+    await globalThis.crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      pair.privateKey,
+      new TextEncoder().encode(nonce)
+    )
+  );
+  return Buffer.from(raw).toString("base64url");
+}
+
+/** The device_hash for the presented cookie, so a test can read or rewrite the row. */
+function deviceHashOf(deviceCookie: string): string {
+  return createHash("sha256").update(deviceCookie.split("=")[1] ?? "").digest("hex");
+}
+
 const createdUserIds: string[] = [];
 const usedWallets: string[] = [];
 
@@ -467,9 +504,30 @@ async function main() {
     wrongCode.cookies.join(" | ")
   );
 
-  const completed = await postStepUp({ stepUpId, code: chosenCode }, deviceCookie);
+  // Enrollment happens HERE, at the same moment a browser would do it: the step-up
+  // that proves control of the mailbox is also the one that binds this device to a
+  // key. From now on a recognised device must prove possession of it.
+  const deviceKey = await generateDeviceKey();
+  const completed = await postStepUp(
+    { stepUpId, code: chosenCode, devicePublicKey: deviceKey.publicKeyJson },
+    deviceCookie
+  );
   check("the right code completes the step-up", completed.status === 200, `got ${completed.status} ${completed.raw}`);
   check("the step-up reports ok", completed.body?.ok === true, completed.raw);
+
+  if (deviceCookie) {
+    const { data: enrolled } = await admin
+      .from("wallet_trusted_devices")
+      .select("public_key")
+      .eq("device_hash", deviceHashOf(deviceCookie))
+      .eq("user_id", userId)
+      .maybeSingle();
+    check(
+      "the step-up ENROLLED the device key",
+      typeof enrolled?.public_key === "string" && enrolled.public_key.length > 0,
+      JSON.stringify(enrolled)
+    );
+  }
 
   const authCookies = completed.cookies.filter((c) => c.startsWith("sb-"));
   check(
@@ -500,16 +558,21 @@ async function main() {
   // ---------------------------------------------- 2b. the device is now trusted
   console.log("\n2b. sign-in from the now-recognised device");
   const c2 = await postChallenge(registered.publicKey.toBase58());
+  const nonce2 = String(c2.body?.nonce ?? "");
   const secondVerify = await postVerify(
     {
       walletAddress: registered.publicKey.toBase58(),
       signature: sign(String(c2.body?.message ?? ""), registered),
-      nonce: String(c2.body?.nonce ?? ""),
+      nonce: nonce2,
+      // Present the device signature, as the browser now does. Without it the
+      // server would treat this device as not device-bound and step it up — which is
+      // the correct behaviour, and is asserted separately below.
+      deviceSignature: await signNonce(deviceKey.pair, nonce2),
     },
     deviceCookie
   );
   check(
-    "a recognised device signs in WITHOUT a step-up",
+    "a device that ENROLLED a key signs in WITHOUT a step-up",
     secondVerify.status === 200 && secondVerify.body?.ok === true,
     `got ${secondVerify.status} ${secondVerify.raw}`
   );
@@ -518,6 +581,76 @@ async function main() {
     secondVerify.cookies.filter((c) => c.startsWith("sb-")).length > 0,
     secondVerify.cookies.join(" | ")
   );
+
+  // ------------------------- 2b-ii. the device key is now REQUIRED on a known device
+  console.log("\n2b-ii. a recognised device that cannot prove its key is put back behind the gate");
+
+  // (a) no device signature at all
+  {
+    const c = await postChallenge(registered.publicKey.toBase58());
+    const res = await postVerify(
+      {
+        walletAddress: registered.publicKey.toBase58(),
+        signature: sign(String(c.body?.message ?? ""), registered),
+        nonce: String(c.body?.nonce ?? ""),
+      },
+      deviceCookie
+    );
+    check(
+      "a recognised device with NO device signature does not sign in",
+      res.body?.ok !== true && res.cookies.filter((x) => x.startsWith("sb-")).length === 0,
+      `got ${res.status} ${res.raw}`
+    );
+  }
+
+  // (b) a device signature from the WRONG key — the relay case, where someone else
+  //     presents this device's handle and has a key of their own.
+  {
+    const otherKey = await generateDeviceKey();
+    const c = await postChallenge(registered.publicKey.toBase58());
+    const nonce = String(c.body?.nonce ?? "");
+    const res = await postVerify(
+      {
+        walletAddress: registered.publicKey.toBase58(),
+        signature: sign(String(c.body?.message ?? ""), registered),
+        nonce,
+        deviceSignature: await signNonce(otherKey.pair, nonce),
+      },
+      deviceCookie
+    );
+    check(
+      "a signature from a DIFFERENT device key does not sign in",
+      res.body?.ok !== true && res.cookies.filter((x) => x.startsWith("sb-")).length === 0,
+      `got ${res.status} ${res.raw}`
+    );
+  }
+
+  // (c) a device row with NO registered key — every device enrolled before Part 2.
+  //     It must step up rather than sign in, which is what makes Part 2 need no
+  //     data migration.
+  {
+    await admin
+      .from("wallet_trusted_devices")
+      .update({ public_key: null })
+      .eq("device_hash", deviceHashOf(deviceCookie ?? ""))
+      .eq("user_id", userId);
+    const c = await postChallenge(registered.publicKey.toBase58());
+    const nonce = String(c.body?.nonce ?? "");
+    const res = await postVerify(
+      {
+        walletAddress: registered.publicKey.toBase58(),
+        signature: sign(String(c.body?.message ?? ""), registered),
+        nonce,
+        deviceSignature: await signNonce(deviceKey.pair, nonce),
+      },
+      deviceCookie
+    );
+    check(
+      "a device enrolled WITHOUT a key steps up instead of signing in",
+      res.body?.ok !== true && res.cookies.filter((x) => x.startsWith("sb-")).length === 0,
+      `got ${res.status} ${res.raw}`
+    );
+  }
 
   // --------------------------------------------------- 2c. revoking un-trusts it
   if (deviceCookie) {
