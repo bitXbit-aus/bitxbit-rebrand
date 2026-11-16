@@ -23,6 +23,7 @@ import {
   stepUpKey,
 } from "@/lib/wallet-stepup";
 import { verifyWalletSignIn } from "@/lib/wallet-signin";
+import { deviceKeyRegistered, verifyDeviceSignature } from "@/lib/wallet-device-key";
 
 /**
  * Phase 2 (B3) — step 2 of wallet sign-in.
@@ -98,6 +99,10 @@ export async function POST(request: NextRequest) {
     typeof body.walletAddress === "string" ? body.walletAddress.trim() : "";
   const signature = typeof body.signature === "string" ? body.signature.trim() : "";
   const nonce = typeof body.nonce === "string" ? body.nonce.trim() : "";
+  // R-021 Part 2: a signature over the SAME nonce, made with the browser's
+  // non-exportable device key. Present only when this browser has enrolled one.
+  const deviceSignature =
+    typeof body.deviceSignature === "string" ? body.deviceSignature.trim() : "";
 
   if (!walletAddress || !signature || !nonce) {
     return withAuthNoStore(NextResponse.json(GENERIC_FAILURE, { status: 400 }));
@@ -167,19 +172,69 @@ export async function POST(request: NextRequest) {
   const deviceHash = hashDeviceId(deviceId);
 
   let deviceTrusted = false;
+  // Why the device was refused. Carried into the audit row only — never returned,
+  // so the caller still sees one generic failure.
+  let deviceRefusal = presentedDeviceId ? "" : "no_device_handle";
   if (presentedDeviceId) {
     // TTL enforced server-side as well as by the cookie's own max-age: the cookie is
     // a bearer value, so "it was set once" is not the same as "it is still current".
     const cutoff = new Date(Date.now() - DEVICE_TTL_SECONDS * 1000).toISOString();
     const { data: trustedRow } = await admin
       .from("wallet_trusted_devices")
-      .select("device_hash")
+      .select("device_hash, public_key")
       .eq("device_hash", deviceHash)
       .eq("user_id", userId)
       .is("revoked_at", null)
       .gt("last_seen_at", cutoff)
       .maybeSingle();
-    deviceTrusted = Boolean(trustedRow);
+
+    // ===================================================================
+    // R-021 PART 2 — THE DEVICE-BOUND KEY. A recognised device is no longer
+    // sufficient on its own: where the row holds a registered key, this sign-in
+    // must ALSO prove possession of it by signing the challenge nonce.
+    //
+    // The nonce is the same value the wallet signed, and it is already single-use
+    // (consumed by verify_wallet_signin above), so a captured
+    // (nonce, walletSignature, deviceSignature) triple cannot be replayed.
+    //
+    // The private key is non-exportable in the browser, so there is nothing a
+    // victim can read out and relay — this closes the "relay the code too"
+    // residual rather than only making it harder.
+    //
+    // A row WITHOUT a key — every device enrolled before Part 2 — falls through to
+    // the step-up branch, which costs a code and mints nothing. That is the safe
+    // direction, and it is why Part 2 needs no data migration.
+    // ===================================================================
+    if (!trustedRow) {
+      deviceRefusal = "device_not_recognised";
+    } else if (!deviceKeyRegistered(trustedRow.public_key)) {
+      deviceRefusal = "device_key_absent";
+    } else if (!deviceSignature) {
+      deviceRefusal = "device_signature_missing";
+    } else if (
+      !verifyDeviceSignature({
+        publicKey: trustedRow.public_key as string,
+        nonce,
+        signature: deviceSignature,
+      })
+    ) {
+      deviceRefusal = "device_signature_invalid";
+    } else {
+      deviceTrusted = true;
+    }
+  }
+
+  if (deviceRefusal === "device_signature_invalid") {
+    // The device IS recognised and DOES hold a key, yet the signature did not
+    // verify: either its stored key is stale, or something else is presenting this
+    // device's handle. The sign-in still does not succeed — the gate below fires —
+    // and this row is what makes the difference visible in the trail.
+    await writeAnonymousSecurityAudit({
+      action: "wallet.device_key_failed",
+      targetTable: "public.wallet_trusted_devices",
+      success: false,
+      metadata: { wallet_address: walletAddress, reason: deviceRefusal },
+    });
   }
 
   if (!deviceTrusted) {
@@ -256,6 +311,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         wallet_address: walletAddress,
         device_returning: Boolean(presentedDeviceId),
+        device_refusal: deviceRefusal,
         code_email: "sent",
       },
     });

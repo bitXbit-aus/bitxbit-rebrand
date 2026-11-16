@@ -20,6 +20,7 @@ import {
   parseStepUpStatus,
   stepUpKey,
 } from "@/lib/wallet-stepup";
+import { parseDevicePublicKey } from "@/lib/wallet-device-key";
 
 /**
  * R-021 prevention — step 4 of wallet sign-in: complete the step-up.
@@ -72,6 +73,32 @@ export async function POST(request: NextRequest) {
   const body = (payload ?? {}) as Record<string, unknown>;
   const stepUpId = typeof body.stepUpId === "string" ? body.stepUpId.trim() : "";
   const code = typeof body.code === "string" ? body.code.trim() : "";
+
+  // ===========================================================================
+  // R-021 PART 2 — ENROLMENT. The browser generates a non-exportable P-256 key at
+  // the moment a step-up succeeds and sends only the public half. A key that is
+  // absent or malformed does NOT fail the sign-in — the member has already proved
+  // control of the account's mailbox, and refusing here would lock out a browser
+  // that cannot generate a key (private mode, a locked-down profile). The device is
+  // simply enrolled WITHOUT one, which means its next sign-in steps up again: a
+  // visible cost rather than a silent downgrade, and one the audit row records.
+  // ===========================================================================
+  const rawDevicePublicKey =
+    typeof body.devicePublicKey === "string" && body.devicePublicKey.length > 0
+      ? body.devicePublicKey
+      : null;
+  const parsedDevicePublicKey = rawDevicePublicKey
+    ? parseDevicePublicKey(rawDevicePublicKey)
+    : null;
+  const devicePublicKey =
+    parsedDevicePublicKey && parsedDevicePublicKey.ok
+      ? parsedDevicePublicKey.canonical
+      : null;
+  const deviceKeyOutcome = !rawDevicePublicKey
+    ? "absent"
+    : parsedDevicePublicKey && parsedDevicePublicKey.ok
+      ? "registered"
+      : `rejected:${parsedDevicePublicKey && !parsedDevicePublicKey.ok ? parsedDevicePublicKey.problem : "unknown"}`;
 
   // Shape checks first: a malformed step-up id or code is a caller error, and
   // handing it to the RPC would only produce a parameter exception.
@@ -191,7 +218,7 @@ export async function POST(request: NextRequest) {
     p_user_id: userId,
     p_label: deviceLabel(userAgent),
     p_last_ip: identifier,
-    p_public_key: null,
+    p_public_key: devicePublicKey,
   });
 
   await writeAnonymousSecurityAudit({
@@ -200,7 +227,12 @@ export async function POST(request: NextRequest) {
     targetTable: "public.users",
     targetId: userId,
     success: true,
-    metadata: { device_trusted: !trustError },
+    metadata: {
+      device_trusted: !trustError,
+      // "registered" | "absent" | "rejected:<problem>" — a device enrolled without a
+      // key is not device-bound, and that must be legible rather than inferred.
+      device_key: deviceKeyOutcome,
+    },
   });
 
   await writeAnonymousSecurityAudit({
