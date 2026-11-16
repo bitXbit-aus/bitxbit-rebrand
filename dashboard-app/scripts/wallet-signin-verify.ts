@@ -92,7 +92,77 @@ function sign(message: string, keypair: Keypair): string {
   );
 }
 
+/**
+ * Client-side pacing for the wallet endpoints, which rate-limit.
+ *
+ * These are the ceilings the deployment actually enforces, read from the routes
+ * rather than guessed:
+ *
+ *   POST /api/auth/wallet/challenge   10 per  60 s   api:wallet-signin-challenge
+ *   POST /api/auth/wallet/verify      10 per  60 s   api:wallet-signin-verify
+ *   POST /api/auth/wallet/step-up     10 per 600 s   api:wallet-stepup
+ *
+ * The harness makes 11 verify calls and 11 challenge calls, so it outruns two of
+ * its own subjects. That is a defect HERE, not in the application: a 429 says
+ * nothing about whether a signature is bound to a device.
+ *
+ * It matters that this stays loud. In the run that prompted it, three 429s were
+ * reported as three FAILED SECURITY ASSERTIONS ("an unregistered wallet is refused",
+ * "an unlinked wallet is told it is not linked", "both signed failures direct the
+ * user to sign in with email") — a working control, dressed up as a vulnerability.
+ * A harness that can manufacture security failures out of its own pacing is worse
+ * than one that stops, so a 429 now aborts with a message that says what it is.
+ */
+const RATE_LIMITS = {
+  challenge: { max: 10, windowMs: 60_000 },
+  verify: { max: 10, windowMs: 60_000 },
+  stepup: { max: 10, windowMs: 600_000 },
+} as const;
+
+/** Paces to leave one request of headroom under the deployment's own ceiling. */
+function makePacer(endpoint: keyof typeof RATE_LIMITS) {
+  const { max, windowMs } = RATE_LIMITS[endpoint];
+  const ceiling = max - 1;
+  const recent: number[] = [];
+  return async function pace(): Promise<void> {
+    for (;;) {
+      const now = Date.now();
+      while (recent.length > 0 && now - (recent[0] as number) >= windowMs) recent.shift();
+      if (recent.length < ceiling) {
+        recent.push(now);
+        return;
+      }
+      const waitMs = windowMs - (now - (recent[0] as number)) + 500;
+      console.log(
+        `   (pacing: ${ceiling} calls to ${endpoint} within ${windowMs / 1000}s — waiting ${Math.ceil(waitMs / 1000)}s)`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  };
+}
+
+const paceChallenge = makePacer("challenge");
+const paceVerify = makePacer("verify");
+const paceStepUp = makePacer("stepup");
+
+/**
+ * Aborts rather than asserting when the deployment rate-limits us.
+ *
+ * Reaching this means the pacing above is stale — the limit was tightened, or
+ * another client shares the bucket. Either way the correct outcome is an explicit
+ * "the harness outran the endpoint", never a security assertion recorded as failed.
+ */
+function refuseToMistakeRateLimitForAFinding(endpoint: string, status: number, raw: string): void {
+  if (status !== 429) return;
+  throw new Error(
+    `the harness outran the ${endpoint} rate limit (429). This is a harness pacing ` +
+      `problem, NOT a security finding — the remaining assertions would be ` +
+      `meaningless. Adjust RATE_LIMITS above or retry. Body: ${raw}`
+  );
+}
+
 async function postChallenge(walletAddress: string) {
+  await paceChallenge();
   const res = await fetch(`${baseUrl}/api/auth/wallet/challenge`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -105,7 +175,9 @@ async function postChallenge(walletAddress: string) {
     body = null;
   }
   const cookies = res.headers.getSetCookie?.() ?? [];
-  return { status: res.status, body: body as Record<string, unknown> | null, cookies };
+  const result = { status: res.status, body: body as Record<string, unknown> | null, cookies };
+  refuseToMistakeRateLimitForAFinding("challenge", result.status, JSON.stringify(result.body));
+  return result;
 }
 
 /**
@@ -127,6 +199,7 @@ function messageHost(message: string): string {
 }
 
 async function postVerify(payload: Record<string, string>, deviceCookie?: string) {
+  await paceVerify();
   const res = await fetch(`${baseUrl}/api/auth/wallet/verify`, {
     method: "POST",
     headers: {
@@ -142,7 +215,9 @@ async function postVerify(payload: Record<string, string>, deviceCookie?: string
     body = null;
   }
   const cookies = res.headers.getSetCookie?.() ?? [];
-  return { status: res.status, body, cookies, raw: JSON.stringify(body) };
+  const result = { status: res.status, body, cookies, raw: JSON.stringify(body) };
+  refuseToMistakeRateLimitForAFinding("verify", result.status, result.raw);
+  return result;
 }
 
 /**
@@ -153,6 +228,7 @@ async function postVerify(payload: Record<string, string>, deviceCookie?: string
  * trust a different browser than the one that asked.
  */
 async function postStepUp(payload: Record<string, string>, deviceCookie?: string) {
+  await paceStepUp();
   const res = await fetch(`${baseUrl}/api/auth/wallet/step-up`, {
     method: "POST",
     headers: {
@@ -168,7 +244,9 @@ async function postStepUp(payload: Record<string, string>, deviceCookie?: string
     body = null;
   }
   const cookies = res.headers.getSetCookie?.() ?? [];
-  return { status: res.status, body, cookies, raw: JSON.stringify(body) };
+  const result = { status: res.status, body, cookies, raw: JSON.stringify(body) };
+  refuseToMistakeRateLimitForAFinding("step-up", result.status, result.raw);
+  return result;
 }
 
 /** Give a freshly created auth user a verified wallet, in the order the trigger requires. */
