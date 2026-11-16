@@ -14,6 +14,7 @@ import {
   submitWalletStepUp,
   WALLET_SIGNIN_GENERIC_ERROR,
 } from "@/lib/wallet-signin-client";
+import { enrolDeviceKey, signWithDeviceKey } from "@/lib/wallet-device-key-client";
 
 /**
  * Sign in with a Solana wallet (Phase 2 / B3), including the new-device step-up.
@@ -109,10 +110,17 @@ export function WalletSignInButton() {
         return;
       }
 
+      // R-021 Part 2. If this browser holds a device key, sign the SAME nonce with it.
+      // `null` means "this browser has no key" — not a failure: the server treats an
+      // unenrolled device as unrecognised and asks for a step-up, which is the
+      // correct outcome for a device that has not enrolled yet.
+      const deviceSignature = (await signWithDeviceKey(challenge.nonce)) ?? undefined;
+
       const result = await submitWalletSignIn({
         walletAddress,
         signature,
         nonce: challenge.nonce,
+        deviceSignature,
       });
 
       // Checked BEFORE the failure branch. The signature verified and the account was
@@ -150,7 +158,18 @@ export function WalletSignInButton() {
 
     setBusy(true);
     try {
-      const result = await submitWalletStepUp({ stepUpId: stepUp.stepUpId, code });
+      // R-021 Part 2. Enrol THIS browser before completing, so the step-up that
+      // proves control of the mailbox also registers the device key. `null` when the
+      // browser cannot hold one (private mode, locked-down profile) — the device is
+      // then enrolled without a key and will step up again next time, which the
+      // server records as `device_key: "absent"` rather than failing silently.
+      const devicePublicKey = (await enrolDeviceKey()) ?? undefined;
+
+      const result = await submitWalletStepUp({
+        stepUpId: stepUp.stepUpId,
+        code,
+        devicePublicKey,
+      });
       if (!result.ok) {
         // The server sends one message for a wrong, expired, exhausted or unknown
         // code, and this surface must not invent a more specific one.

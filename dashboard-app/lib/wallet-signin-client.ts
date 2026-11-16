@@ -106,7 +106,18 @@ function boundedRedirect(data: Record<string, unknown> | null): string {
 }
 
 export async function submitWalletSignIn(
-  params: { walletAddress: string; signature: string; nonce: string },
+  params: {
+    walletAddress: string;
+    signature: string;
+    nonce: string;
+    /**
+     * R-021 Part 2. A signature over the SAME nonce, made with this browser's
+     * non-exportable device key. Omitted when this browser holds no key — the
+     * server then treats the device as unrecognised and asks for a step-up, which
+     * is the correct outcome rather than a failure.
+     */
+    deviceSignature?: string;
+  },
   fetcher: Fetcher = fetch
 ): Promise<{ ok: true; redirectTo: string } | WalletSignInStepUp | WalletSignInFailure> {
   try {
@@ -163,7 +174,16 @@ export async function submitWalletSignIn(
  * there is nothing here to infer.
  */
 export async function submitWalletStepUp(
-  params: { stepUpId: string; code: string },
+  params: {
+    stepUpId: string;
+    code: string;
+    /**
+     * R-021 Part 2. The public half of a freshly generated device key, sent once so
+     * the server can bind this device to it. The private half never leaves the
+     * browser. Omitted when the browser cannot generate one.
+     */
+    devicePublicKey?: string;
+  },
   fetcher: Fetcher = fetch
 ): Promise<{ ok: true; redirectTo: string } | WalletSignInFailure> {
   try {

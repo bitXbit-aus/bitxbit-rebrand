@@ -92,7 +92,77 @@ function sign(message: string, keypair: Keypair): string {
   );
 }
 
+/**
+ * Client-side pacing for the wallet endpoints, which rate-limit.
+ *
+ * These are the ceilings the deployment actually enforces, read from the routes
+ * rather than guessed:
+ *
+ *   POST /api/auth/wallet/challenge   10 per  60 s   api:wallet-signin-challenge
+ *   POST /api/auth/wallet/verify      10 per  60 s   api:wallet-signin-verify
+ *   POST /api/auth/wallet/step-up     10 per 600 s   api:wallet-stepup
+ *
+ * The harness makes 11 verify calls and 11 challenge calls, so it outruns two of
+ * its own subjects. That is a defect HERE, not in the application: a 429 says
+ * nothing about whether a signature is bound to a device.
+ *
+ * It matters that this stays loud. In the run that prompted it, three 429s were
+ * reported as three FAILED SECURITY ASSERTIONS ("an unregistered wallet is refused",
+ * "an unlinked wallet is told it is not linked", "both signed failures direct the
+ * user to sign in with email") — a working control, dressed up as a vulnerability.
+ * A harness that can manufacture security failures out of its own pacing is worse
+ * than one that stops, so a 429 now aborts with a message that says what it is.
+ */
+const RATE_LIMITS = {
+  challenge: { max: 10, windowMs: 60_000 },
+  verify: { max: 10, windowMs: 60_000 },
+  stepup: { max: 10, windowMs: 600_000 },
+} as const;
+
+/** Paces to leave one request of headroom under the deployment's own ceiling. */
+function makePacer(endpoint: keyof typeof RATE_LIMITS) {
+  const { max, windowMs } = RATE_LIMITS[endpoint];
+  const ceiling = max - 1;
+  const recent: number[] = [];
+  return async function pace(): Promise<void> {
+    for (;;) {
+      const now = Date.now();
+      while (recent.length > 0 && now - (recent[0] as number) >= windowMs) recent.shift();
+      if (recent.length < ceiling) {
+        recent.push(now);
+        return;
+      }
+      const waitMs = windowMs - (now - (recent[0] as number)) + 500;
+      console.log(
+        `   (pacing: ${ceiling} calls to ${endpoint} within ${windowMs / 1000}s — waiting ${Math.ceil(waitMs / 1000)}s)`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  };
+}
+
+const paceChallenge = makePacer("challenge");
+const paceVerify = makePacer("verify");
+const paceStepUp = makePacer("stepup");
+
+/**
+ * Aborts rather than asserting when the deployment rate-limits us.
+ *
+ * Reaching this means the pacing above is stale — the limit was tightened, or
+ * another client shares the bucket. Either way the correct outcome is an explicit
+ * "the harness outran the endpoint", never a security assertion recorded as failed.
+ */
+function refuseToMistakeRateLimitForAFinding(endpoint: string, status: number, raw: string): void {
+  if (status !== 429) return;
+  throw new Error(
+    `the harness outran the ${endpoint} rate limit (429). This is a harness pacing ` +
+      `problem, NOT a security finding — the remaining assertions would be ` +
+      `meaningless. Adjust RATE_LIMITS above or retry. Body: ${raw}`
+  );
+}
+
 async function postChallenge(walletAddress: string) {
+  await paceChallenge();
   const res = await fetch(`${baseUrl}/api/auth/wallet/challenge`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -105,7 +175,9 @@ async function postChallenge(walletAddress: string) {
     body = null;
   }
   const cookies = res.headers.getSetCookie?.() ?? [];
-  return { status: res.status, body: body as Record<string, unknown> | null, cookies };
+  const result = { status: res.status, body: body as Record<string, unknown> | null, cookies };
+  refuseToMistakeRateLimitForAFinding("challenge", result.status, JSON.stringify(result.body));
+  return result;
 }
 
 /**
@@ -127,6 +199,7 @@ function messageHost(message: string): string {
 }
 
 async function postVerify(payload: Record<string, string>, deviceCookie?: string) {
+  await paceVerify();
   const res = await fetch(`${baseUrl}/api/auth/wallet/verify`, {
     method: "POST",
     headers: {
@@ -142,7 +215,9 @@ async function postVerify(payload: Record<string, string>, deviceCookie?: string
     body = null;
   }
   const cookies = res.headers.getSetCookie?.() ?? [];
-  return { status: res.status, body, cookies, raw: JSON.stringify(body) };
+  const result = { status: res.status, body, cookies, raw: JSON.stringify(body) };
+  refuseToMistakeRateLimitForAFinding("verify", result.status, result.raw);
+  return result;
 }
 
 /**
@@ -153,6 +228,7 @@ async function postVerify(payload: Record<string, string>, deviceCookie?: string
  * trust a different browser than the one that asked.
  */
 async function postStepUp(payload: Record<string, string>, deviceCookie?: string) {
+  await paceStepUp();
   const res = await fetch(`${baseUrl}/api/auth/wallet/step-up`, {
     method: "POST",
     headers: {
@@ -168,7 +244,9 @@ async function postStepUp(payload: Record<string, string>, deviceCookie?: string
     body = null;
   }
   const cookies = res.headers.getSetCookie?.() ?? [];
-  return { status: res.status, body, cookies, raw: JSON.stringify(body) };
+  const result = { status: res.status, body, cookies, raw: JSON.stringify(body) };
+  refuseToMistakeRateLimitForAFinding("step-up", result.status, result.raw);
+  return result;
 }
 
 /** Give a freshly created auth user a verified wallet, in the order the trigger requires. */
@@ -177,6 +255,43 @@ async function attachVerifiedWallet(userId: string, walletAddress: string) {
   // address changes, so setting the flag in the same statement would be undone.
   await admin.from("users").update({ wallet_address: walletAddress }).eq("id", userId);
   await admin.from("users").update({ wallet_verified: true }).eq("id", userId);
+}
+
+/**
+ * R-021 Part 2 — a device key, as a browser would hold one.
+ *
+ * Generated with `extractable: false`, exactly as `lib/wallet-device-key-client.ts`
+ * does, and only the public half is handed to the server. The harness holds the
+ * private key here because a Node script has no IndexedDB; a browser never can.
+ */
+async function generateDeviceKey() {
+  const pair = await globalThis.crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign", "verify"]
+  );
+  const jwk = await globalThis.crypto.subtle.exportKey("jwk", pair.publicKey);
+  return {
+    pair,
+    publicKeyJson: JSON.stringify({ kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y }),
+  };
+}
+
+/** Signs the challenge nonce, returning base64url of WebCrypto's raw r||s. */
+async function signNonce(pair: CryptoKeyPair, nonce: string): Promise<string> {
+  const raw = new Uint8Array(
+    await globalThis.crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      pair.privateKey,
+      new TextEncoder().encode(nonce)
+    )
+  );
+  return Buffer.from(raw).toString("base64url");
+}
+
+/** The device_hash for the presented cookie, so a test can read or rewrite the row. */
+function deviceHashOf(deviceCookie: string): string {
+  return createHash("sha256").update(deviceCookie.split("=")[1] ?? "").digest("hex");
 }
 
 const createdUserIds: string[] = [];
@@ -467,9 +582,30 @@ async function main() {
     wrongCode.cookies.join(" | ")
   );
 
-  const completed = await postStepUp({ stepUpId, code: chosenCode }, deviceCookie);
+  // Enrollment happens HERE, at the same moment a browser would do it: the step-up
+  // that proves control of the mailbox is also the one that binds this device to a
+  // key. From now on a recognised device must prove possession of it.
+  const deviceKey = await generateDeviceKey();
+  const completed = await postStepUp(
+    { stepUpId, code: chosenCode, devicePublicKey: deviceKey.publicKeyJson },
+    deviceCookie
+  );
   check("the right code completes the step-up", completed.status === 200, `got ${completed.status} ${completed.raw}`);
   check("the step-up reports ok", completed.body?.ok === true, completed.raw);
+
+  if (deviceCookie) {
+    const { data: enrolled } = await admin
+      .from("wallet_trusted_devices")
+      .select("public_key")
+      .eq("device_hash", deviceHashOf(deviceCookie))
+      .eq("user_id", userId)
+      .maybeSingle();
+    check(
+      "the step-up ENROLLED the device key",
+      typeof enrolled?.public_key === "string" && enrolled.public_key.length > 0,
+      JSON.stringify(enrolled)
+    );
+  }
 
   const authCookies = completed.cookies.filter((c) => c.startsWith("sb-"));
   check(
@@ -500,16 +636,21 @@ async function main() {
   // ---------------------------------------------- 2b. the device is now trusted
   console.log("\n2b. sign-in from the now-recognised device");
   const c2 = await postChallenge(registered.publicKey.toBase58());
+  const nonce2 = String(c2.body?.nonce ?? "");
   const secondVerify = await postVerify(
     {
       walletAddress: registered.publicKey.toBase58(),
       signature: sign(String(c2.body?.message ?? ""), registered),
-      nonce: String(c2.body?.nonce ?? ""),
+      nonce: nonce2,
+      // Present the device signature, as the browser now does. Without it the
+      // server would treat this device as not device-bound and step it up — which is
+      // the correct behaviour, and is asserted separately below.
+      deviceSignature: await signNonce(deviceKey.pair, nonce2),
     },
     deviceCookie
   );
   check(
-    "a recognised device signs in WITHOUT a step-up",
+    "a device that ENROLLED a key signs in WITHOUT a step-up",
     secondVerify.status === 200 && secondVerify.body?.ok === true,
     `got ${secondVerify.status} ${secondVerify.raw}`
   );
@@ -518,6 +659,76 @@ async function main() {
     secondVerify.cookies.filter((c) => c.startsWith("sb-")).length > 0,
     secondVerify.cookies.join(" | ")
   );
+
+  // ------------------------- 2b-ii. the device key is now REQUIRED on a known device
+  console.log("\n2b-ii. a recognised device that cannot prove its key is put back behind the gate");
+
+  // (a) no device signature at all
+  {
+    const c = await postChallenge(registered.publicKey.toBase58());
+    const res = await postVerify(
+      {
+        walletAddress: registered.publicKey.toBase58(),
+        signature: sign(String(c.body?.message ?? ""), registered),
+        nonce: String(c.body?.nonce ?? ""),
+      },
+      deviceCookie
+    );
+    check(
+      "a recognised device with NO device signature does not sign in",
+      res.body?.ok !== true && res.cookies.filter((x) => x.startsWith("sb-")).length === 0,
+      `got ${res.status} ${res.raw}`
+    );
+  }
+
+  // (b) a device signature from the WRONG key — the relay case, where someone else
+  //     presents this device's handle and has a key of their own.
+  {
+    const otherKey = await generateDeviceKey();
+    const c = await postChallenge(registered.publicKey.toBase58());
+    const nonce = String(c.body?.nonce ?? "");
+    const res = await postVerify(
+      {
+        walletAddress: registered.publicKey.toBase58(),
+        signature: sign(String(c.body?.message ?? ""), registered),
+        nonce,
+        deviceSignature: await signNonce(otherKey.pair, nonce),
+      },
+      deviceCookie
+    );
+    check(
+      "a signature from a DIFFERENT device key does not sign in",
+      res.body?.ok !== true && res.cookies.filter((x) => x.startsWith("sb-")).length === 0,
+      `got ${res.status} ${res.raw}`
+    );
+  }
+
+  // (c) a device row with NO registered key — every device enrolled before Part 2.
+  //     It must step up rather than sign in, which is what makes Part 2 need no
+  //     data migration.
+  {
+    await admin
+      .from("wallet_trusted_devices")
+      .update({ public_key: null })
+      .eq("device_hash", deviceHashOf(deviceCookie ?? ""))
+      .eq("user_id", userId);
+    const c = await postChallenge(registered.publicKey.toBase58());
+    const nonce = String(c.body?.nonce ?? "");
+    const res = await postVerify(
+      {
+        walletAddress: registered.publicKey.toBase58(),
+        signature: sign(String(c.body?.message ?? ""), registered),
+        nonce,
+        deviceSignature: await signNonce(deviceKey.pair, nonce),
+      },
+      deviceCookie
+    );
+    check(
+      "a device enrolled WITHOUT a key steps up instead of signing in",
+      res.body?.ok !== true && res.cookies.filter((x) => x.startsWith("sb-")).length === 0,
+      `got ${res.status} ${res.raw}`
+    );
+  }
 
   // --------------------------------------------------- 2c. revoking un-trusts it
   if (deviceCookie) {
