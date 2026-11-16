@@ -188,3 +188,81 @@ test("deviceKeyRegistered tells 'no key' apart from 'has a key'", () => {
   assert.equal(deviceKeyRegistered(""), false);
   assert.equal(deviceKeyRegistered('{"kty":"EC","crv":"P-256","x":"a","y":"b"}'), true);
 });
+
+// ---------------------------------------------------------------------------
+// REAL BROWSER VECTORS (R-021 Part 2, rule 12).
+//
+// Captured from Chromium on the deploy-preview-91 origin. The public key below is
+// the exported public half of a keypair generated with `extractable: false`, and
+// each signature is what a real `crypto.subtle.sign` produced: one immediately,
+// and one after a FULL PAGE RELOAD, signing with the CryptoKey read back out of
+// IndexedDB in a fresh JS realm.
+//
+// This is the browser-to-server contract, and it is the one thing the Node-only
+// suite cannot otherwise prove — that what a browser actually emits is what this
+// module actually accepts. Curves, hashes and encodings agree in the abstract;
+// these bytes are the evidence. Change the encoding, the hash, or the accepted JWK
+// shape and this test fails here rather than at sign-in in production.
+//
+// Measured alongside them, in the browser: the private key reports
+// `extractable: false`, `exportKey` on it throws InvalidAccessError, and BOTH
+// properties survive the IndexedDB round trip (structured clone returns a CryptoKey
+// that still refuses to export). That is the whole security property of Part 2 —
+// there is no form of this key a victim could read out and relay.
+const BROWSER_PUBLIC_KEY =
+  '{"kty":"EC","crv":"P-256","x":"gEqe0BOd1d5IHFGbytDj9yY6hcuFMisxFDuny1p5Dj8","y":"qHHSwga1vreC-k8ftSrFTWfiwDBmIthH5idDMf4BSlw"}';
+const BROWSER_SIGNATURE_LIVE =
+  "V3bdBEqDL7t1LE-6vQ7_-ePfupbrIXcwsY3hb-4dWCqbx8Q-BdkGnF5MfMLKZjN7L8y7c5P1Qa66NijlvmxOEw";
+const BROWSER_SIGNATURE_AFTER_RELOAD =
+  "quXcb2JznvUv9ChfD8KshkLQ7MNOcOkhA80DhqsQcNahM6cJ-EjZmmmxZnxhgW0oIbCP7Vk6z4XzOKVcXybG9w";
+
+test("a public key exported by a REAL BROWSER is accepted", () => {
+  const parsed = parseDevicePublicKey(BROWSER_PUBLIC_KEY);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.jwk.crv, "P-256");
+});
+
+test("a signature captured from a REAL BROWSER verifies (browser-to-server contract)", () => {
+  assert.equal(
+    verifyDeviceSignature({
+      publicKey: BROWSER_PUBLIC_KEY,
+      nonce: "nonce-browser-2",
+      signature: BROWSER_SIGNATURE_LIVE,
+    }),
+    true,
+    "a real Chromium WebCrypto signature must verify through this module — if this fails, the browser emits something the server does not accept"
+  );
+});
+
+test("a signature made AFTER A PAGE RELOAD, from the IndexedDB key, verifies", () => {
+  // This is the persistence case: the key was written to IndexedDB, the page was
+  // reloaded, and the CryptoKey came back in a fresh realm. It still signs, and the
+  // signature is still the form the server accepts.
+  assert.equal(
+    verifyDeviceSignature({
+      publicKey: BROWSER_PUBLIC_KEY,
+      nonce: "nonce-after-reload",
+      signature: BROWSER_SIGNATURE_AFTER_RELOAD,
+    }),
+    true
+  );
+});
+
+test("the browser vectors are bound to their nonce, not merely well-formed", () => {
+  assert.equal(
+    verifyDeviceSignature({
+      publicKey: BROWSER_PUBLIC_KEY,
+      nonce: "nonce-after-reload",
+      signature: BROWSER_SIGNATURE_LIVE,
+    }),
+    false
+  );
+  assert.equal(
+    verifyDeviceSignature({
+      publicKey: BROWSER_PUBLIC_KEY,
+      nonce: "nonce-browser-2",
+      signature: BROWSER_SIGNATURE_AFTER_RELOAD,
+    }),
+    false
+  );
+});
