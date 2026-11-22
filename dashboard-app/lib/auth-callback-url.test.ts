@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   resolveAuthRedirectBase,
   resolveSignInDomain,
+  resolveRequestOrigin,
   FALLBACK_SIGNIN_DOMAIN,
 } from "./auth-callback-url";
 import type { HostPolicy } from "./host-validation";
@@ -15,6 +16,64 @@ const POLICY: HostPolicy = {
 };
 
 const CANONICAL = "https://app.bitxbit.com.au";
+
+// --- Regression 2026-11-22: `request.url` carries Netlify's per-deploy permalink ---
+//
+// Since next@15.5.29, `request.url` resolves from `x-forwarded-host`, which on Netlify
+// is the deploy's own `<hash>--bitxbit-dashboard.netlify.app`. That permalink matches
+// the site-slug allowlist, so it BEAT the canonical URL — production began telling
+// members to sign for a permalink host, and the magic-link callback would have
+// redirected them there. The `host` header (what the browser asked for) now wins.
+
+const PERMALINK_URL =
+  "https://6b0361cab5ff06d366311ce8--bitxbit-dashboard.netlify.app/api/auth/wallet/challenge";
+
+test("the host header wins over a deploy permalink in request.url", () => {
+  assert.equal(
+    resolveRequestOrigin(PERMALINK_URL, "app.bitxbit.com.au", "https"),
+    "https://app.bitxbit.com.au"
+  );
+});
+
+test("the sign-in message names the host the member is on, not the permalink", () => {
+  const base = resolveRequestOrigin(PERMALINK_URL, "app.bitxbit.com.au", null);
+  assert.equal(resolveSignInDomain(base, POLICY, CANONICAL), "app.bitxbit.com.au");
+});
+
+test("a preview host is still kept — previews are not bound to production", () => {
+  const previewHost = "deploy-preview-94--bitxbit-dashboard.netlify.app";
+  const base = resolveRequestOrigin(
+    `https://${previewHost}/api/auth/wallet/challenge`,
+    previewHost,
+    "https"
+  );
+  assert.equal(resolveSignInDomain(base, POLICY, CANONICAL), previewHost);
+});
+
+test("an absent host header falls back to request.url, not an empty base", () => {
+  assert.equal(
+    resolveRequestOrigin("https://app.bitxbit.com.au/x", null, null),
+    "https://app.bitxbit.com.au/x"
+  );
+});
+
+test("the scheme comes from x-forwarded-proto, defaulting to https", () => {
+  // A port is normalised away by normalizeHost, so only the hostname survives.
+  assert.equal(resolveRequestOrigin("https://x/y", "localhost:3000", "http"), "http://localhost");
+  assert.equal(
+    resolveRequestOrigin("https://x/y", "app.bitxbit.com.au", ""),
+    "https://app.bitxbit.com.au"
+  );
+  assert.equal(
+    resolveRequestOrigin("https://x/y", "app.bitxbit.com.au", "gopher"),
+    "https://app.bitxbit.com.au"
+  );
+});
+
+test("a disallowed host header still falls back to the canonical URL", () => {
+  const base = resolveRequestOrigin("https://x/y", "evil.example", "https");
+  assert.equal(resolveAuthRedirectBase(base, POLICY, CANONICAL), CANONICAL);
+});
 
 test("keeps the production origin", () => {
   assert.equal(

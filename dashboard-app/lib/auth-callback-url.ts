@@ -46,6 +46,38 @@ export function resolveAuthRedirectBase(
 export const FALLBACK_SIGNIN_DOMAIN = "app.bitxbit.com.au";
 
 /**
+ * The origin the BROWSER actually used — preferred over `request.url`.
+ *
+ * Regression this fixes (found in production 2026-11-22, after `next@15.5.29`):
+ * Next builds `request.url` from `x-forwarded-host`, and on Netlify that header
+ * carries the **deploy's own permalink** (`<hash>--bitxbit-dashboard.netlify.app`),
+ * not the host the member typed. Because the permalink matches this site's
+ * `netlifySite` slug, the host allowlist accepts it, so it *won* over the canonical
+ * URL: production wallet sign-in began telling members to sign for
+ * `https://6b0361…--bitxbit-dashboard.netlify.app`, and the magic-link callback
+ * would have redirected them there after login.
+ *
+ * The `host` header is what the browser asked for, and middleware already rejects
+ * any disallowed `host` (and any `host`/`x-forwarded-host` divergence) before these
+ * routes run — so preferring it here does not widen what is trusted, it restores
+ * what the user is actually on.
+ *
+ * Falls back to `requestUrl` when no usable `host` header is present, so callers
+ * keep the previous behaviour rather than getting an empty base.
+ */
+export function resolveRequestOrigin(
+  requestUrl: string,
+  hostHeader: string | null,
+  protoHeader: string | null
+): string {
+  const host = normalizeHost(hostHeader);
+  if (!host) return requestUrl;
+  const firstProto = (protoHeader ?? "").split(",")[0]?.trim().toLowerCase();
+  const scheme = firstProto === "http" || firstProto === "https" ? firstProto : "https";
+  return `${scheme}://${host}`;
+}
+
+/**
  * The domain shown in the "Sign in with your Solana account" message the user
  * signs (SIWS) — the same decision as the redirect base, reduced to a hostname.
  *
