@@ -5,6 +5,7 @@ import {
   rateLimitResponse,
 } from "@/lib/rate-limit";
 import { parseHostPolicy } from "@/lib/host-validation";
+import { resolveRequestOrigin } from "@/lib/auth-callback-url";
 import { isValidSolanaAddress } from "@/lib/solana";
 import {
   createWalletSignInChallenge,
@@ -62,8 +63,17 @@ export async function POST(request: NextRequest) {
 
   // The domain the user is actually on, so a preview sign-in is not bound to
   // production's hostname. See resolveSignInDomain.
+  //
+  // Built from the `host` header, NOT `request.url`: since next@15.5.29 the latter
+  // carries Netlify's per-deploy permalink via `x-forwarded-host`, which the site-slug
+  // allowlist accepts — so production began advertising the permalink host. See
+  // resolveRequestOrigin.
   const domain = resolveSignInDomain(
-    request.url,
+    resolveRequestOrigin(
+      request.url,
+      request.headers.get("host"),
+      request.headers.get("x-forwarded-proto")
+    ),
     HOST_POLICY,
     process.env.NEXT_PUBLIC_APP_URL
   );

@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { safeAuthNextPath } from "@/lib/auth-redirect";
-import { resolveAuthRedirectBase } from "@/lib/auth-callback-url";
+import { resolveAuthRedirectBase, resolveRequestOrigin } from "@/lib/auth-callback-url";
 import { parseHostPolicy } from "@/lib/host-validation";
 import { withAuthNoStore } from "@/lib/supabase/response-cache";
 import {
@@ -30,7 +30,17 @@ export async function GET(request: Request) {
   // context, so a preview sign-in would otherwise end on production. Only an
   // allowed host for this deployment is kept; anything else falls back to the
   // canonical URL. Middleware has already rejected disallowed hosts.
-  const appUrl = resolveAuthRedirectBase(request.url, HOST_POLICY, process.env.NEXT_PUBLIC_APP_URL);
+  // From the `host` header rather than `request.url`, which since next@15.5.29 carries
+  // Netlify's per-deploy permalink — redirecting a member there after login.
+  const appUrl = resolveAuthRedirectBase(
+    resolveRequestOrigin(
+      request.url,
+      request.headers.get("host"),
+      request.headers.get("x-forwarded-proto")
+    ),
+    HOST_POLICY,
+    process.env.NEXT_PUBLIC_APP_URL
+  );
 
   if (code) {
     const supabase = await createClient();
