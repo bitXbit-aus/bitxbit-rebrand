@@ -62,27 +62,60 @@ function toBase64Url(bytes: ArrayBuffer | Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/**
+ * Every IndexedDB interaction here is BOUNDED IN TIME, and every path settles.
+ *
+ * This code sits in the sign-in path, but it is not sign-in itself — it is a
+ * security *enhancement* layered on top. An enhancement must be able to fail; it
+ * must never be able to hold up the thing it enhances.
+ *
+ * The bug this fixes: the previous version returned a promise that, on an
+ * unexpected IDB state, could simply never settle. `await` on a promise that never
+ * settles does not throw — it hangs — so the caller's `finally` never ran, the
+ * button stayed busy forever, and NOTHING was reported anywhere. From the member's
+ * point of view the button "does not work" after the wallet approves, with no error
+ * to search for. A bound turns every one of those states into the honest answer this
+ * layer actually has: "this browser has no device key", which is exactly what an
+ * unenrolled device looks like, and which the server already handles by stepping up.
+ */
+const IDB_TIMEOUT_MS = 1200;
+
 function openDatabase(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
     if (!deviceKeySupported()) {
       resolve(null);
       return;
     }
+    let settled = false;
+    const finish = (db: IDBDatabase | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(db);
+    };
+    // Declared after `finish` closes over it, but initialised before any callback can
+    // run: `finish` is only ever called asynchronously or after this line.
+    const timer = setTimeout(() => finish(null), IDB_TIMEOUT_MS);
     let request: IDBOpenDBRequest;
     try {
       request = indexedDB.open(DB_NAME, DB_VERSION);
     } catch {
-      resolve(null);
+      finish(null);
       return;
     }
     request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      try {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      } catch {
+        // A store we could not create is a keyring we do not have. The failed
+        // transaction below (or the timeout) turns that into "no device key".
+      }
     };
-    request.onsuccess = () => resolve(request.result);
-    // Blocked (another tab holds an old version) or a hard failure: no keyring.
-    request.onerror = () => resolve(null);
-    request.onblocked = () => resolve(null);
+    request.onsuccess = () => finish(request.result);
+    // Blocked (another tab holds an older version), errored, or absent: no keyring.
+    request.onerror = () => finish(null);
+    request.onblocked = () => finish(null);
   });
 }
 
@@ -91,32 +124,53 @@ function withStore<T>(
   run: (store: IDBObjectStore) => IDBRequest
 ): Promise<T | null> {
   return new Promise((resolve) => {
-    openDatabase().then((db) => {
-      if (!db) {
-        resolve(null);
-        return;
-      }
-      let request: IDBRequest;
-      try {
-        const tx = db.transaction(STORE, mode);
-        const store = tx.objectStore(STORE);
-        request = run(store);
-        tx.onabort = () => resolve(null);
-      } catch {
-        db.close();
-        resolve(null);
-        return;
-      }
-      request.onsuccess = () => {
-        const result = request.result as T;
-        db.close();
-        resolve(result ?? null);
-      };
-      request.onerror = () => {
-        db.close();
-        resolve(null);
-      };
-    });
+    let settled = false;
+    const finish = (value: T | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), IDB_TIMEOUT_MS);
+    try {
+      openDatabase()
+        .then((db) => {
+          if (!db) {
+            finish(null);
+            return;
+          }
+          let request: IDBRequest;
+          try {
+            const tx = db.transaction(STORE, mode);
+            const store = tx.objectStore(STORE);
+            request = run(store);
+            tx.onabort = () => finish(null);
+            tx.onerror = () => finish(null);
+          } catch {
+            try {
+              db.close();
+            } catch {
+              // already closed
+            }
+            finish(null);
+            return;
+          }
+          const settle = (value: T | null) => {
+            try {
+              db.close();
+            } catch {
+              // already closed
+            }
+            finish(value);
+          };
+          request.onsuccess = () => settle((request.result as T) ?? null);
+          request.onerror = () => settle(null);
+        })
+        // A rejected chain must still settle the outer promise; otherwise it hangs.
+        .catch(() => finish(null));
+    } catch {
+      finish(null);
+    }
   });
 }
 
@@ -216,7 +270,18 @@ export async function hasDeviceKey(): Promise<boolean> {
  */
 export async function signWithDeviceKey(nonce: string): Promise<string | null> {
   if (!nonce) return null;
-  const key = await withStore<CryptoKey>("readonly", (store) => store.get(KEY_ID) as unknown as IDBRequest);
+  // The store lookup is inside the guard too: it previously sat outside every
+  // try/catch, so any failure there escaped this function entirely. This module
+  // promises `null` for every problem; it must not have a path that rejects.
+  let key: CryptoKey | null = null;
+  try {
+    key = await withStore<CryptoKey>(
+      "readonly",
+      (store) => store.get(KEY_ID) as unknown as IDBRequest
+    );
+  } catch {
+    return null;
+  }
   if (!key) return null;
   try {
     const signature = await crypto.subtle.sign(
