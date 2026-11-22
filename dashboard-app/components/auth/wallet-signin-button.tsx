@@ -145,6 +145,19 @@ export function WalletSignInButton() {
       }
 
       finish(result.redirectTo);
+    } catch (error) {
+      // This handler previously had NO catch, so any throw after the wallet approved
+      // produced nothing at all — no toast, no error, no clue. The button simply
+      // appeared not to work, which is the least debuggable failure there is.
+      //
+      // The device-key layer is best-effort and must not throw, but "must not" is
+      // not "cannot": a failure has to be visible rather than silent.
+      console.error("wallet sign-in failed", error);
+      toast({
+        title: "Sign-in didn't complete",
+        description: "Something went wrong after your wallet approved. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setBusy(false);
     }
@@ -181,6 +194,19 @@ export function WalletSignInButton() {
         return;
       }
       finish(result.redirectTo);
+    } catch (error) {
+      // This handler previously had NO catch, so any throw after the wallet approved
+      // produced nothing at all — no toast, no error, no clue. The button simply
+      // appeared not to work, which is the least debuggable failure there is.
+      //
+      // The device-key layer is best-effort and must not throw, but "must not" is
+      // not "cannot": a failure has to be visible rather than silent.
+      console.error("wallet sign-in failed", error);
+      toast({
+        title: "Sign-in didn't complete",
+        description: "Something went wrong after your wallet approved. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setBusy(false);
     }
