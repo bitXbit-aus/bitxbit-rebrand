@@ -1780,9 +1780,60 @@ staging and wrote `wallet.device_revoked` (success). The **cross-account boundar
 asserted**: `revoke_wallet_device(<victim's hash>, <attacker's user_id>)` returned **false** with the victim's
 row untouched, and the positive control with the owner's own id returned **true** — so the refusal is scoping,
 not a broken instrument. Session material was minted server-side (no credential typed) and shredded; probe
-rows torn down and read back. Full detail: the evidence file. **D5 does not change the residual:** a victim
-who relays the *code* as well as the signature still gets in. Part 2 (the device-bound key, design §4) is the
-closure, and is not built.
+rows torn down and read back. Full detail: the evidence file.
+
+### Part 2 — the device-bound key (PR #91, merge `a454900`) — RELEASED 2026-11-16
+
+Part 1 raised the attack from one deception to two; a victim who relayed the *code* as well as the signature
+still got in. **Part 2 removes the second thing they can be talked into giving away.** A recognised device must
+now also prove possession of a **non-exportable** P-256 key by signing the challenge nonce — and a key that
+cannot be exported has no form the member can read out, so the second deception stops existing rather than
+getting harder.
+
+**Measured in a real browser (rule 12), on the `deploy-preview-91` origin:** the private key reports
+`extractable: false`; `exportKey("jwk", privateKey)` **throws `InvalidAccessError`**; the public half exports as
+`{kty, crv, x, y}` with no `d`; a signature is **64 bytes** (raw `r‖s`). Through IndexedDB the key comes back as
+a `CryptoKey` that is **still non-extractable** — the property survives structured clone — and it still signs
+after a **full page reload** in a fresh JS realm. Storing a JWK instead of the key handle would have destroyed
+this, which is why the module stores the handle.
+
+**The browser-to-server contract was closed from both ends:** a real browser signature, and one produced after a
+page reload, both **verify through the exported server function** — `verifyDeviceSignature`, no test doubles in
+front of it — 7/7. Curves agreeing in the abstract is not evidence; those bytes are. The vectors are now pinned
+as regression tests in `lib/wallet-device-key.test.ts`, so a change to the encoding, hash or accepted JWK shape
+fails in CI rather than at sign-in in production.
+
+**Deployed harness 46/46** on `deploy-preview-91`, including: the step-up **ENROLLED the device key** (read back
+from the row, not inferred from a 200); a device that enrolled a key signs in **without** a step-up; a
+recognised device with **no** device signature does not sign in; a signature from a **different** device key
+does not sign in; and a device enrolled **without** a key steps up instead of signing in — that last being why
+**Part 2 needs no data migration**. In production `/api/version` reports the merge commit.
+
+**Design deviation, recorded (owner-approved beforehand):** design §4 sketches a separate `/device-challenge`
+endpoint with its own nonce table. Not built that way — the device key signs the **existing** challenge nonce,
+which is already fresh, TTL'd (300 s) and single-use, so replay protection is inherited and **no table, RPC or
+migration was required**. Given up: an independent freshness boundary for the device factor alone.
+
+**The residual, narrowed:** from *relay the code too* to **storage loss**. A member whose device key is evicted
+steps up again — fail-closed, costing a code rather than granting a session. **Safari's ~7-day scripted-storage
+eviction is predicted, not measured** (the browser probe ran in Chromium).
+
+**PRODUCTION PROOF — observed 2026-11-22**, the first real sign-in from a new device: an Android phone using
+Phantom's in-app browser. Read from `security_audit_log`, not inferred:
+
+| Time (UTC) | Action | Detail |
+|---|---|---|
+| 09:34:23 | `wallet.step_up_required` | `device_refusal: "no_device_handle"` |
+| 09:35:02 | `wallet.step_up_completed` | **`device_key: "registered"`**, `device_trusted: true` |
+| 09:35:03 | `wallet.signed_in` | **`device: "stepped_up"`** |
+
+`wallet_trusted_devices` then held **1** trusted device, **1** of them carrying a `public_key`. So Part 2's
+enrolment works against production, on a mobile browser, and the key persisted.
+
+**And the closure was OBSERVED 2026-11-22 09:38:59** — the same phone signed in again, with no code requested,
+and the log recorded `wallet.signed_in` with **`device: "recognised"`**. The enrolled key therefore *verifies*,
+not merely *registers*: the second deception is gone end to end, in production, on a mobile browser. That is
+the difference between "the key was stored" and "the key gates sign-in", and it is now measured.
 
 ### Not claimed
 
@@ -1816,7 +1867,7 @@ accounts. The risk is **open**.
 | **R-018** | **Advisories remaining in the tree after the Next 15 migration** | **OPEN 2026-10-27** — 27 advisories (1 critical, 6 high, 20 mod). The one critical (`tar`) is reachable only via the `supabase` devDependency CLI, so it is not deployed. `zod` (direct, unused, high) was **removed**. `uuid` **assessed — not reachable**: no dependency calls the affected `v3`/`v5`/`v6`, and the measured impact is silent truncation (integrity only). Static analysis, no runtime trace. | Shri (interim) | open |
 | **R-019** | **A merge to `main` can silently not release (Netlify build quota)** | **MITIGATED 2026-10-27; residual OPEN.** The quota was exhausted and production stayed at `acec64d` while `main` was `7671f85` — CI green, nothing failed. Cause largely removed: `[build] ignore` rules on both sites (docs live *inside* the app, so docs-only merges cost full builds) plus a diff-based gate on the browser-smoke job; verified by executing the stored commands against real refs and catching five mutations. **Still open: nothing fails when a production build is skipped** — the Netlify checks are not required. Rules **exercised live 2026-11-02**: a docs-only commit was skipped on both sites while an app-changing commit built; Netlify diffs against the branch's *previous* commit, not the base tip, so the smoke job now fails fast with an explicit "not a code defect" message when the head touches no app files. **Detection control built 2026-10-27**: `/api/version` reports the deployed commit and a workflow compares it with the merged SHA — asks production, since merge commits get no Netlify signal at all. **Enforcement ENABLED 2026-11-03**: `Production is serving main` is a required check and `VERSION_ENDPOINT_REQUIRED=true`; validated green on a real PR first, which caught a bug in the check itself (`git log -1 -- <path>` skipped a merge commit via history simplification). | Shri (interim) | open |
 | **R-020** | **A wallet session could set an email password (wallet as a recovery credential)** | ✅ **CLOSED 2026-11-03 (PR #80, `c33f76f`)** — production serving it, the R-019 control observed the release, and the **owner confirmed a real password recovery end to end on this revision**. **M8 waived under D5 — not satisfied.** Raised by independent review as *"password recovery may be accessible through an ordinary wallet session"*. `/auth/reset-password` checked only that *a* session existed, and the form changed the password from the browser. **Measured on staging 2026-11-03**: a wallet-class session (`amr=[{"method":"otp"}]` — the same class as a genuine recovery session) changed the password with no `current_password` and no nonce, proven by password grant. Production has both password-change protections ON and **neither helps** (the current-password check is skipped for `otp`/`magiclink`/`recovery` sessions; reauthentication only bites after 24h) — documented, not measured here. Staging has both OFF, so it could not detect this class at all. **Fix:** a signed, 30-minute, `httpOnly` recovery-intent marker set by `/auth/callback` only for the reset path, verified in a Server Action before the password is touched. 5/5 mutations caught. | Shri (interim) | closed |
-| **R-021** | **Wallet sign-in signature relay (a phished signature becomes a session)** | **OPEN — prevention PART 1 shipped and verified in a deployment (PR #87: *the relay no longer mints a session*, `/dashboard` not-200 after a relay, 42/42); DETECTION LIVE IN PRODUCTION since 2026-11-15.** Residual: a victim who also relays the emailed code still gets in — closed only by Part 2 (device-bound key). A public challenge endpoint means an attacker can request a challenge **for the victim's wallet address**, show the message to the victim on another site, and relay the signature back for a session. **Measured on a staging-backed preview**: the challenge response carries **0** `Set-Cookie` headers (nothing binds it to the requesting client), a challenge requested with no browser context is completed by a different one (`ok: true`), and that session gets `/dashboard` 200. **A false argument in `lib/wallet-crypto.ts` claimed this was already prevented** (that a hostile site could not obtain one of our nonces) — corrected. Challenge binding is **rejected** as a fix, with the reasoning recorded, because the attacker receives whatever binding is issued. Recommended: **step-up verification on an unrecognised device** — an owner decision, since it makes wallet sign-in multi-step on a new device. **D5 — the recognised-device list + per-device revoke (PR #89, merge `78ff51e`) — RELEASED to production 2026-11-15:** production `/api/version` reports the merge commit, so the alert's *remove that device* instruction finally has a target. Real-browser verified on the preview (list renders with the "This device" badge, **Remove** revokes, `wallet.device_revoked` audited) and the cross-account refusal **measured** at the RPC layer, not only asserted. The `RESEND_API_KEY`-off-previews follow-up is closed (PR #88, merge `830ce2e`) and the harness now tolerates a deployment with no mailer. Threat model: `wallet-signin-threat-model.md`. | Shri (interim) | open |
+| **R-021** | **Wallet sign-in signature relay (a phished signature becomes a session)** | ✅ **CLOSED 2026-11-22 — remediation proven in production, end to end.** PREVENTION PART 2 shipped and released 2026-11-16 (PR #91, merge `a454900`; production `/api/version` reported the merge commit). DETECTION live since 2026-11-15; PART 1 unchanged (PR #87: *the relay no longer mints a session*, `/dashboard` not-200 after a relay, 42/42). Part 2 — the **device-bound key** (design §4) — requires a recognised device to also prove possession of a **non-exportable** P-256 key by signing the challenge nonce, so the second deception stops existing: there is no form of the key a victim can read out and relay. Residual **narrowed from *relay the code too* to storage loss** — an evicted device key simply steps up again (fail-closed: a code, not a session); Safari's ~7-day scripted-storage eviction is **predicted, not measured**. A public challenge endpoint means an attacker can request a challenge **for the victim's wallet address**, show the message to the victim on another site, and relay the signature back for a session. **Measured on a staging-backed preview**: the challenge response carries **0** `Set-Cookie` headers (nothing binds it to the requesting client), a challenge requested with no browser context is completed by a different one (`ok: true`), and that session gets `/dashboard` 200. **A false argument in `lib/wallet-crypto.ts` claimed this was already prevented** (that a hostile site could not obtain one of our nonces) — corrected. Challenge binding is **rejected** as a fix, with the reasoning recorded, because the attacker receives whatever binding is issued. Recommended: **step-up verification on an unrecognised device** — an owner decision, since it makes wallet sign-in multi-step on a new device. **D5 — the recognised-device list + per-device revoke (PR #89, merge `78ff51e`) — RELEASED to production 2026-11-15:** production `/api/version` reports the merge commit, so the alert's *remove that device* instruction finally has a target. Real-browser verified on the preview (list renders with the "This device" badge, **Remove** revokes, `wallet.device_revoked` audited) and the cross-account refusal **measured** at the RPC layer, not only asserted. The `RESEND_API_KEY`-off-previews follow-up is closed (PR #88, merge `830ce2e`) and the harness now tolerates a deployment with no mailer. **Part 2 verification:** unit **366/366**; deployed harness **46/46** on `deploy-preview-91` (the step-up *enrolled the device key*; an enrolled device signs in without a step-up; a recognised device with **no** device signature does not sign in; a signature from a **different** device key does not; a device enrolled **without** a key steps up — the last is why **no migration was needed**); **rule 12 in a real browser** — the private key is non-exportable (`InvalidAccessError`) and **stays so through IndexedDB and a full page reload**, and a real browser signature **verifies through the exported server function** (7/7; vectors pinned as regression tests). **Production proof OBSERVED 2026-11-22** — the first real new-device sign-in (Android phone, Phantom in-app browser), read from `security_audit_log`: `wallet.step_up_required` (`device_refusal: "no_device_handle"`) → `wallet.step_up_completed` with **`device_key: "registered"`** → `wallet.signed_in` with **`device: "stepped_up"`**; `wallet_trusted_devices` held 1 device, 1 carrying a `public_key`. So enrolment works in production and the key persisted. **And CLOSED by observation at 09:38:59 the same day:** a repeat sign-in from that device recorded `wallet.signed_in` with **`device: "recognised"`** and no code, so the enrolled key *verifies* rather than merely *registers*. Residual that remains, accepted: **storage loss** — an evicted device key costs a step-up, never a session (fail-closed); Safari's ~7-day eviction is predicted, not measured. Support path still named, not solved: a wallet-only member who cannot read the account email is blocked from a new device. Threat model: `wallet-signin-threat-model.md`. | Shri (interim) | closed |
 
 **Register sweep — 2026-10-23.** Every open claim was re-measured against the repo, `npm audit`,
 live production, the Netlify/GitHub APIs and the production database. See
