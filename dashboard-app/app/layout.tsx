@@ -5,7 +5,6 @@ import { SolanaWalletProvider } from "@/components/providers/wallet-provider";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
 import { CookieConsent } from "@/components/analytics/cookie-consent";
 import { Toaster } from "@/components/ui/toaster";
-import { WalletDebugPanel } from "@/components/auth/wallet-debug-panel";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -77,8 +76,6 @@ export default function RootLayout({
           <RegisterServiceWorker />
           <CookieConsent />
           <Toaster />
-          {/* Opt-in only (?mwadebug=1); instrumentation for reading a real phone's console. */}
-          <WalletDebugPanel />
         </SolanaWalletProvider>
       </body>
     </html>
