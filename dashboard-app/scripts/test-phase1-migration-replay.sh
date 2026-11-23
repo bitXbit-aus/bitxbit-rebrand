@@ -24,6 +24,7 @@ MIGRATION_026="$ROOT_DIR/supabase/migrations/026_harden_payout_confirmation_evid
 MIGRATION_027="$ROOT_DIR/supabase/migrations/027_shared_rate_limit_counter.sql"
 MIGRATION_028="$ROOT_DIR/supabase/migrations/028_wallet_signin.sql"
 MIGRATION_029="$ROOT_DIR/supabase/migrations/029_wallet_step_up.sql"
+MIGRATION_030="$ROOT_DIR/supabase/migrations/030_membership_schema.sql"
 
 cleanup() {
   dropdb --if-exists "$DB_NAME" >/dev/null 2>&1 || true
@@ -82,6 +83,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_027" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_028" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_029" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_030" >/dev/null
 
 # Simulate a later validation migration. Replay must preserve this state.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
@@ -107,6 +109,7 @@ psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_026" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_027" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_028" >/dev/null
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_029" >/dev/null
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$MIGRATION_030" >/dev/null
 
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -1644,6 +1647,190 @@ END $$;
 SQL
 
 printf 'wallet step-up (029) verification passed (one live code per account+device, superseded codes invalid, single-use, attempt-bounded, expiry refused, revocation per account, privileges locked)\n'
+
+# ------------------------------------------------------------------------------
+# Membership schema (030) verification
+#
+# The schema's job is to refuse the states that would lie to a member, so every
+# assertion below reintroduces the failure it prevents. Two of the denials are
+# POSITIVE controls -- they assert that a legitimate operation still works,
+# because a hardening measure that breaks a supported path is its own defect:
+#   * a member may hold cancelled history beside one active subscription, and
+#   * deleting a member still cascades their subscription and redemption rows.
+# The last is the reason DELETE is deliberately not guarded on redemptions.
+# ------------------------------------------------------------------------------
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE
+  v_member UUID := '51515151-5151-4151-8151-515151515151';
+  v_member2 UUID := '52525252-5252-4252-8252-525252525252';
+  v_plan UUID;
+  v_paid_plan UUID;
+  v_offer UUID;
+  v_redemption UUID;
+  v_rejected BOOLEAN;
+  v_count INT;
+BEGIN
+  -- 1. The catalogue is seeded, and the paid plan is present but priced -- i.e.
+  -- unjoinable by the CHECK below rather than by everyone remembering.
+  SELECT id INTO v_plan FROM public.membership_plans WHERE slug = 'community';
+  SELECT id INTO v_paid_plan FROM public.membership_plans WHERE slug = 'rewards';
+  IF v_plan IS NULL OR v_paid_plan IS NULL THEN
+    RAISE EXCEPTION 'expected the community and rewards plans to be seeded';
+  END IF;
+  IF (SELECT requires_payment FROM public.membership_plans WHERE id = v_plan) IS NOT FALSE THEN
+    RAISE EXCEPTION 'the community plan should not require payment';
+  END IF;
+
+  -- 2. The launch constraint holds in BOTH directions.
+  v_rejected := FALSE;
+  BEGIN
+    INSERT INTO public.membership_plans (slug, name, price_aud_cents, requires_payment)
+    VALUES ('bad-priced-free', 'Bad', 500, FALSE);
+  EXCEPTION WHEN check_violation THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'a priced plan claiming not to require payment was accepted';
+  END IF;
+
+  v_rejected := FALSE;
+  BEGIN
+    INSERT INTO public.membership_plans (slug, name, price_aud_cents, requires_payment)
+    VALUES ('bad-free-paid', 'Bad', 0, TRUE);
+  EXCEPTION WHEN check_violation THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'a payment-requiring plan with no price was accepted';
+  END IF;
+
+  -- 3. Two members, and an offer to redeem.
+  INSERT INTO auth.users (id, email) VALUES (v_member, 'membership-one@example.test');
+  INSERT INTO auth.users (id, email) VALUES (v_member2, 'membership-two@example.test');
+  INSERT INTO public.merchant_offers (merchant_name, discount_description, redemption_instructions)
+  VALUES ('Test Merchant', '10% off', 'Show this code') RETURNING id INTO v_offer;
+
+  INSERT INTO public.member_subscriptions (user_id, plan_id) VALUES (v_member, v_plan);
+
+  -- 4. A second ACTIVE subscription is refused...
+  v_rejected := FALSE;
+  BEGIN
+    INSERT INTO public.member_subscriptions (user_id, plan_id) VALUES (v_member, v_plan);
+  EXCEPTION WHEN unique_violation THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'a member was allowed two active subscriptions';
+  END IF;
+
+  -- ...while cancelled history beside it is allowed (the index is partial).
+  INSERT INTO public.member_subscriptions (user_id, plan_id, status, ended_at)
+  VALUES (v_member, v_plan, 'cancelled', NOW());
+  SELECT COUNT(*) INTO v_count FROM public.member_subscriptions WHERE user_id = v_member;
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'expected 2 subscription rows for the member, got %', v_count;
+  END IF;
+
+  -- 5. A subscription that stopped must say when it stopped.
+  v_rejected := FALSE;
+  BEGIN
+    INSERT INTO public.member_subscriptions (user_id, plan_id, status)
+    VALUES (v_member2, v_plan, 'cancelled');
+  EXCEPTION WHEN check_violation THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'a cancelled subscription with no end date was accepted';
+  END IF;
+
+  -- 6. An inverted validity window is refused.
+  v_rejected := FALSE;
+  BEGIN
+    INSERT INTO public.merchant_offers
+      (merchant_name, discount_description, redemption_instructions, valid_from, valid_until)
+    VALUES ('Test', 'x', 'y', NOW(), NOW() - INTERVAL '1 day');
+  EXCEPTION WHEN check_violation THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'a merchant offer ending before it starts was accepted';
+  END IF;
+
+  -- 7. One redemption per member per offer -- idempotency in the schema.
+  INSERT INTO public.offer_redemptions (user_id, merchant_offer_id, redemption_code)
+  VALUES (v_member, v_offer, 'CODE-0001') RETURNING id INTO v_redemption;
+
+  v_rejected := FALSE;
+  BEGIN
+    INSERT INTO public.offer_redemptions (user_id, merchant_offer_id, redemption_code)
+    VALUES (v_member, v_offer, 'CODE-0002');
+  EXCEPTION WHEN unique_violation THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'a member redeemed the same offer twice';
+  END IF;
+
+  -- 8. A redemption is never edited...
+  v_rejected := FALSE;
+  BEGIN
+    UPDATE public.offer_redemptions SET redemption_code = 'TAMPERED' WHERE id = v_redemption;
+  EXCEPTION WHEN insufficient_privilege THEN v_rejected := TRUE;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'a redemption was editable';
+  END IF;
+
+  -- ...but deleting the MEMBER still cascades it away without failing. This is
+  -- the assertion that the append-only choice did not break member deletion.
+  DELETE FROM auth.users WHERE id = v_member;
+  SELECT COUNT(*) INTO v_count FROM public.offer_redemptions WHERE user_id = v_member;
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'deleting a member left % redemptions behind', v_count;
+  END IF;
+  SELECT COUNT(*) INTO v_count FROM public.member_subscriptions WHERE user_id = v_member;
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'deleting a member left % subscriptions behind', v_count;
+  END IF;
+
+  -- 9. No client role reaches any of the four tables, and RLS is on all four.
+  SELECT COUNT(*) INTO v_count
+  FROM information_schema.role_table_grants
+  WHERE table_schema = 'public'
+    AND table_name IN ('membership_plans','member_subscriptions','merchant_offers','offer_redemptions')
+    AND grantee IN ('anon','authenticated');
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'a client role holds % grants on the membership tables', v_count;
+  END IF;
+
+  SELECT COUNT(*) INTO v_count
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND c.relname IN ('membership_plans','member_subscriptions','merchant_offers','offer_redemptions')
+    AND c.relrowsecurity;
+  IF v_count <> 4 THEN
+    RAISE EXCEPTION 'expected RLS on all four membership tables, found %', v_count;
+  END IF;
+
+  SELECT COUNT(DISTINCT table_name) INTO v_count
+  FROM information_schema.role_table_grants
+  WHERE table_schema = 'public'
+    AND table_name IN ('membership_plans','member_subscriptions','merchant_offers','offer_redemptions')
+    AND grantee = 'service_role';
+  IF v_count <> 4 THEN
+    RAISE EXCEPTION 'service_role holds grants on % membership tables, expected 4', v_count;
+  END IF;
+
+  -- 10. Promotional draws stay unbuilt: the readiness report defers them behind
+  -- independent legal review, and a table nobody may populate is not a head start.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'promotional_draws'
+  ) THEN
+    RAISE EXCEPTION 'promotional_draws exists but is deferred behind legal review';
+  END IF;
+
+  DELETE FROM public.merchant_offers WHERE id = v_offer;
+  DELETE FROM auth.users WHERE id = v_member2;
+END $$;
+SQL
+
+printf 'membership schema (030) verification passed (catalogue seeded, payment flag bound to price, one active subscription per member with history preserved, stopped subscription dated, inverted offer window refused, one redemption per member per offer, redemption immutable but member deletion still cascades, client roles locked out, RLS on all four, draws still deferred)\n'
 
 # ------------------------------------------------------------------------------
 # Concurrent correction-vs-claim race test
