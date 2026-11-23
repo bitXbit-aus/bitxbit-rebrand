@@ -65,8 +65,29 @@ export const MOBILE_WALLET_CHAINS: readonly `${string}:${string}`[] = [SOLANA_MA
 /** Name shown by the wallet app when it asks the member to approve this site. */
 export const MOBILE_WALLET_NAME = "bitXbit";
 
-/** Icon shown in that prompt. A real asset: public/icons/icon-192x192.png (verified 192x192). */
-export const MOBILE_WALLET_ICON_PATH = "/icons/icon-192x192.png";
+/**
+ * Prompt icon, in the form the WALLET requires: a path RELATIVE to the identity's `uri`.
+ *
+ * Measured on a real device 2026-11-23. Sending an absolute URL here makes the wallet reject
+ * the entire authorisation with:
+ *
+ *     "When specified, identity.icon must be a relative URI"
+ *
+ * — and it does so AFTER the wallet app has opened and the transport has connected, so it
+ * presents to the member as "Phantom opens and never asks me to approve". The preparation
+ * looks like it worked right up to the point the wallet silently declines.
+ *
+ * Solana Mobile's own `registerMwa` example is explicit about the form and its resolution:
+ *
+ *     icon: 'relative/path/to/icon.png', // resolves to myapp.io/relative/path/to/icon.png
+ *
+ * No leading slash, matching that example: it resolves against `uri`'s root, which is what we
+ * want because `uri` is an origin.
+ */
+export const MOBILE_WALLET_ICON_RELATIVE_PATH = "icons/icon-192x192.png";
+
+/** The same asset as a site-absolute path, used to prove the file exists on disk. */
+export const MOBILE_WALLET_ICON_PATH = `/${MOBILE_WALLET_ICON_RELATIVE_PATH}`;
 
 /**
  * Is this a browser that can actually reach a wallet app over MWA?
@@ -120,7 +141,7 @@ export function mobileAppIdentity(origin: string): { name: string; uri: string; 
   return {
     name: MOBILE_WALLET_NAME,
     uri: origin,
-    icon: `${origin}${MOBILE_WALLET_ICON_PATH}`,
+    icon: MOBILE_WALLET_ICON_RELATIVE_PATH,
   };
 }
 

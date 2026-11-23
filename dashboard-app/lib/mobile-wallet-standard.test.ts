@@ -8,6 +8,7 @@ import { SOLANA_MAINNET_CHAIN } from "@solana/wallet-standard-chains";
 import {
   MOBILE_WALLET_CHAINS,
   MOBILE_WALLET_ICON_PATH,
+  MOBILE_WALLET_ICON_RELATIVE_PATH,
   MOBILE_WALLET_NAME,
   isMobileWalletAdapterEnvironment,
   mobileAppIdentity,
@@ -136,10 +137,35 @@ test("the app identity is bound to the origin the member is actually on", () => 
     "a preview must identify itself as the preview, not as production"
   );
   assert.equal(identity.name, MOBILE_WALLET_NAME);
+});
+
+test("the prompt icon is RELATIVE, as the wallet requires", () => {
+  // Measured on a real device: an absolute URL here makes the wallet reject the whole
+  // authorisation with "When specified, identity.icon must be a relative URI" — after the app
+  // has opened and the transport has connected, so it looks like "wallet opens, never asks me
+  // to approve". An earlier version of this test asserted the OPPOSITE (that the icon must be
+  // an absolute URL) and so certified the bug. An assertion can pin a mistake as firmly as it
+  // pins a decision.
+  const identity = mobileAppIdentity("https://deploy-preview-99--bitxbit-dashboard.netlify.app");
   assert.ok(
-    identity.icon.startsWith(previewOrigin),
-    "the icon must be an absolute URL on the same origin, or the wallet cannot fetch it"
+    !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(identity.icon),
+    `the icon must not carry a scheme: ${identity.icon}`
   );
+  assert.ok(
+    !identity.icon.startsWith("//"),
+    `the icon must not be protocol-relative: ${identity.icon}`
+  );
+});
+
+test("resolving the relative icon against the identity's uri lands on the real asset", () => {
+  const origin = "https://deploy-preview-99--bitxbit-dashboard.netlify.app";
+  const identity = mobileAppIdentity(origin);
+  assert.equal(
+    new URL(identity.icon, identity.uri).href,
+    `${origin}${MOBILE_WALLET_ICON_PATH}`,
+    "the wallet resolves icon against uri; that resolution must hit the file we actually ship"
+  );
+  assert.equal(MOBILE_WALLET_ICON_RELATIVE_PATH, MOBILE_WALLET_ICON_PATH.replace(/^\//, ""));
 });
 
 test("the prompt icon is a real PNG that exists in public/", () => {
