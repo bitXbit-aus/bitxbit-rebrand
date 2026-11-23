@@ -114,3 +114,40 @@ test("the policy is terminated and parseable", () => {
   assert.ok(!/;;/.test(CONTENT_SECURITY_POLICY), "policy contains an empty directive");
   assert.ok(!/\s{2,}/.test(CONTENT_SECURITY_POLICY), "policy contains doubled whitespace");
 });
+
+// --- Mobile Wallet Adapter (Android browsers) ---------------------------------------
+//
+// On Android Chrome the connect modal offered wallets that could never reach a connected
+// state, because the provider registered only browser-extension adapters. `registerMwa`
+// registers the mobile wallet as a Wallet Standard wallet; its browser transport is a
+// WebSocket to a reflector the wallet app runs on the same device —
+// `ws://localhost:<port>/solana-wallet`, the only localhost reference in the library's
+// browser build (no fetch, no http://localhost). Blocked here, the handshake fails at the
+// browser and leaves no server-side trace.
+//
+// NOTE: the https-only test above CANNOT see this entry — it skips any token containing
+// '*', and this one is a port wildcard. That is precisely why it is pinned explicitly
+// here: a scoped allowance that no rule inspects is a change nobody would notice.
+
+test("connect-src permits the Mobile Wallet Adapter localhost reflector", () => {
+  const connectSrc = directive(CONTENT_SECURITY_POLICY, "connect-src");
+  assert.ok(
+    connectSrc.includes("ws://localhost:*"),
+    "the Android mobile wallet handshakes over ws://localhost:<port>/solana-wallet; " +
+      "without this entry CSP blocks it silently at the browser. See " +
+      "lib/mobile-wallet-standard.ts."
+  );
+});
+
+test("the MWA allowance is scoped to the websocket transport, not localhost generally", () => {
+  const connectSrc = directive(CONTENT_SECURITY_POLICY, "connect-src");
+  assert.ok(
+    !connectSrc.includes("http://localhost:*"),
+    "only the websocket transport is measured and needed — do not widen to http"
+  );
+  assert.ok(!connectSrc.includes("ws://*:"), "must not become a general websocket wildcard");
+  assert.ok(
+    !/wss?:\/\/(?!localhost)/.test(connectSrc),
+    "no non-localhost websocket origin has been justified"
+  );
+});

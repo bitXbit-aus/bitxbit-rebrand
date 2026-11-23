@@ -45,6 +45,12 @@ const DIRECTIVES = [
   "frame-src 'self' https://connect.solflare.com https://keys.coinbase.com",
   [
     "connect-src 'self'",
+    // Mobile Wallet Adapter — Android browsers only. The wallet app runs a reflector on
+    // the device and the page reaches it over `ws://localhost:<port>/solana-wallet`, which
+    // is the only localhost reference in the library's browser build (no fetch, no
+    // http://localhost). Without this the mobile handshake is blocked silently at the
+    // browser and leaves no server-side trace. See lib/mobile-wallet-standard.ts.
+    "ws://localhost:*",
     "https://*.supabase.co",
     "https://api.mainnet-beta.solana.com",
     "https://public-api.birdeye.so",
