@@ -84,3 +84,39 @@ A future migration should add:
 2. Apply migrations `010`, `011`, and `012` to a staging Supabase project and run end-to-end smoke tests.
 3. Begin One Good Turn schema design as a separate migration series (`013_*`, `014_*`, etc.) that builds on the hardened foundation.
 4. Obtain legal/regulatory sign-off before designing any promotional draw module.
+
+## Implementation status
+
+### Schemas built (2026-11-23)
+
+Migration `030_membership_schema.sql` implements the four tables this report proposes, as a
+schema first and nothing else: `membership_plans`, `member_subscriptions`,
+`merchant_offers`, `offer_redemptions`. `promotional_draws` is **not** created — per step 4 it
+waits on legal review, and a table nobody may populate is not a head start.
+
+Two deviations from the sketch in this report, both recorded in the migration:
+
+- **Prices are integer minor units** (`price_aud_cents`), not a decimal `price_aud`. Integer
+  cents carry no rounding decision and match Stripe's API, which takes amounts in the smallest
+  currency unit. Same figure, no float or decimal in the path.
+- **`interval` is named `billing_interval`**, to avoid a column name that collides with a SQL
+  type name.
+
+The launch constraint is enforced by the database, not by this document: a plan's
+`requires_payment` must agree with its price, so the seeded paid plan is present but
+unjoinable until payments exist. The other invariants — one *active* subscription per member
+(cancelled history accumulates freely), a stopped subscription must carry `ended_at`, one
+redemption per member per offer, and redemptions are append-only for `UPDATE` — are all
+asserted by the replay harness, and each assertion was mutation-tested.
+
+The tables are **dormant**: service_role only, no client-role grants, and no application code
+reads them yet. That ordering is deliberate — the schema can be applied to production before
+the code that queries it merges.
+
+### Still to build (from the prerequisites above)
+
+The subscription service layer with **server-side entitlement checks** (§2), the handler that
+**extends rate limiting** to subscription and redemption endpoints (§6), **audit logging** for
+every state change (§7), **fraud monitoring** and redemption-code issuance (§4), a
+**privacy policy** covering this data (§5), and — only when paid tiers ship —
+**PCI-scoped payment integration via Stripe Checkout/Elements** (§1).
