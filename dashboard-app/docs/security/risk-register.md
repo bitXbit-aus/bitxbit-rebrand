@@ -1433,8 +1433,20 @@ their own host.
 
 **The gap that exposed:** the wallet harness runs against *previews*, where `host` and the forwarded host
 coincide, so its host assertions **could not** see this. Nothing asserted the **production** `Site:` line.
-That is the control worth adding — after any framework or dependency bump, re-measure production's challenge
-message, not only the preview's. Until it exists, this entry is the reminder.
+
+**That control now exists (added 2026-11-23, merged `4a46d18`).** `production-release-verification.yml` gained
+a step, *Verify production advertises its own host*: it POSTs to the live challenge endpoint with an inert
+probe address (the Solana system-program id — no member's wallet, no signature, nothing enrolled), reads the
+`Site:` line, and requires **exact equality** with `https://app.bitxbit.com.au`. It runs on every push to
+`main` and fails loudly, naming the Netlify permalink if that is what it finds. Its invariants are asserted in
+`lib/release-verification.test.ts`, including that the expected host is read from the app's own
+`FALLBACK_SIGNIN_DOMAIN` so the workflow and the code cannot drift apart. Verified both ways before merging:
+it passes against production and fails against a preview. Deliberately **not** a PR-time gate, so it adds no
+new way to block merges.
+
+This matters beyond the one bug: the lesson is not "re-measure production after a framework bump" — it is that
+a *commit* check says nothing about *what the app tells users*. The same class of regression (a dependency
+bump silently changing a user-facing string) is now caught rather than found by hand.
 
 Evidence: `evidence/r001-closure-2026-10-27.md`, `evidence/zod-removal-2026-10-27.md`.
 
