@@ -168,3 +168,101 @@ test("a missing endpoint is bootstrap-tolerated, and can be made strict", () => 
     "the bootstrap case must be visible as a warning rather than a silent pass"
   );
 });
+
+// --- 4. The release also proves the app tells members the right host ----------------
+//
+// R-018 regression, 2026-11-22: closing two dependency advisories required bumping
+// next to 15.5.29, which changed how `request.url` is derived — it follows
+// `x-forwarded-host`, and on Netlify that header is the DEPLOY'S OWN PERMALINK. The
+// permalink matches this site's slug in HOST_POLICY, so isAllowedHost() accepted it
+// and it BEAT the canonical URL: production began asking members to sign for
+// https://6b0361…--bitxbit-dashboard.netlify.app, and the magic-link callback would
+// have redirected them there after login.
+//
+// The deployed wallet harness could not catch it, and structurally could not: it runs
+// against PREVIEWS, where the `host` header and the forwarded host coincide, so its
+// host assertions are blind to this. Nothing asserted PRODUCTION's Site: line.
+//
+// Each property below can be broken silently, which is why it is asserted here.
+
+function readCanonicalHost(): string {
+  const src = readFileSync(join(APP_ROOT, "lib", "auth-callback-url.ts"), "utf8");
+  const m = /FALLBACK_SIGNIN_DOMAIN\s*=\s*"([^"]+)"/.exec(src);
+  if (!m) {
+    throw new Error("sanity: FALLBACK_SIGNIN_DOMAIN is no longer declared as a string literal");
+  }
+  return m[1];
+}
+
+const canonicalHost = readCanonicalHost();
+
+const hostStepStart = workflow.indexOf("Verify production advertises its own host");
+const hostStepEnd = workflow.indexOf("production-is-serving-main:");
+const hostStep =
+  hostStepStart >= 0
+    ? workflow.slice(hostStepStart, hostStepEnd > hostStepStart ? hostStepEnd : undefined)
+    : "";
+
+test("the release verification asks production what host it advertises", () => {
+  assert.ok(
+    hostStep.length > 0,
+    "the post-merge job must verify the host production tells members to sign for. Without it, a " +
+      "framework bump can rewrite every user-facing origin and the only harness that runs is the " +
+      "preview one, which cannot see it."
+  );
+  assert.match(hostStep, /wallet\/challenge/, "the check must ask the live challenge endpoint");
+  assert.ok(
+    hostStep.includes("Site:"),
+    "it must read the Site: line specifically - that line is the only thing a wallet shows the " +
+      "member about what they are authorising"
+  );
+});
+
+test("the expected host is the app's own canonical host, so the two cannot drift", () => {
+  assert.ok(
+    hostStep.includes(canonicalHost),
+    `the workflow must expect the app's canonical host (${canonicalHost}). If the two drift, the ` +
+      "control either demands a host the app will never use, or accepts one it should not."
+  );
+});
+
+test("the advertised host is compared exactly, and a mismatch fails the run", () => {
+  assert.match(
+    hostStep,
+    /\[\s*"\$site"\s*=\s*"\$EXPECTED_SITE"\s*\]/,
+    "exact equality is required: a substring or truthiness test would accept a permalink that " +
+      "merely CONTAINS the canonical host, which is precisely the broken value"
+  );
+  assert.ok(
+    /exit 1/.test(hostStep),
+    "an advertisement that is not this site must FAIL the run, not warn"
+  );
+  assert.match(hostStep, /::error::/, "the failure must be surfaced as an error annotation");
+});
+
+test("the host check names the permalink regression it exists to catch", () => {
+  assert.ok(
+    /--bitxbit-dashboard\\?\.netlify\\?\.app/.test(hostStep),
+    "the failure must recognise the Netlify per-deploy permalink specifically. That is the exact " +
+      "value the regression produced, and naming it is what tells the next person what broke."
+  );
+});
+
+test("the host probe is inert and needs no member's address", () => {
+  assert.ok(
+    hostStep.includes("11111111111111111111111111111111"),
+    "the probe must use a placeholder address: it mints a challenge without touching any member's " +
+      "wallet, and never a real one"
+  );
+  assert.match(
+    hostStep,
+    /no signature is produced and nothing is enrolled/i,
+    "the probe's harmlessness must be stated, so nobody 'improves' it into a real signing flow"
+  );
+  assert.match(
+    hostStep,
+    /HOST_MAX_ATTEMPTS/,
+    "attempts must be bounded by an explicit budget that stays inside the endpoint's rate limit " +
+      "(10 per 60s) - otherwise the check can fail ITSELF with a 429 and read as a real finding"
+  );
+});

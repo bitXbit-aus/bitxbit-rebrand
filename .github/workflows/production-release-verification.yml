@@ -55,6 +55,11 @@ env:
   # queue without failing inside a normal review cycle.
   MAX_TICKS: "40"
   TICK_SECONDS: "30"
+  # Host verification (the R-018 regression guard). 6 attempts, 10s apart: the
+  # challenge endpoint is rate-limited to 10 per 60s per IP, so this stays inside it
+  # and cannot manufacture a rate-limit failure that looks like a real one.
+  HOST_MAX_ATTEMPTS: "6"
+  HOST_ATTEMPT_SECONDS: "10"
 
 jobs:
   release-reached-production:
@@ -131,6 +136,66 @@ jobs:
           done
 
           echo "::error::Production is still serving '${served:-nothing}' after $(( MAX_TICKS * TICK_SECONDS ))s; the merge to main did NOT reach production. This is R-019. Inspect the Netlify deploy for $SHA: a skipped build (account build minutes exhausted) or a build error. Retry the deploy in Netlify once resolved."
+          exit 1
+
+      # WHY THIS EXISTS — R-018 regression, 2026-11-22
+      # ---------------------------------------------
+      # Closing two dependency advisories required bumping next@15.5.28 -> 15.5.29.
+      # That patch changed how `request.url` is derived: it now follows
+      # `x-forwarded-host`, which on Netlify carries the DEPLOY'S OWN PERMALINK
+      # (`<hash>--bitxbit-dashboard.netlify.app`). That permalink matches the
+      # site-slug allowlist in HOST_POLICY, so `isAllowedHost()` accepted it and it
+      # BEAT the canonical URL. Production began telling members to sign for:
+      #
+      #   Site:    https://6b0361cab5ff06d366311ce8--bitxbit-dashboard.netlify.app
+      #
+      # ...and the magic-link callback would have redirected them there after login.
+      #
+      # The deployed wallet harness did NOT catch it, and structurally could not: it
+      # runs against PREVIEWS, where the `host` header and the forwarded host
+      # coincide, so its host assertions are blind to this. Nothing at all asserted
+      # PRODUCTION's Site: line. This step is that missing control.
+      #
+      # It is the same discipline as the check above: do not ask the platform what it
+      # intended, ask PRODUCTION what it is actually telling members. Fixed in
+      # 74f44bf (resolveRequestOrigin prefers the `host` header); this keeps it fixed.
+      - name: Verify production advertises its own host
+        run: |
+          set -euo pipefail
+
+          CHALLENGE_URL="https://app.bitxbit.com.au/api/auth/wallet/challenge"
+          EXPECTED_SITE="https://app.bitxbit.com.au"
+          # A deliberately inert address: the Solana system-program id, which no member
+          # holds. The endpoint needs only a well-formed base58 address to mint a
+          # challenge; no signature is produced and nothing is enrolled or trusted.
+          # Never substitute a real address here.
+          PROBE_WALLET="11111111111111111111111111111111"
+
+          read_site() {
+            curl -sS --max-time 15 -X POST "$CHALLENGE_URL" \
+              -H 'content-type: application/json' \
+              -d "{\"walletAddress\":\"$PROBE_WALLET\"}" 2>/dev/null \
+              | jq -r '.message // empty' 2>/dev/null \
+              | tr -d '\r' \
+              | awk '/^Site:[[:space:]]*/ { sub(/^Site:[[:space:]]*/, ""); print; exit }' || true
+          }
+
+          site=""
+          for i in $(seq 1 "$HOST_MAX_ATTEMPTS"); do
+            site=$(read_site)
+            echo "attempt $i/$HOST_MAX_ATTEMPTS: wallet sign-in advertises '${site:-nothing}'"
+            if [ "$site" = "$EXPECTED_SITE" ]; then
+              echo "Production advertises $site - the site a member is asked to sign for is its own."
+              exit 0
+            fi
+            sleep "$HOST_ATTEMPT_SECONDS"
+          done
+
+          if printf '%s' "$site" | grep -q -- '--bitxbit-dashboard\.netlify\.app'; then
+            echo "::error::Production's wallet sign-in advertises the Netlify PER-DEPLOY PERMALINK ('${site}') instead of $EXPECTED_SITE. This is the R-018 regression returning: request.url is being trusted for a user-facing origin. Check that the challenge route and the auth callback both build their origin with resolveRequestOrigin() (the host header), not request.url."
+          else
+            echo "::error::Production's wallet sign-in advertises '${site:-nothing}' but must advertise $EXPECTED_SITE. A member is being asked to authorise a host that is not this site - the message a wallet displays is the only thing that tells them what they are signing for."
+          fi
           exit 1
 
   production-is-serving-main:
