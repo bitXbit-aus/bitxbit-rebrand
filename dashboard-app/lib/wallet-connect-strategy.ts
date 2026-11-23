@@ -13,18 +13,24 @@
  * `Navigation is blocked: solana-wallet:/v1/associate...`"
  * (https://www.npmjs.com/package/@solana-mobile/wallet-adapter-mobile)
  *
- * Their UX guidelines therefore prescribe: "If it is not selected, but available, select
- * it as early as possible in your UI flow. This will also fix connection related issues
- * with Mobile Wallet Adapter." (https://docs.solanamobile.com/get-started/web/ux-guidelines)
+ * The failure mode this avoids: letting the chooser's own select→connect dance perform the
+ * launch, outside the gesture. Chrome blocks the intent navigation, the wallet ends up
+ * SELECTED BUT NOT CONNECTED, and every later click finds `connected === false`, reopens
+ * the chooser and re-enters the same dead branch — which presents to a member as
+ * "I pick it, I allow it, and then nothing happens".
  *
- * The failure mode this avoids: opening the selection MODAL, choosing MWA there, and
- * letting the modal's select→connect dance run outside the gesture. Chrome blocks the
- * intent navigation, the wallet ends up SELECTED BUT NOT CONNECTED, and every later click
- * finds `connected === false`, reopens the modal, and re-enters the same dead branch —
- * which presents to a member as "I pick it, I allow it, and then nothing happens".
+ * So when MWA is the selected-but-unconnected wallet, the click connects it DIRECTLY.
+ * That is the whole fix, and it is deliberately the only thing this module changes.
  *
- * So: never route a click through the modal when MWA is the thing standing by. Selection
- * and connection are two presses, each carrying its own gesture.
+ * WHY THERE IS NO "select MWA for you" STEP
+ * -----------------------------------------
+ * Solana Mobile's UX guidelines recommend selecting MWA as early as possible, and an
+ * earlier version here followed that by diverting the first click straight to MWA. That was
+ * wrong for this product: it silently removed Phantom, Solflare and Coinbase from Android,
+ * because the wallet chooser never opened. The guideline assumes MWA is the only wallet
+ * worth reaching; here the member chooses, so every provider stays on offer. The gesture
+ * requirement is satisfied by connecting on the press AFTER the choice — one extra tap, and
+ * nothing taken away.
  */
 
 /**
@@ -42,24 +48,20 @@ export const MOBILE_WALLET_ADAPTER_NAME = "Mobile Wallet Adapter";
 export type WalletConnectStep =
   /** Already connected with a usable key — proceed to the signature. */
   | "sign"
-  /** MWA is selected but not connected — connect now, inside the click's gesture. */
+  /** MWA is the selected wallet but not connected — connect now, inside the click's gesture. */
   | "connect-mwa"
-  /** MWA is available but not selected — select it so the NEXT click can connect. */
-  | "select-mwa"
-  /** No mobile wallet standing by — show the wallet selection modal as before. */
+  /** Otherwise show the wallet chooser, so the member can pick any provider. */
   | "open-modal";
 
 export function nextWalletConnectStep(input: {
   connected: boolean;
   hasSignableKey: boolean;
   selectedWalletName: string | null | undefined;
-  mobileWalletAvailable: boolean;
   mobileWalletName?: string;
 }): WalletConnectStep {
   const mobileWalletName = input.mobileWalletName ?? MOBILE_WALLET_ADAPTER_NAME;
 
   if (input.connected && input.hasSignableKey) return "sign";
   if (input.selectedWalletName === mobileWalletName) return "connect-mwa";
-  if (input.mobileWalletAvailable) return "select-mwa";
   return "open-modal";
 }
