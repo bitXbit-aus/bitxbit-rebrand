@@ -106,6 +106,11 @@ export function WalletDebugPanel() {
     };
 
     // --- is the mobile wallet actually registered in THIS browser? ---
+    //
+    // Probed REPEATEDLY, not once. The provider's registration effect runs AFTER this
+    // component's effect (parent effects run after child effects), so a single immediate
+    // probe reported "not registered" on a browser where registration was simply later —
+    // a false negative, and a misleading instrument is worse than no instrument.
     const found: string[] = [];
     const registry = {
       register: (...wallets: Array<{ name?: string }>) =>
@@ -115,12 +120,20 @@ export function WalletDebugPanel() {
       on: () => {},
       off: () => {},
     };
-    window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: registry }));
-    push(
-      `wallets registered: ${found.length > 0 ? found.join(", ") : "(none — MWA not registered here)"}`
-    );
+    let lastReport = "";
+    const probe = () => {
+      window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: registry }));
+      const report = found.length > 0 ? found.join(", ") : "(not registered yet)";
+      if (report !== lastReport) {
+        lastReport = report;
+        push(`wallets registered: ${report}`);
+      }
+    };
+    probe();
+    const probeTimer = window.setInterval(probe, 1000);
 
     return () => {
+      window.clearInterval(probeTimer);
       window.WebSocket = NativeWebSocket;
       window.fetch = nativeFetch;
     };
