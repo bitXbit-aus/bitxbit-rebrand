@@ -1420,6 +1420,22 @@ its benefit; measure the diff before accepting one.
 direct dependency's version until the override is revisited. **Re-read this entry whenever `next` or
 `postcss` moves.** Without that note, the pin silently becomes the reason an upgrade "doesn't take".
 
+**Regression introduced by that bump, and fixed the same day (2026-11-22).** `next@15.5.29` changed how
+`request.url` is derived: it now follows `x-forwarded-host`, which on Netlify carries the **deploy's
+per-deploy permalink** (`<hash>--bitxbit-dashboard.netlify.app`). That permalink matches this site's
+`netlifySite` slug, so `isAllowedHost()` accepted it and it **beat** the canonical URL — production began
+showing members `Site: https://6b03…--bitxbit-dashboard.netlify.app` in the wallet message, and the
+magic-link callback would have redirected them there after login. Measured on the live endpoint minutes
+after release; fixed in **`74f44bf`** by preferring the `host` header (`resolveRequestOrigin`), with +6
+tests, and **re-measured after release**: production again advertises `https://app.bitxbit.com.au`, and the
+deployed harness still passes **46/46** on a preview — so the fix did not over-correct, previews still name
+their own host.
+
+**The gap that exposed:** the wallet harness runs against *previews*, where `host` and the forwarded host
+coincide, so its host assertions **could not** see this. Nothing asserted the **production** `Site:` line.
+That is the control worth adding — after any framework or dependency bump, re-measure production's challenge
+message, not only the preview's. Until it exists, this entry is the reminder.
+
 Evidence: `evidence/r001-closure-2026-10-27.md`, `evidence/zod-removal-2026-10-27.md`.
 
 ---
