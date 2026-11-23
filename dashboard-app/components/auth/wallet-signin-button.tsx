@@ -15,6 +15,8 @@ import {
   WALLET_SIGNIN_GENERIC_ERROR,
 } from "@/lib/wallet-signin-client";
 import { enrolDeviceKey, signWithDeviceKey } from "@/lib/wallet-device-key-client";
+import { MOBILE_WALLET_ADAPTER_NAME, nextWalletConnectStep } from "@/lib/wallet-connect-strategy";
+import type { WalletName } from "@solana/wallet-adapter-base";
 
 /**
  * Sign in with a Solana wallet (Phase 2 / B3), including the new-device step-up.
@@ -43,7 +45,8 @@ function shorten(address: string): string {
 }
 
 export function WalletSignInButton() {
-  const { publicKey, connected, connecting, signMessage } = useWallet();
+  const { publicKey, connected, connecting, signMessage, connect, select, wallet, wallets } =
+    useWallet();
   const { setVisible } = useWalletModal();
   const [busy, setBusy] = useState(false);
   const [stepUp, setStepUp] = useState<{ stepUpId: string; emailHint: string } | null>(null);
@@ -57,6 +60,51 @@ export function WalletSignInButton() {
 
   const handleClick = async () => {
     if (!connected || !publicKey) {
+      // Android's Mobile Wallet Adapter reaches the wallet app by navigating to
+      // `solana-wallet:/v1/associate/local?...`, and Chrome blocks a navigation that does
+      // not come from a user gesture. Routing this click through the selection modal loses
+      // that gesture: the wallet ends up SELECTED BUT NOT CONNECTED, every later click
+      // finds `connected === false`, reopens the modal and re-enters the same dead branch —
+      // which a member experiences as "I pick it, I allow it, and nothing happens".
+      //
+      // Solana Mobile's guidance is to select MWA as early as possible and connect it
+      // directly from the click, so each press carries its own gesture. Two presses, never
+      // a modal round trip. See lib/wallet-connect-strategy.ts for the documented failure.
+      if (connecting) return;
+
+      const step = nextWalletConnectStep({
+        connected,
+        hasSignableKey: !!publicKey,
+        selectedWalletName: wallet?.adapter.name,
+        mobileWalletAvailable: wallets.some((w) => w.adapter.name === MOBILE_WALLET_ADAPTER_NAME),
+      });
+
+      if (step === "connect-mwa") {
+        try {
+          await connect();
+        } catch (error) {
+          // This handler had no catch before; a throw after the wallet approved produced no
+          // toast, no error and no clue. An enhancement path must always be able to say
+          // what went wrong.
+          console.error("mobile wallet connect failed", error);
+          toast({
+            title: "Could not open your wallet app",
+            description:
+              "On Android, open this site in Chrome with a wallet app installed — or connect a browser wallet instead.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
+      if (step === "select-mwa") {
+        // Select it now; the NEXT press connects, with a gesture of its own.
+        // `WalletName` is a branded string; the value is the library's own name, pinned to
+        // its source by lib/wallet-connect-strategy.test.ts.
+        select(MOBILE_WALLET_ADAPTER_NAME as WalletName);
+        return;
+      }
+
       setVisible(true);
       return;
     }
