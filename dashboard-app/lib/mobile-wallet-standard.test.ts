@@ -75,6 +75,56 @@ test("an absent user agent is not Android", () => {
   }
 });
 
+// The vendor's compatibility table is narrower than "Android": MWA is supported in Android
+// CHROME only. Firefox, Opera, Brave, Samsung Internet and in-app WebViews are listed as
+// unsupported. Registering in those offers an entry that can never connect — which is the
+// exact defect this feature removes, only made deliberate. A member is most likely to hit
+// the WebView case, because a shared link opens inside whichever app shared it.
+
+const ANDROID_BUT_UNSUPPORTED: Array<[string, string]> = [
+  [
+    "Chrome WebView / in-app browser",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36",
+  ],
+  ["Android Firefox", "Mozilla/5.0 (Android 14; Mobile; rv:133.0) Gecko/133.0 Firefox/133.0"],
+  [
+    "Android Opera",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 OPR/85.0.0.0",
+  ],
+  [
+    "Android Brave",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 Brave/131",
+  ],
+  [
+    "Samsung Internet",
+    "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/27.0 Chrome/125.0.0.0 Mobile Safari/537.36",
+  ],
+  [
+    "Android Edge",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 EdgA/131.0.0.0",
+  ],
+];
+
+test("does NOT register in Android browsers the vendor lists as unsupported", () => {
+  for (const [label, ua] of ANDROID_BUT_UNSUPPORTED) {
+    assert.equal(
+      isMobileWalletAdapterEnvironment(ua),
+      false,
+      `${label} cannot launch an Android intent, so MWA there is a dead option: ${ua}`
+    );
+  }
+});
+
+test("a Chrome PWA still registers (same token as Chrome)", () => {
+  // PWAs are explicitly supported and carry the ordinary Chrome user agent.
+  assert.equal(
+    isMobileWalletAdapterEnvironment(
+      "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+    ),
+    true
+  );
+});
+
 // --- the identity the wallet app displays -------------------------------------------
 
 test("the app identity is bound to the origin the member is actually on", () => {

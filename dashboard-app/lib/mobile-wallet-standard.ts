@@ -61,14 +61,45 @@ export const MOBILE_WALLET_ICON_PATH = "/icons/icon-192x192.png";
 /**
  * Is this a browser that can actually reach a wallet app over MWA?
  *
- * Android only, deliberately. MWA's browser transport needs a wallet app on the SAME
- * device, reachable over a localhost reflector; iOS wallets reach this site through their
- * own in-app browser (the path already proven working). Registering MWA on desktop would
- * add a wallet entry that can never connect — recreating the exact defect this fixes.
+ * Android **Chrome** only, deliberately — and the narrower test is the vendor's, not a
+ * guess. Solana Mobile's compatibility table:
+ *
+ *   Android - Chrome        ✅  (also works in Chrome PWAs)
+ *   Android - Other browsers ❌  "Firefox, Opera, Brave, etc. do not support MWA"
+ *   Android - WebViews      ❌  in-app browsers cannot launch the intent
+ *   iOS - all browsers      ❌
+ *   Desktop                 ❌  (remote/QR only)
+ *
+ * MWA's browser transport needs a wallet app on the SAME device, reachable over a
+ * localhost reflector, and it launches it by navigating to `solana-wallet:/…`, which only
+ * Android Chrome will act on. Offering the entry anywhere else is not a harmless extra: it
+ * is the same dead-option defect this feature exists to remove — a member taps it, allows
+ * the prompt, and nothing opens.
+ *
+ * A member in a supported browser with no wallet app installed is handled separately, by
+ * the wallet-not-found handler passed to `registerMwa`.
  */
 export function isMobileWalletAdapterEnvironment(userAgent: string | null | undefined): boolean {
   if (typeof userAgent !== "string") return false;
-  return /android/i.test(userAgent);
+  if (!/android/i.test(userAgent)) return false;
+
+  // In-app browsers (WebViews) report `; wv` or the WebView token, and can never launch an
+  // Android intent. This is the environment a member is most likely to arrive in, because a
+  // shared link opens inside whichever app shared it.
+  if (/\bwv\b|WebView/i.test(userAgent)) return false;
+
+  // Everything the vendor lists as unsupported. Samsung Internet and Brave are
+  // Chromium-based but are named explicitly as non-supporting, so they are excluded too.
+  if (
+    /SamsungBrowser|OPR\/|Opera|Firefox|FxiOS|EdgA|Edg\/|Brave|YaBrowser|DuckDuckGo|MiuiBrowser|UCBrowser|Vivaldi/i.test(
+      userAgent
+    )
+  ) {
+    return false;
+  }
+
+  // Must actually be Chrome (or a Chrome PWA, which carries the same token).
+  return /Chrome\/\d/.test(userAgent);
 }
 
 /**
