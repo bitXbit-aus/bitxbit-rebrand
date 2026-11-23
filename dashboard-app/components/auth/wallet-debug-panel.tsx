@@ -111,29 +111,32 @@ export function WalletDebugPanel() {
     // component's effect (parent effects run after child effects), so a single immediate
     // probe reported "not registered" on a browser where registration was simply later —
     // a false negative, and a misleading instrument is worse than no instrument.
-    const found: string[] = [];
+    // A Set: each probe makes the wallet re-announce itself, so a list accumulates
+    // duplicates ("Mobile Wallet Adapter" x19) and buries the signal.
+    const found = new Set<string>();
     const registry = {
       register: (...wallets: Array<{ name?: string }>) =>
-        wallets.forEach((w) => found.push(w?.name ?? "(unnamed)")),
+        wallets.forEach((w) => found.add(w?.name ?? "(unnamed)")),
       unregister: () => {},
-      get: () => found,
+      get: () => [...found],
       on: () => {},
       off: () => {},
     };
     let lastReport = "";
     const probe = () => {
       window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: registry }));
-      const report = found.length > 0 ? found.join(", ") : "(not registered yet)";
+      const report = found.size > 0 ? [...found].join(", ") : "(not registered yet)";
       if (report !== lastReport) {
         lastReport = report;
         push(`wallets registered: ${report}`);
       }
     };
     probe();
-    const probeTimer = window.setInterval(probe, 1000);
+    // Bounded: enough to catch registration landing after mount, then stop poking the wallet.
+    const probeTimers = [1000, 3000, 6000, 10000].map((ms) => window.setTimeout(probe, ms));
 
     return () => {
-      window.clearInterval(probeTimer);
+      probeTimers.forEach((timer) => window.clearTimeout(timer));
       window.WebSocket = NativeWebSocket;
       window.fetch = nativeFetch;
     };
