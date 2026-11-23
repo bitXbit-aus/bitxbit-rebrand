@@ -15,7 +15,7 @@ import {
   WALLET_SIGNIN_GENERIC_ERROR,
 } from "@/lib/wallet-signin-client";
 import { enrolDeviceKey, signWithDeviceKey } from "@/lib/wallet-device-key-client";
-import { nextWalletConnectStep } from "@/lib/wallet-connect-strategy";
+import { MOBILE_WALLET_ADAPTER_NAME, nextWalletConnectStep } from "@/lib/wallet-connect-strategy";
 
 /**
  * Sign in with a Solana wallet (Phase 2 / B3), including the new-device step-up.
@@ -311,21 +311,38 @@ export function WalletSignInButton() {
     );
   }
 
+  // Mobile Wallet Adapter is selected in the chooser but not connected yet. That state needs
+  // to be VISIBLE, because the connection deliberately happens on the next tap (it needs a
+  // user gesture — see lib/wallet-connect-strategy.ts). Left unlabelled, the page looks
+  // inert after the member picks their wallet: reported as "wallet choice opened however
+  // still nothing at all".
+  const awaitingMobileConnect = !connected && wallet?.adapter.name === MOBILE_WALLET_ADAPTER_NAME;
+
   const label = connected && publicKey
     ? busy
       ? "Signing you in…"
       : `Sign in with ${shorten(publicKey.toBase58())}`
-    : "Sign in with your linked wallet";
+    : awaitingMobileConnect
+      ? "Connect your wallet app"
+      : "Sign in with your linked wallet";
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      className="w-full"
-      onClick={handleClick}
-      disabled={busy || connecting}
-    >
-      {label}
-    </Button>
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        onClick={handleClick}
+        disabled={busy || connecting}
+      >
+        {label}
+      </Button>
+      {awaitingMobileConnect && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Mobile Wallet Adapter is selected but not connected yet — tap the button to open
+          your wallet app.
+        </p>
+      )}
+    </>
   );
 }
