@@ -15,6 +15,7 @@ import {
   WALLET_SIGNIN_GENERIC_ERROR,
 } from "@/lib/wallet-signin-client";
 import { enrolDeviceKey, signWithDeviceKey } from "@/lib/wallet-device-key-client";
+import { MOBILE_WALLET_ADAPTER_NAME, nextWalletConnectStep } from "@/lib/wallet-connect-strategy";
 
 /**
  * Sign in with a Solana wallet (Phase 2 / B3), including the new-device step-up.
@@ -43,7 +44,7 @@ function shorten(address: string): string {
 }
 
 export function WalletSignInButton() {
-  const { publicKey, connected, connecting, signMessage } = useWallet();
+  const { publicKey, connected, connecting, signMessage, connect, wallet } = useWallet();
   const { setVisible } = useWalletModal();
   const [busy, setBusy] = useState(false);
   const [stepUp, setStepUp] = useState<{ stepUpId: string; emailHint: string } | null>(null);
@@ -57,6 +58,62 @@ export function WalletSignInButton() {
 
   const handleClick = async () => {
     if (!connected || !publicKey) {
+      // Android's Mobile Wallet Adapter reaches the wallet app by navigating to
+      // `solana-wallet:/v1/associate/local?...`, and Chrome blocks a navigation that does
+      // not come from a user gesture.
+      //
+      // The chooser stays the entry point: Phantom, Solflare, Coinbase AND Mobile Wallet
+      // Adapter are all offered and the member picks. What must NOT happen is leaving the
+      // launch to the chooser's own select→connect, which runs outside the gesture —
+      // Chrome blocks the intent, the wallet stays SELECTED BUT NOT CONNECTED, and every
+      // later click finds `connected === false` and reopens the chooser. That loop is what
+      // a member experiences as "I pick it, I allow it, and nothing happens".
+      //
+      // So the press AFTER the choice connects directly, carrying its own gesture.
+      // See lib/wallet-connect-strategy.ts.
+      if (connecting) return;
+
+      const step = nextWalletConnectStep({
+        connected,
+        hasSignableKey: !!publicKey,
+        selectedWalletName: wallet?.adapter.name,
+      });
+
+      if (step === "connect-mwa") {
+        try {
+          await connect();
+
+          // `connect()` can RESOLVE having connected nothing. The wallet app opens, the
+          // page-to-wallet session never establishes, and the wallet is never asked to
+          // approve anything — so the member sees a wallet app sitting there and nothing
+          // else. Reported verbatim as: "Wallet opened, however i was not requested to
+          // approve sign in." Without this branch that outcome is SILENT, which is
+          // indistinguishable from a broken button.
+          //
+          // `wallet.adapter.connected` is read from the adapter instance, not from React
+          // state, so it is current immediately after the await.
+          if (!wallet?.adapter.connected) {
+            toast({
+              title: "Your wallet didn't ask you to approve",
+              description:
+                "The wallet app opened, but the connection to it never completed. Leave the wallet app open, allow the browser's local-network prompt, then tap sign-in again.",
+            });
+          }
+        } catch (error) {
+          // This handler had no catch before; a throw after the wallet approved produced no
+          // toast, no error and no clue. An enhancement path must always be able to say
+          // what went wrong.
+          console.error("mobile wallet connect failed", error);
+          toast({
+            title: "Could not open your wallet app",
+            description:
+              "On Android, open this site in Chrome with a wallet app installed — or connect a browser wallet instead.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
       setVisible(true);
       return;
     }
@@ -254,21 +311,38 @@ export function WalletSignInButton() {
     );
   }
 
+  // Mobile Wallet Adapter is selected in the chooser but not connected yet. That state needs
+  // to be VISIBLE, because the connection deliberately happens on the next tap (it needs a
+  // user gesture — see lib/wallet-connect-strategy.ts). Left unlabelled, the page looks
+  // inert after the member picks their wallet: reported as "wallet choice opened however
+  // still nothing at all".
+  const awaitingMobileConnect = !connected && wallet?.adapter.name === MOBILE_WALLET_ADAPTER_NAME;
+
   const label = connected && publicKey
     ? busy
       ? "Signing you in…"
       : `Sign in with ${shorten(publicKey.toBase58())}`
-    : "Sign in with your linked wallet";
+    : awaitingMobileConnect
+      ? "Connect your wallet app"
+      : "Sign in with your linked wallet";
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      className="w-full"
-      onClick={handleClick}
-      disabled={busy || connecting}
-    >
-      {label}
-    </Button>
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        onClick={handleClick}
+        disabled={busy || connecting}
+      >
+        {label}
+      </Button>
+      {awaitingMobileConnect && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Mobile Wallet Adapter is selected but not connected yet — tap the button to open
+          your wallet app.
+        </p>
+      )}
+    </>
   );
 }

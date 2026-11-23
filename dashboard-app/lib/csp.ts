@@ -45,6 +45,24 @@ const DIRECTIVES = [
   "frame-src 'self' https://connect.solflare.com https://keys.coinbase.com",
   [
     "connect-src 'self'",
+    // Mobile Wallet Adapter — Android Chrome only. TWO localhost allowances are required,
+    // both measured against the library's own browser build rather than assumed:
+    //
+    //   http://localhost      the PERMISSION PRIMER. The library's "Continue to allow"
+    //                         button calls exactly `fetch("http://localhost")` to make
+    //                         Chrome raise its local-network permission prompt
+    //                         ("Tap 'Allow' on the next screen"). CSP blocks that fetch
+    //                         before the request is made, so the prompt never appears —
+    //                         and the library wraps it in `try { … } catch {}`, so NOTHING
+    //                         is reported anywhere. Symptom: the member taps "Continue to
+    //                         allow" and no wallet opens.
+    //   ws://localhost:*      the TRANSPORT. The page connects to a reflector the wallet app
+    //                         runs on the device (`ws://localhost:<port>/solana-wallet`).
+    //
+    // A block here is silent by construction, so do not narrow either without re-measuring
+    // in a real browser. See lib/mobile-wallet-standard.ts and lib/csp-policy.test.ts.
+    "http://localhost",
+    "ws://localhost:*",
     "https://*.supabase.co",
     "https://api.mainnet-beta.solana.com",
     "https://public-api.birdeye.so",

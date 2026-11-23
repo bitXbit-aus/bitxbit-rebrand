@@ -100,11 +100,22 @@ test("connect-src excludes devnet and keeps mainnet", () => {
   );
 });
 
-test("every connect-src and frame-src origin is https (or 'self')", () => {
+// This test went red the moment http://localhost was added to connect-src — which is the
+// test doing its job, and how the missing allowance was confirmed to matter. It is widened
+// by NAMING the exception rather than by loosening the rule, so everything else must still
+// be https and a second non-https origin cannot slip in unnoticed.
+const NON_HTTPS_ALLOWED = ["http://localhost", "ws://localhost:*"];
+
+test("every connect-src and frame-src origin is https, except the MWA localhost allowances", () => {
   for (const name of ["connect-src", "frame-src"]) {
     for (const token of directive(CONTENT_SECURITY_POLICY, name).split(/\s+/).filter(Boolean)) {
       if (token === "'self'" || token.includes("*")) continue;
-      assert.ok(token.startsWith("https://"), `${name} origin is not https: ${token}`);
+      if (NON_HTTPS_ALLOWED.includes(token)) continue;
+      assert.ok(
+        token.startsWith("https://"),
+        `${name} origin is not https: ${token}. Only the named MWA localhost allowances may ` +
+          "use another scheme — everything else must be https."
+      );
     }
   }
 });
@@ -113,4 +124,58 @@ test("the policy is terminated and parseable", () => {
   assert.ok(CONTENT_SECURITY_POLICY.endsWith(";"), "policy must end with ';'");
   assert.ok(!/;;/.test(CONTENT_SECURITY_POLICY), "policy contains an empty directive");
   assert.ok(!/\s{2,}/.test(CONTENT_SECURITY_POLICY), "policy contains doubled whitespace");
+});
+
+// --- Mobile Wallet Adapter (Android browsers) ---------------------------------------
+//
+// On Android Chrome the connect modal offered wallets that could never reach a connected
+// state, because the provider registered only browser-extension adapters. `registerMwa`
+// registers the mobile wallet as a Wallet Standard wallet; its browser transport is a
+// WebSocket to a reflector the wallet app runs on the same device —
+// `ws://localhost:<port>/solana-wallet`, the only localhost reference in the library's
+// browser build (no fetch, no http://localhost). Blocked here, the handshake fails at the
+// browser and leaves no server-side trace.
+//
+// NOTE: the https-only test above CANNOT see this entry — it skips any token containing
+// '*', and this one is a port wildcard. That is precisely why it is pinned explicitly
+// here: a scoped allowance that no rule inspects is a change nobody would notice.
+
+test("connect-src permits the Mobile Wallet Adapter localhost reflector", () => {
+  const connectSrc = directive(CONTENT_SECURITY_POLICY, "connect-src");
+  assert.ok(
+    connectSrc.includes("ws://localhost:*"),
+    "the Android mobile wallet handshakes over ws://localhost:<port>/solana-wallet; " +
+      "without this entry CSP blocks it silently at the browser. See " +
+      "lib/mobile-wallet-standard.ts."
+  );
+});
+
+test("connect-src permits the MWA loopback PERMISSION PRIMER, not only the transport", () => {
+  const connectSrc = directive(CONTENT_SECURITY_POLICY, "connect-src");
+  assert.ok(
+    connectSrc.includes("http://localhost"),
+    "the library's \"Continue to allow\" button calls exactly fetch(\"http://localhost\") to " +
+      "make Chrome raise its local-network permission prompt. Without this the fetch is " +
+      "blocked by CSP, the prompt never appears, and — because the library swallows the " +
+      "failure in `catch {}` — nothing is reported anywhere. The member taps the button and " +
+      "no wallet opens."
+  );
+});
+
+test("the MWA localhost allowances are not a general widening", () => {
+  const connectSrc = directive(CONTENT_SECURITY_POLICY, "connect-src");
+  assert.ok(!connectSrc.includes("ws://*:"), "must not become a general websocket wildcard");
+  assert.ok(!connectSrc.includes("http://*"), "must not become a general http wildcard");
+
+  // Every non-https connect target must be localhost. (Earlier this file asserted the
+  // OPPOSITE for http://localhost — pinning the very omission that broke mobile sign-in.
+  // An assertion can lock in a mistake as effectively as it locks in a decision.)
+  const plainOrWs = connectSrc.split(/\s+/).filter((t) => /^wss?:/.test(t) || /^http:\/\//.test(t));
+  assert.ok(plainOrWs.length > 0, "sanity: the MWA allowances should be present");
+  for (const token of plainOrWs) {
+    assert.ok(
+      /^(http|ws):\/\/localhost/.test(token),
+      `only localhost may use a non-https scheme in connect-src, found: ${token}`
+    );
+  }
 });
