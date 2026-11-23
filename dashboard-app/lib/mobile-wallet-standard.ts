@@ -26,13 +26,23 @@
  * exactly zero: entries 1140 → 1140, 0 added, 0 removed, 0 version changes, no
  * react-native. Same capability, none of the supply-chain blast radius.
  *
- * CSP
- * ---
- * The browser transport is a WebSocket to a reflector the wallet app runs on the same
- * device: `ws://localhost:<port>/solana-wallet` (the only localhost reference the browser
- * build contains — there is no fetch and no http://localhost). `connect-src` must allow
- * `ws://localhost:*` or the handshake is blocked at the browser with no server-side
- * trace. See lib/csp.ts and lib/csp-policy.test.ts.
+ * CSP — TWO localhost allowances are required, and CSP blocks BOTH silently
+ * ------------------------------------------------------------------------
+ *   `ws://localhost:*`   the TRANSPORT — the page connects to a reflector the wallet app
+ *                        runs on the device (`ws://localhost:<port>/solana-wallet`).
+ *   `http://localhost`   the PERMISSION PRIMER — the library's "Continue to allow" button
+ *                        calls exactly `fetch("http://localhost")` so Chrome raises its
+ *                        local-network permission prompt. The library wraps that in
+ *                        `try { … } catch {}`, so a CSP block reports NOTHING anywhere:
+ *                        the member taps "Continue to allow" and no wallet opens.
+ *
+ * An earlier version of this comment claimed the browser build contained "no fetch and no
+ * http://localhost" — that was simply wrong, and a test had been written pinning the
+ * omission. Both the claim and the test are corrected; the lesson is that a CSP allowance
+ * needs to be measured against the library's real call sites, and that a swallowed error
+ * makes a missing allowance look like an unrelated failure.
+ *
+ * See lib/csp.ts and lib/csp-policy.test.ts.
  *
  * AN ENHANCEMENT, NEVER LOAD-BEARING
  * ----------------------------------
