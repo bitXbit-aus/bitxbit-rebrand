@@ -82,6 +82,23 @@ export function WalletSignInButton() {
       if (step === "connect-mwa") {
         try {
           await connect();
+
+          // `connect()` can RESOLVE having connected nothing. The wallet app opens, the
+          // page-to-wallet session never establishes, and the wallet is never asked to
+          // approve anything — so the member sees a wallet app sitting there and nothing
+          // else. Reported verbatim as: "Wallet opened, however i was not requested to
+          // approve sign in." Without this branch that outcome is SILENT, which is
+          // indistinguishable from a broken button.
+          //
+          // `wallet.adapter.connected` is read from the adapter instance, not from React
+          // state, so it is current immediately after the await.
+          if (!wallet?.adapter.connected) {
+            toast({
+              title: "Your wallet didn't ask you to approve",
+              description:
+                "The wallet app opened, but the connection to it never completed. Leave the wallet app open, allow the browser's local-network prompt, then tap sign-in again.",
+            });
+          }
         } catch (error) {
           // This handler had no catch before; a throw after the wallet approved produced no
           // toast, no error and no clue. An enhancement path must always be able to say
